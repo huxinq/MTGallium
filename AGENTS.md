@@ -80,6 +80,20 @@ CI pass. Passing tests are technical evidence, not a research conclusion.
 - Generalize only when a capability is recurring and material; prefer
   subtraction when machinery no longer earns its complexity.
 
+Write commit messages for future readers. The subject should describe the
+resulting source state or established result, not implementation activity:
+prefer `Retain planner settlement provenance` or `Separate public Search
+Teacher test capability`, or `Record ambiguous 8x32 strength result` over
+`Implement planner evidence`, `Fix tests`, or `Update issue 0037`. Source and
+capability commits describe the source state they create; result-recording
+commits describe a stable, decision-relevant result. For non-obvious research,
+semantic, evidence, compatibility, or architectural meaning, use a short body
+explaining why the change exists, which interpretation-bearing distinction it
+preserves, and any important limit or intentionally unchanged behavior. Do not
+duplicate detailed experiment reports, measurements, manifests, or diary
+interpretation in commit messages, and do not require a body for an obvious
+narrow mechanical change.
+
 ## Time and compute
 
 Treat elapsed time and agent effort as operational evidence. Distinguish
