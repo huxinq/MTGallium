@@ -1,0 +1,15 @@
+name: Reproducible defect
+description: Report a minimal, safe-to-share reproducible defect.
+body:
+  - type: textarea
+    attributes:
+      label: Reproduction
+      description: Include public source revision, commands, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: Safety
+      options:
+        - label: I did not include private replay, hidden-information, seed, credential, or private evidence material.
+          required: true

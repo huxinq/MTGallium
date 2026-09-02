@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Repository Gradle entry point. Evaluation/Search Teacher contains established
+# large Kotlin methods for which the default compiler process repeatedly runs
+# out of heap during bytecode optimization. Keep the workaround scoped to that
+# module so ordinary small-module checks do not pay its memory cost.
+set -euo pipefail
+
+args=("$@")
+evaluation_search_teacher=false
+for argument in "${args[@]}"; do
+    if [[ "$argument" == *":evaluation:search-teacher:"* ]]; then
+        evaluation_search_teacher=true
+        break
+    fi
+done
+
+command=(third_party/argentum-engine/gradlew --project-dir .)
+if [[ "$evaluation_search_teacher" == true ]]; then
+    command+=(
+        --no-daemon
+        -Pkotlin.compiler.execution.strategy=in-process
+        -Dorg.gradle.jvmargs=-Xmx6g
+    )
+fi
+
+exec "${command[@]}" "${args[@]}"

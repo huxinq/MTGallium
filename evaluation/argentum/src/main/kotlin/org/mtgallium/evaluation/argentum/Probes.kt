@@ -1,0 +1,997 @@
+package org.mtgallium.evaluation.argentum
+
+import com.wingedsheep.ai.engine.AIPlayer
+import com.wingedsheep.engine.core.ActivateAbility
+import com.wingedsheep.engine.core.CastSpell
+import com.wingedsheep.engine.core.DecisionContext
+import com.wingedsheep.engine.core.DecisionResponse
+import com.wingedsheep.engine.core.DeclareAttackers
+import com.wingedsheep.engine.core.DeclareBlockers
+import com.wingedsheep.engine.core.GameAction
+import com.wingedsheep.engine.core.GameConfig
+import com.wingedsheep.engine.core.PassPriority
+import com.wingedsheep.engine.core.PlayerConfig
+import com.wingedsheep.engine.core.PlayLand
+import com.wingedsheep.engine.core.SelectCardsDecision
+import com.wingedsheep.engine.core.SubmitDecision
+import com.wingedsheep.engine.registry.CardRegistry
+import com.wingedsheep.engine.state.GameState
+import com.wingedsheep.engine.state.ZoneKey
+import com.wingedsheep.gym.GameEnvironment
+import com.wingedsheep.gym.contract.CardsChoiceSpec
+import com.wingedsheep.gym.contract.DecisionShape
+import com.wingedsheep.gym.contract.DistributionChoiceSpec
+import com.wingedsheep.gym.contract.NumberChoiceSpec
+import com.wingedsheep.gym.contract.ObservationBuilder
+import com.wingedsheep.gym.contract.PendingDecisionKind
+import com.wingedsheep.gym.contract.PendingDecisionView
+import com.wingedsheep.gym.contract.StackItemKind
+import com.wingedsheep.gym.contract.StackItemView
+import com.wingedsheep.gym.contract.StateDigest
+import com.wingedsheep.gym.contract.TrainingObservation
+import com.wingedsheep.gym.contract.sourceEntityIdOrNull
+import com.wingedsheep.gym.service.DeckSpec
+import com.wingedsheep.gym.service.EnvConfig
+import com.wingedsheep.gym.service.MultiEnvService
+import com.wingedsheep.gym.service.ObservationPerspective
+import com.wingedsheep.gym.service.PlayerSpec
+import com.wingedsheep.gym.service.StepRequest
+import com.wingedsheep.gym.trainer.defaults.BoundedStructuredDecisionExpander
+import com.wingedsheep.gym.trainer.defaults.DynamicSlotActionFeaturizer
+import com.wingedsheep.gym.trainer.defaults.HeuristicEvaluator
+import com.wingedsheep.gym.trainer.defaults.StructuralFeatures
+import com.wingedsheep.gym.trainer.defaults.StructuralStateFeaturizer
+import com.wingedsheep.gym.trainer.search.AlphaZeroSearch
+import com.wingedsheep.sdk.core.Zone
+import com.wingedsheep.sdk.model.Deck
+import com.wingedsheep.sdk.model.EntityId
+import com.wingedsheep.sdk.scripting.AbilityId
+import kotlinx.serialization.ExperimentalSerializationApi
+import java.lang.reflect.Modifier
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import kotlin.math.min
+import kotlin.system.measureNanoTime
+import kotlin.system.measureTimeMillis
+
+internal data class EvaluationContext(
+    val root: Path,
+    val registry: CardRegistry,
+    val manifest: DeckManifest,
+    val baseSeed: Long,
+)
+
+internal fun runStaticAndContractProbes(context: EvaluationContext): List<ProbeResult> = buildList {
+    addAll(cardPoolProbes(context))
+    add(replayProbe(context))
+    add(hiddenInformationProbe(context))
+    add(actionSourceProbe())
+    add(httpSeedProbe(context))
+    add(observationPerspectiveProbe(context))
+    add(structuredDecisionProbe(context))
+    add(stateDigestProbe(context))
+    add(trainerBranchingProbe(context))
+    add(mctsSmokeProbe(context))
+}
+
+private fun cardPoolProbes(context: EvaluationContext): List<ProbeResult> {
+    val manifest = context.manifest
+    val allCards = (manifest.mainDeck.keys + manifest.sideboard.keys).sorted()
+    val missing = allCards.filterNot(context.registry::hasCard)
+    val emptyOracle = allCards.filter { name -> context.registry.getCard(name)?.oracleText.isNullOrBlank() }
+    val sizeOk = manifest.mainDeck.values.sum() == 60 && manifest.sideboard.values.sum() == 15
+
+    val sourceRoot = context.root.resolve("third_party/argentum-engine/mtg-sets")
+    val kotlinFiles = Files.walk(sourceRoot).use { paths ->
+        paths.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".kt") }.toList()
+    }
+    val nonbasicCards = allCards.filterNot { it == "Mountain" }
+    val audit = nonbasicCards.associateWith { cardName ->
+        val normalized = cardName.filter(Char::isLetterOrDigit).lowercase()
+        val matchingFiles = kotlinFiles.filter { path ->
+            val fileNormalized = path.fileName.toString().filter(Char::isLetterOrDigit).lowercase()
+            fileNormalized == "${normalized}kt" || Files.readString(path).contains("\"$cardName\"")
+        }
+        val dedicatedTests = matchingFiles.filter { path ->
+            path.toString().contains("/tests/") &&
+                path.fileName.toString().filter(Char::isLetterOrDigit).lowercase().contains(normalized)
+        }
+        val generatedDefinitions = matchingFiles.filter { path ->
+            !path.toString().contains("/tests/") &&
+                Files.readString(path).contains("GENERATED by mtgish-tooling")
+        }
+        dedicatedTests.size to generatedDefinitions.size
+    }
+    val withoutDedicatedTest = audit.filterValues { it.first == 0 }.keys.sorted()
+    val generated = audit.filterValues { it.second > 0 }.keys.sorted()
+
+    return listOf(
+        ProbeResult(
+            id = "cards.manifest_shape",
+            component = "Rules core",
+            status = if (sizeOk) ProbeStatus.PASS else ProbeStatus.FAIL,
+            severity = if (sizeOk) Severity.INFO else Severity.BLOCKER,
+            summary = if (sizeOk) "Frozen deck manifest contains 60 main-deck and 15 sideboard cards."
+            else "Frozen deck manifest does not contain a legal 60/15 shape.",
+            evidence = mapOf(
+                "mainDeck" to manifest.mainDeck.values.sum().toString(),
+                "sideboard" to manifest.sideboard.values.sum().toString(),
+                "source" to manifest.source,
+            ),
+        ),
+        ProbeResult(
+            id = "cards.resolve",
+            component = "Rules core",
+            status = if (missing.isEmpty() && emptyOracle.isEmpty()) ProbeStatus.PASS else ProbeStatus.FAIL,
+            severity = if (missing.isEmpty() && emptyOracle.isEmpty()) Severity.INFO else Severity.BLOCKER,
+            summary = if (missing.isEmpty() && emptyOracle.isEmpty())
+                "All ${allCards.size} distinct cards resolve with Oracle text."
+            else "The closed pool has missing or empty card definitions.",
+            evidence = mapOf(
+                "missing" to missing.joinToString(),
+                "emptyOracle" to emptyOracle.joinToString(),
+                "registeredCards" to context.registry.size.toString(),
+            ),
+        ),
+        ProbeResult(
+            id = "cards.dedicated_scenarios",
+            component = "Rules core",
+            status = if (withoutDedicatedTest.isEmpty()) ProbeStatus.PASS else ProbeStatus.WARN,
+            severity = if (withoutDedicatedTest.isEmpty()) Severity.INFO else Severity.MAJOR,
+            summary = if (withoutDedicatedTest.isEmpty())
+                "Every nonbasic card has a dedicated scenario test."
+            else "${withoutDedicatedTest.size}/${nonbasicCards.size} nonbasic cards lack a dedicated scenario test.",
+            evidence = mapOf("cards" to withoutDedicatedTest.joinToString()),
+        ),
+        ProbeResult(
+            id = "cards.generated_definitions",
+            component = "Rules core",
+            status = if (generated.isEmpty()) ProbeStatus.PASS else ProbeStatus.WARN,
+            severity = if (generated.isEmpty()) Severity.INFO else Severity.MAJOR,
+            summary = if (generated.isEmpty())
+                "No closed-pool definition is marked predictive/generated."
+            else "${generated.size} closed-pool definitions are explicitly marked predictive/generated.",
+            evidence = mapOf("cards" to generated.joinToString()),
+        ),
+    )
+}
+
+private data class RecordedReplayStep(
+    val legalActions: List<GameAction>? = null,
+    val actionIndex: Int? = null,
+    val response: DecisionResponse? = null,
+    val digestAfter: String,
+)
+
+private fun replayProbe(context: EvaluationContext): ProbeResult {
+    val deck = diagnosticDeck()
+    val config = gameConfig(deck, context.baseSeed, skipMulligans = true, startingPlayer = 0)
+    val builder = ObservationBuilder()
+    val expander = BoundedStructuredDecisionExpander()
+    val first = GameEnvironment.create(context.registry)
+    first.reset(config)
+    val initialDigest = semanticDigest(first, builder)
+    val transcript = mutableListOf<RecordedReplayStep>()
+    var mismatch: String? = null
+    var lastDescription = "reset"
+
+    while (mismatch == null && !first.isTerminal && transcript.size < 2_000) {
+        try {
+            val pending = first.pendingDecision
+            if (pending != null) {
+                val response = expander.expand(first.state, pending).responses.first()
+                lastDescription = response::class.simpleName ?: "DecisionResponse"
+                first.step(SubmitDecision(pending.playerId, response))
+                if (first.lastRejection != null) {
+                    mismatch = "recorded decision ${transcript.size + 1} was rejected: ${first.lastRejection}"
+                    continue
+                }
+                transcript += RecordedReplayStep(
+                    response = response,
+                    digestAfter = semanticDigest(first, builder),
+                )
+            } else {
+                val actions = first.legalActions()
+                val actionIndex = actions.indexOfFirst { it.affordable }
+                if (actionIndex < 0) {
+                    mismatch = "no affordable action at transition ${transcript.size + 1}"
+                    continue
+                }
+                lastDescription = actions[actionIndex].description
+                first.step(actions[actionIndex].action)
+                if (first.lastRejection != null) {
+                    mismatch = "recorded action ${transcript.size + 1} was rejected: ${first.lastRejection}"
+                    continue
+                }
+                transcript += RecordedReplayStep(
+                    legalActions = actions.map { it.action },
+                    actionIndex = actionIndex,
+                    digestAfter = semanticDigest(first, builder),
+                )
+            }
+        } catch (error: Throwable) {
+            mismatch = "recording transition ${transcript.size + 1} threw ${error::class.simpleName}: ${error.message}"
+        }
+    }
+    if (mismatch == null && !first.isTerminal) {
+        mismatch = "recording did not terminate within ${transcript.size} transitions"
+    }
+
+    val replay = GameEnvironment.create(context.registry)
+    replay.reset(config)
+    var replayedSteps = 0
+    var routingNonceRebindings = 0
+    if (mismatch == null && semanticDigest(replay, builder) != initialDigest) {
+        mismatch = "initial semantic digest"
+    }
+
+    for ((index, recorded) in transcript.withIndex()) {
+        if (mismatch != null) break
+        try {
+            val response = recorded.response
+            if (response != null) {
+                val pending = replay.pendingDecision
+                if (pending == null) {
+                    mismatch = "missing pending decision at replay transition ${index + 1}"
+                    break
+                }
+                val rebound = response.withDecisionId(pending.id)
+                val available = expander.expand(replay.state, pending).responses
+                if (rebound !in available) {
+                    mismatch = "recorded response is not legal at replay transition ${index + 1}"
+                    break
+                }
+                if (response.decisionId != pending.id) routingNonceRebindings += 1
+                replay.step(SubmitDecision(pending.playerId, rebound))
+            } else {
+                if (replay.pendingDecision != null) {
+                    mismatch = "unexpected pending decision at replay transition ${index + 1}"
+                    break
+                }
+                val actions = replay.legalActions()
+                val expectedActions = requireNotNull(recorded.legalActions)
+                if (actions.map { it.action } != expectedActions) {
+                    mismatch = "legal action ordering at replay transition ${index + 1}"
+                    break
+                }
+                val actionIndex = requireNotNull(recorded.actionIndex)
+                replay.step(actions[actionIndex].action)
+            }
+            replayedSteps += 1
+            if (replay.lastRejection != null) {
+                mismatch = "replay transition $replayedSteps was rejected: ${replay.lastRejection}"
+            } else if (semanticDigest(replay, builder) != recorded.digestAfter) {
+                mismatch = "semantic state after replay transition $replayedSteps"
+            }
+        } catch (error: Throwable) {
+            mismatch = "replay transition ${index + 1} threw ${error::class.simpleName}: ${error.message}"
+        }
+    }
+    if (mismatch == null && !replay.isTerminal) mismatch = "replay transcript did not terminate"
+
+    val differingFields = differingStateFields(first.state, replay.state)
+    return ProbeResult(
+        id = "determinism.seeded_replay",
+        component = "Direct Gym",
+        status = if (mismatch == null) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (mismatch == null) Severity.INFO else Severity.BLOCKER,
+        summary = mismatch?.let { "Seeded semantic replay diverged at $it." }
+            ?: "A complete $replayedSteps-transition transcript reproduced every semantic state digest.",
+        evidence = mapOf(
+            "seed" to context.baseSeed.toString(),
+            "recordedSteps" to transcript.size.toString(),
+            "replayedSteps" to replayedSteps.toString(),
+            "lastAction" to lastDescription,
+            "routingNonceRebindings" to routingNonceRebindings.toString(),
+            "finalStructuralDifferences" to differingFields.joinToString(),
+            "firstPending" to first.pendingDecision.describe(),
+            "secondPending" to replay.pendingDecision.describe(),
+        ),
+    )
+}
+
+private fun semanticDigest(environment: GameEnvironment, builder: ObservationBuilder): String {
+    val perspective = environment.agentToAct ?: environment.playerIds.first()
+    return builder.build(
+        environment.state,
+        perspective,
+        environment.legalActions(),
+        revealAll = true,
+    ).observation.stateDigest
+}
+
+private fun com.wingedsheep.engine.core.PendingDecision?.describe(): String =
+    this?.let { "${it::class.simpleName}:${it.id}" } ?: "none"
+
+private fun differingStateFields(first: GameState, second: GameState): List<String> {
+    return GameState::class.java.declaredFields
+        .asSequence()
+        .filterNot { Modifier.isStatic(it.modifiers) || '$' in it.name }
+        .onEach { it.trySetAccessible() }
+        .filter { field -> field.get(first) != field.get(second) }
+        .map { it.name }
+        .sorted()
+        .toList()
+}
+
+private fun hiddenInformationProbe(context: EvaluationContext): ProbeResult {
+    val environment = GameEnvironment.create(context.registry)
+    environment.reset(gameConfig(diagnosticDeck(), context.baseSeed + 1, true, 0))
+    val original = environment.state
+    val perspective = environment.playerIds.first()
+    val opponent = environment.playerIds.last()
+    val hiddenZones = listOf(Zone.LIBRARY, Zone.HAND)
+    if (hiddenZones.any { zone -> original.zones[ZoneKey(opponent, zone)].orEmpty().size < 2 }) {
+        return ProbeResult(
+            id = "information.hidden_zones",
+            component = "Direct Gym",
+            status = ProbeStatus.FAIL,
+            severity = Severity.BLOCKER,
+            summary = "Could not construct both hidden-zone permutation probes.",
+        )
+    }
+    val builder = ObservationBuilder()
+    val actions = environment.legalActions()
+    val before = builder.build(original, perspective, actions).observation as TrainingObservation
+    val beforeJson = reportJson.encodeToString(TrainingObservation.serializer(), before)
+    val leakingZones = hiddenZones.filter { zone ->
+        val key = ZoneKey(opponent, zone)
+        val swapped = original.zones.getValue(key).toMutableList().also {
+            val last = it.lastIndex
+            val temporary = it[last]
+            it[last] = it[last - 1]
+            it[last - 1] = temporary
+        }
+        val altered: GameState = original.copy(zones = original.zones.toMutableMap().also { it[key] = swapped })
+        val after = builder.build(altered, perspective, actions).observation as TrainingObservation
+        reportJson.encodeToString(TrainingObservation.serializer(), after) != beforeJson
+    }
+    val identical = leakingZones.isEmpty()
+
+    return ProbeResult(
+        id = "information.hidden_zones",
+        component = "Direct Gym",
+        status = if (identical) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (identical) Severity.INFO else Severity.BLOCKER,
+        summary = if (identical)
+            "Permuting unknown opponent hand and library cards leaves serialized observations byte-identical."
+        else "Unknown opponent zone order changes the player observation.",
+        evidence = mapOf("leakingZones" to leakingZones.joinToString()),
+    )
+}
+
+private fun actionSourceProbe(): ProbeResult {
+    val player = EntityId("source-probe-player")
+    val source = EntityId("source-probe-object")
+    val opponent = EntityId("source-probe-opponent")
+    val cases = linkedMapOf(
+        "land" to (PlayLand(player, source) to source),
+        "spell" to (CastSpell(player, source) to source),
+        "ability" to (ActivateAbility(player, source, AbilityId("source-probe")) to source),
+        "pass" to (PassPriority(player) to null),
+        "attack" to (DeclareAttackers(player, mapOf(source to opponent)) to null),
+        "block" to (DeclareBlockers(player, mapOf(source to listOf(opponent))) to null),
+    )
+    val mismatches = cases.filterValues { (action, expected) ->
+        action.sourceEntityIdOrNull() != expected
+    }.keys
+    val passes = mismatches.isEmpty()
+
+    return ProbeResult(
+        id = "contract.action_source_ids",
+        component = "HTTP Gym",
+        status = if (passes) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (passes) Severity.INFO else Severity.MAJOR,
+        summary = if (passes)
+            "Land, spell, and ability actions expose sources; pass and combat aggregates remain source-less."
+        else "Game action source mapping disagrees with the Gym contract.",
+        evidence = mapOf(
+            "cases" to cases.keys.joinToString(),
+            "mismatches" to mismatches.joinToString(),
+        ),
+    )
+}
+
+@OptIn(ExperimentalSerializationApi::class)
+private fun httpSeedProbe(context: EvaluationContext): ProbeResult {
+    val descriptor = EnvConfig.serializer().descriptor
+    val fields = (0 until descriptor.elementsCount).map(descriptor::getElementName)
+    val requiredFields = setOf("seed", "perspectiveMode", "perspectivePlayerIndex", "revealAll")
+    val controllerSource = Files.readString(
+        context.root.resolve(
+            "third_party/argentum-engine/gym-server/src/main/kotlin/com/wingedsheep/gym/server/controller/EnvController.kt"
+        )
+    )
+    val routePresent = "@PostMapping(\"/{id}/reset-with-metadata\")" in controllerSource
+    val service = MultiEnvService(context.registry)
+    var createReproduced = false
+    var resetReproduced = false
+    var returnedCreateSeed = false
+    var returnedResetSeed = false
+    try {
+        fun config(seed: Long? = null) = EnvConfig(
+            players = listOf(
+                PlayerSpec(
+                    "A",
+                    DeckSpec.Explicit(mapOf("Mountain" to 30, "Raging Goblin" to 10)),
+                    playerId = EntityId("seed-p0"),
+                ),
+                PlayerSpec(
+                    "B",
+                    DeckSpec.Explicit(mapOf("Mountain" to 30, "Raging Goblin" to 10)),
+                    playerId = EntityId("seed-p1"),
+                ),
+            ),
+            startingPlayerIndex = 0,
+            seed = seed,
+        )
+        val created = service.create(config())
+        returnedCreateSeed = created.effectiveSeed != null
+        val replay = service.create(config(created.effectiveSeed))
+        createReproduced = created.observation.observation.stateDigest == replay.observation.observation.stateDigest
+
+        val reset = service.resetWithMetadata(created.envId, config())
+        returnedResetSeed = reset.effectiveSeed != null
+        val resetDigest = reset.observation.observation.stateDigest
+        val resetReplay = service.resetWithMetadata(created.envId, config(reset.effectiveSeed))
+        resetReproduced = resetDigest == resetReplay.observation.observation.stateDigest
+    } finally {
+        service.workerPool.close()
+    }
+    val present = fields.containsAll(requiredFields) && routePresent && returnedCreateSeed &&
+        returnedResetSeed && createReproduced && resetReproduced
+    return ProbeResult(
+        id = "contract.http_seed",
+        component = "HTTP Gym",
+        status = if (present) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (present) Severity.INFO else Severity.MAJOR,
+        summary = if (present)
+            "Create and metadata-reset return effective seeds that reproduce opening observations."
+        else "The remote orchestration seed contract is incomplete or non-reproducible.",
+        evidence = mapOf(
+            "fields" to fields.joinToString(),
+            "resetWithMetadataRoute" to routePresent.toString(),
+            "createReproduced" to createReproduced.toString(),
+            "resetReproduced" to resetReproduced.toString(),
+        ),
+    )
+}
+
+private fun observationPerspectiveProbe(context: EvaluationContext): ProbeResult {
+    val service = MultiEnvService(context.registry)
+    val player0 = EntityId("perspective-p0")
+    val player1 = EntityId("perspective-p1")
+    fun config(mode: ObservationPerspective) = EnvConfig(
+        players = listOf(
+            PlayerSpec("A", DeckSpec.Explicit(mapOf("Mountain" to 30, "Raging Goblin" to 10)), playerId = player0),
+            PlayerSpec("B", DeckSpec.Explicit(mapOf("Mountain" to 30, "Raging Goblin" to 10)), playerId = player1),
+        ),
+        startingPlayerIndex = 0,
+        perspectivePlayerIndex = 0,
+        perspectiveMode = mode,
+        seed = context.baseSeed + 2,
+    )
+    var actingTracksActor = false
+    var actingSwitched = false
+    var fixedMasksOtherPlayer = false
+    try {
+        val acting = service.create(config(ObservationPerspective.ACTING_PLAYER))
+        var actingResult = acting.observation
+        val seen = linkedSetOf<EntityId>()
+        actingTracksActor = true
+        repeat(4) {
+            val observation = actingResult.observation as TrainingObservation
+            observation.agentToAct?.let(seen::add)
+            if (observation.agentToAct != null && observation.perspectivePlayerId != observation.agentToAct) {
+                actingTracksActor = false
+            }
+            val passId = actingResult.registry.legalActions.firstOrNull { it.second.action is PassPriority }?.first
+                ?: return@repeat
+            actingResult = service.step(StepRequest(acting.envId, passId))
+        }
+        actingSwitched = seen.size == 2
+
+        val fixed = service.create(config(ObservationPerspective.FIXED))
+        val passId = fixed.observation.registry.legalActions.first { it.second.action is PassPriority }.first
+        val afterPass = service.step(StepRequest(fixed.envId, passId)).observation as TrainingObservation
+        fixedMasksOtherPlayer = afterPass.perspectivePlayerId == player0 &&
+            afterPass.agentToAct == player1 &&
+            afterPass.legalActions.isEmpty() &&
+            afterPass.pendingDecision?.canRespond != true &&
+            afterPass.pendingDecision?.choiceSpec == null
+    } finally {
+        service.workerPool.close()
+    }
+    val passes = actingTracksActor && actingSwitched && fixedMasksOtherPlayer
+    return ProbeResult(
+        id = "contract.observation_perspective",
+        component = "Direct Gym",
+        status = if (passes) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (passes) Severity.INFO else Severity.BLOCKER,
+        summary = if (passes)
+            "Acting-player observations follow priority; fixed views hide another player's response surface."
+        else "Observation perspective switching or fixed-player masking violated the contract.",
+        evidence = mapOf(
+            "actingTracksActor" to actingTracksActor.toString(),
+            "actingSwitched" to actingSwitched.toString(),
+            "fixedMasksOtherPlayer" to fixedMasksOtherPlayer.toString(),
+        ),
+    )
+}
+
+private fun structuredDecisionProbe(context: EvaluationContext): ProbeResult {
+    val environment = GameEnvironment.create(context.registry)
+    environment.reset(gameConfig(diagnosticDeck(), context.baseSeed + 3, true, 0))
+    val observer = environment.playerIds.first()
+    val chooser = environment.playerIds.last()
+    val options = environment.state.getHand(chooser).take(2)
+    val decision = SelectCardsDecision(
+        id = "contract-choice",
+        playerId = chooser,
+        prompt = "Choose cards",
+        context = DecisionContext(sourceId = EntityId("choice-source"), sourceName = "Choice source"),
+        options = options,
+        minSelections = 1,
+        maxSelections = 2,
+        ordered = true,
+    )
+    val paused = environment.state.copy(pendingDecision = decision)
+    val authorized = ObservationBuilder().build(paused, chooser, emptyList()).observation as TrainingObservation
+    val unauthorized = ObservationBuilder().build(paused, observer, emptyList()).observation as TrainingObservation
+    val authorizedView = authorized.pendingDecision
+    val spec = authorizedView?.choiceSpec as? CardsChoiceSpec
+    val privateView = unauthorized.pendingDecision
+    val present = authorizedView?.canRespond == true &&
+        spec != null &&
+        spec.options == options &&
+        spec.minSelections == 1 &&
+        spec.maxSelections == 2 &&
+        spec.ordered &&
+        privateView != null &&
+        privateView.canRespond == false &&
+        privateView.choiceSpec == null &&
+        unauthorized.legalActions.isEmpty()
+    return ProbeResult(
+        id = "contract.structured_candidates",
+        component = "HTTP Gym",
+        status = if (present) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (present) Severity.INFO else Severity.BLOCKER,
+        summary = if (present)
+            "The chooser receives lossless typed candidates and constraints; other players receive only a masked decision."
+        else "Structured-choice candidates are incomplete or visible to an unauthorized player.",
+        evidence = mapOf(
+            "pendingDecisionKinds" to PendingDecisionKind.entries.size.toString(),
+            "candidateCount" to options.size.toString(),
+            "unauthorizedCanRespond" to (privateView?.canRespond).toString(),
+        ),
+    )
+}
+
+private fun stateDigestProbe(context: EvaluationContext): ProbeResult {
+    val environment = GameEnvironment.create(context.registry)
+    environment.reset(gameConfig(diagnosticDeck(), context.baseSeed + 3, true, 0))
+    val perspective = environment.agentToAct ?: environment.playerIds.first()
+    val observation = ObservationBuilder()
+        .build(environment.state, perspective, environment.legalActions())
+        .observation as TrainingObservation
+    val targetA = EntityId("target-a")
+    val targetB = EntityId("target-b")
+    val stackItem = StackItemView(
+        entityId = EntityId("spell-probe"),
+        controllerId = perspective,
+        name = "Digest probe",
+        kind = StackItemKind.SPELL,
+        targets = listOf(targetA),
+    )
+    val targetsA = observation.copy(stack = listOf(stackItem), stateDigest = "")
+    val targetsB = targetsA.copy(
+        stack = listOf(stackItem.copy(targets = listOf(targetB))),
+        stateDigest = "",
+    )
+    val stackTargetsDistinct = StateDigest.compute(targetsA) != StateDigest.compute(targetsB)
+
+    val numberA = PendingDecisionView(
+        decisionId = "routing-a",
+        kind = PendingDecisionKind.CHOOSE_NUMBER,
+        playerId = perspective,
+        prompt = "Choose a number",
+        shape = DecisionShape(numericMin = 0, numericMax = 2),
+        choiceSpec = NumberChoiceSpec(0, 2),
+    )
+    val numberB = numberA.copy(
+        decisionId = "routing-b",
+        shape = DecisionShape(numericMin = 0, numericMax = 3),
+        choiceSpec = NumberChoiceSpec(0, 3),
+    )
+    val decisionConstraintsDistinct = StateDigest.compute(
+        observation.copy(pendingDecision = numberA, stateDigest = "")
+    ) != StateDigest.compute(
+        observation.copy(pendingDecision = numberB, stateDigest = "")
+    )
+
+    val distributionA = PendingDecisionView(
+        decisionId = "routing-a",
+        kind = PendingDecisionKind.DISTRIBUTE,
+        playerId = perspective,
+        prompt = "Distribute",
+        choiceSpec = DistributionChoiceSpec(
+            totalAmount = 2,
+            targets = listOf(targetA, targetB),
+            minPerTarget = 0,
+            maxPerTarget = linkedMapOf(targetA to 1, targetB to 2),
+            allowPartial = false,
+        ),
+    )
+    val distributionB = distributionA.copy(
+        decisionId = "routing-b",
+        choiceSpec = DistributionChoiceSpec(
+            totalAmount = 2,
+            targets = listOf(targetA, targetB),
+            minPerTarget = 0,
+            maxPerTarget = linkedMapOf(targetB to 2, targetA to 1),
+            allowPartial = false,
+        ),
+    )
+    val canonicalMapsStable = StateDigest.compute(
+        observation.copy(pendingDecision = distributionA, stateDigest = "")
+    ) == StateDigest.compute(
+        observation.copy(pendingDecision = distributionB, stateDigest = "")
+    )
+    val passes = stackTargetsDistinct && decisionConstraintsDistinct && canonicalMapsStable
+    return ProbeResult(
+        id = "contract.digest_action_state",
+        component = "Direct Gym",
+        status = if (passes) ProbeStatus.PASS else ProbeStatus.FAIL,
+        severity = if (passes) Severity.INFO else Severity.MAJOR,
+        summary = if (passes)
+            "The digest covers visible stack and decision semantics while canonicalizing unordered maps."
+        else "The information-state digest omits semantic fields or depends on map iteration order.",
+        evidence = mapOf(
+            "stackTargetsDistinct" to stackTargetsDistinct.toString(),
+            "decisionConstraintsDistinct" to decisionConstraintsDistinct.toString(),
+            "canonicalMapsStable" to canonicalMapsStable.toString(),
+        ),
+    )
+}
+
+private fun trainerBranchingProbe(context: EvaluationContext): ProbeResult {
+    val environment = GameEnvironment.create(context.registry)
+    environment.reset(gameConfig(diagnosticDeck(), context.baseSeed + 4, true, 0))
+    var transitions = 0
+    while (environment.pendingDecision == null && !environment.isTerminal && transitions < 300) {
+        val pass = environment.legalActions().firstOrNull { it.action is PassPriority } ?: break
+        environment.step(pass.action)
+        transitions += 1
+    }
+    val pending = environment.pendingDecision
+    if (pending == null) {
+        return ProbeResult(
+            id = "trainer.structured_branching",
+            component = "Bundled trainer",
+            status = ProbeStatus.FAIL,
+            severity = Severity.BLOCKER,
+            summary = "The trainer probe could not reach a structured decision.",
+            evidence = mapOf("transitions" to transitions.toString()),
+        )
+    }
+
+    return try {
+        val parent = environment.state
+        val search = AlphaZeroSearch<StructuralFeatures>(
+            env = environment,
+            featurizer = StructuralStateFeaturizer(),
+            actionFeaturizer = DynamicSlotActionFeaturizer(headSize = 4096),
+            evaluator = HeuristicEvaluator(),
+        )
+        val result = search.run(16)
+        val builder = ObservationBuilder()
+        val childDigests = result.root.edges.map { edge ->
+            val child = environment.fork()
+            child.step(edge.action)
+            semanticDigest(child, builder)
+        }.toSet()
+        val parentUnchanged = environment.state == parent && environment.state.rng == parent.rng
+        val passes = result.root.edges.size > 1 && childDigests.size > 1 && parentUnchanged
+        ProbeResult(
+            id = "trainer.structured_branching",
+            component = "Bundled trainer",
+            status = if (passes) ProbeStatus.PASS else ProbeStatus.FAIL,
+            severity = if (passes) Severity.INFO else Severity.BLOCKER,
+            summary = if (passes)
+                "A structured decision produced ${result.root.edges.size} MCTS edges and distinct child states."
+            else "Structured-decision search failed to expose multiple independent semantic branches.",
+            evidence = mapOf(
+                "decision" to pending::class.simpleName.orEmpty(),
+                "edges" to result.root.edges.size.toString(),
+                "distinctChildDigests" to childDigests.size.toString(),
+                "exhaustive" to result.structuredExpansionExhaustive.toString(),
+                "estimatedResponses" to result.structuredEstimatedResponseCount.toString(),
+                "parentUnchanged" to parentUnchanged.toString(),
+            ),
+        )
+    } catch (error: Throwable) {
+        ProbeResult(
+            id = "trainer.structured_branching",
+            component = "Bundled trainer",
+            status = ProbeStatus.FAIL,
+            severity = Severity.BLOCKER,
+            summary = "Structured MCTS probe threw ${error::class.simpleName}: ${error.message}",
+        )
+    }
+}
+
+private fun mctsSmokeProbe(context: EvaluationContext): ProbeResult {
+    val environment = GameEnvironment.create(context.registry)
+    environment.reset(gameConfig(diagnosticDeck(), context.baseSeed + 5, true, 0))
+    val elapsed: Long
+    return try {
+        val search = AlphaZeroSearch<StructuralFeatures>(
+            env = environment,
+            featurizer = StructuralStateFeaturizer(),
+            actionFeaturizer = DynamicSlotActionFeaturizer(headSize = 4096),
+            evaluator = HeuristicEvaluator(),
+        )
+        var visits = 0
+        elapsed = measureTimeMillis { visits = search.run(8).visits.sum() }
+        ProbeResult(
+            id = "trainer.mcts_smoke",
+            component = "Bundled trainer",
+            status = if (visits == 8) ProbeStatus.PASS else ProbeStatus.FAIL,
+            severity = if (visits == 8) Severity.INFO else Severity.BLOCKER,
+            summary = "Eight-simulation MCTS completed with $visits recorded visits.",
+            durationMillis = elapsed,
+        )
+    } catch (error: Throwable) {
+        ProbeResult(
+            id = "trainer.mcts_smoke",
+            component = "Bundled trainer",
+            status = ProbeStatus.FAIL,
+            severity = Severity.BLOCKER,
+            summary = "MCTS smoke test threw ${error::class.simpleName}: ${error.message}",
+        )
+    }
+}
+
+internal fun runReliabilityCorpus(
+    context: EvaluationContext,
+    id: String,
+    deck: Deck,
+    games: Int,
+    skipMulligans: Boolean,
+): CorpusResult {
+    if (games == 0) return CorpusResult(id, 0, 0, 0, 0, 0, 0, 0)
+    val threads = min(Runtime.getRuntime().availableProcessors(), 4).coerceAtLeast(1)
+    val pool = Executors.newFixedThreadPool(threads)
+    val started = System.nanoTime()
+    val results = try {
+        (0 until games).map { gameIndex ->
+            pool.submit(Callable {
+                runSingleGame(
+                    registry = context.registry,
+                    deck = deck,
+                    seed = mixSeed(context.baseSeed, gameIndex.toLong()),
+                    startingPlayer = gameIndex % 2,
+                    skipMulligans = skipMulligans,
+                )
+            })
+        }.map { future ->
+            try {
+                future.get()
+            } catch (error: Throwable) {
+                SingleGameResult(false, false, false, 0, error.message)
+            }
+        }
+    } finally {
+        pool.shutdown()
+    }
+    val elapsedMillis = (System.nanoTime() - started) / 1_000_000
+    return CorpusResult(
+        id = id,
+        requestedGames = games,
+        completedGames = results.count { it.completed },
+        rejectedGames = results.count { it.rejected },
+        truncatedGames = results.count { it.truncated },
+        exceptions = results.count { it.error != null },
+        totalSteps = results.sumOf { it.steps.toLong() },
+        wallClockMillis = elapsedMillis,
+    )
+}
+
+private data class SingleGameResult(
+    val completed: Boolean,
+    val rejected: Boolean,
+    val truncated: Boolean,
+    val steps: Int,
+    val error: String?,
+)
+
+private fun runSingleGame(
+    registry: CardRegistry,
+    deck: Deck,
+    seed: Long,
+    startingPlayer: Int,
+    skipMulligans: Boolean,
+): SingleGameResult = try {
+    val p0 = EntityId("p0")
+    val p1 = EntityId("p1")
+    val environment = GameEnvironment.create(registry)
+    val config = gameConfig(deck, seed, skipMulligans, startingPlayer, p0, p1)
+    val agents = mapOf(
+        p0 to AIPlayer.create(registry, p0),
+        p1 to AIPlayer.create(registry, p1),
+    )
+    environment.reset(config)
+    var rejected = false
+    var missingAction = false
+    while (!environment.isTerminal && environment.stepCount < 2_000) {
+        val player = environment.agentToAct
+        if (player == null) {
+            missingAction = true
+            break
+        }
+        val ai = agents.getValue(player)
+        val action = environment.pendingDecision?.let { decision ->
+            com.wingedsheep.engine.core.SubmitDecision(player, ai.respondToDecision(environment.state, decision))
+        } ?: environment.legalActions().takeIf { it.isNotEmpty() }
+            ?.let { ai.chooseFrom(environment.state, it).action }
+        if (action == null) {
+            missingAction = true
+            break
+        }
+        environment.step(action)
+        if (environment.lastRejection != null) {
+            rejected = true
+            break
+        }
+    }
+    SingleGameResult(
+        completed = environment.isTerminal,
+        rejected = rejected,
+        truncated = !environment.isTerminal && !rejected && !missingAction && environment.stepCount >= 2_000,
+        steps = environment.stepCount,
+        error = if (missingAction) "No actor or legal action in a non-terminal state" else null,
+    )
+} catch (error: Throwable) {
+    SingleGameResult(false, false, false, 0, "${error::class.simpleName}: ${error.message}")
+}
+
+internal fun runBenchmarks(context: EvaluationContext, smoke: Boolean): List<Metric> {
+    val environment = GameEnvironment.create(context.registry)
+    environment.reset(gameConfig(diagnosticDeck(), context.baseSeed + 5, true, 0))
+    repeat(100) { environment.fork() }
+
+    val batches = if (smoke) 10 else 20
+    val forkSamples = if (smoke) 1_000 else 20_000
+    val forkNanos = medianBatchNanoseconds(forkSamples, batches) { environment.fork() }
+
+    val action = environment.legalActions().first { it.affordable }.action
+    val stepSamples = if (smoke) 100 else 2_000
+    val stepNanos = medianBatchNanoseconds(stepSamples, batches) {
+        val child = environment.fork()
+        child.step(action)
+    }
+
+    val observeSamples = if (smoke) 100 else 1_000
+    val builder = ObservationBuilder()
+    val perspective = environment.agentToAct ?: environment.playerIds.first()
+    val actions = environment.legalActions()
+    val observeNanos = medianBatchNanoseconds(observeSamples, batches) {
+        builder.build(environment.state, perspective, actions)
+    }
+
+    val aggregation = "median of $batches batch means"
+
+    return listOf(
+        Metric("direct.fork", forkNanos, "ns/op", forkSamples, aggregation),
+        Metric("direct.fork_and_step", stepNanos, "ns/op", stepSamples, aggregation),
+        Metric("direct.observation", observeNanos, "ns/op", observeSamples, aggregation),
+        Metric("direct.transitions", 1_000_000_000.0 / stepNanos, "ops/s", stepSamples, aggregation),
+    )
+}
+
+private fun medianBatchNanoseconds(
+    samples: Int,
+    batches: Int,
+    operation: () -> Unit,
+): Double {
+    require(samples > 0 && batches > 0 && samples % batches == 0)
+    val batchSize = samples / batches
+    val measurements = DoubleArray(batches) {
+        measureNanoTime { repeat(batchSize) { operation() } }.toDouble() / batchSize
+    }.sortedArray()
+    val middle = measurements.size / 2
+    return if (measurements.size % 2 == 0) {
+        (measurements[middle - 1] + measurements[middle]) / 2.0
+    } else {
+        measurements[middle]
+    }
+}
+
+internal fun decide(probes: List<ProbeResult>, corpora: List<CorpusResult>): Pair<List<ComponentDecision>, Verdict> {
+    fun failed(id: String) = probes.any { it.id == id && it.status == ProbeStatus.FAIL }
+    val corpusFailure = corpora.any {
+        it.requestedGames > 0 &&
+            (it.completedGames != it.requestedGames || it.rejectedGames > 0 || it.truncatedGames > 0 || it.exceptions > 0)
+    }
+    val coreReject = probes.any {
+        it.component == "Rules core" && it.status == ProbeStatus.FAIL && it.severity == Severity.BLOCKER
+    } || corpusFailure
+    val directReject = probes.any {
+        it.component == "Direct Gym" && it.status == ProbeStatus.FAIL && it.severity == Severity.BLOCKER
+    } || corpusFailure
+
+    val decisions = listOf(
+        ComponentDecision(
+            "Rules core",
+            when {
+                coreReject -> Verdict.REJECT
+                probes.any { it.component == "Rules core" && it.status == ProbeStatus.WARN } -> Verdict.CONDITIONAL
+                else -> Verdict.ADOPT
+            },
+            when {
+                coreReject -> listOf("Closed-pool resolution or reliability hard gate failed.")
+                probes.any { it.component == "Rules core" && it.status == ProbeStatus.WARN } ->
+                    listOf("Closed pool resolves, but dedicated behavioral evidence is incomplete.")
+                else -> listOf("Closed pool resolves, has dedicated scenarios, and completed the reliability corpus.")
+            },
+        ),
+        ComponentDecision(
+            "Direct Gym",
+            when {
+                directReject -> Verdict.REJECT
+                probes.any { it.component == "Direct Gym" && it.status != ProbeStatus.PASS } -> Verdict.CONDITIONAL
+                else -> Verdict.ADOPT
+            },
+            if (directReject) listOf("Semantic replay, observation perspective, or masking hard gate failed.")
+            else listOf("Semantic replay, masking, perspective, and digest probes passed."),
+        ),
+        ComponentDecision(
+            "HTTP Gym",
+            if (probes.any { it.component == "HTTP Gym" && it.status == ProbeStatus.FAIL }) Verdict.CONDITIONAL else Verdict.ADOPT,
+            if (probes.any { it.component == "HTTP Gym" && it.status == ProbeStatus.FAIL })
+                listOf("Remote seed, source identity, or structured-decision contract remains incomplete.")
+            else listOf("Remote seed metadata, source identity, and structured choices passed their gates."),
+        ),
+        ComponentDecision(
+            "Bundled trainer",
+            if (failed("trainer.mcts_smoke")) Verdict.REJECT
+            else if (failed("trainer.structured_branching")) Verdict.CONDITIONAL
+            else Verdict.ADOPT,
+            if (failed("trainer.mcts_smoke") || failed("trainer.structured_branching"))
+                listOf("Search plumbing or structured-decision branching remains incomplete.")
+            else listOf("MCTS runs and branches across multiple structured responses."),
+        ),
+    )
+    val overall = when {
+        decisions.take(2).any { it.verdict == Verdict.REJECT } -> Verdict.REJECT
+        decisions.any { it.verdict != Verdict.ADOPT } -> Verdict.CONDITIONAL
+        else -> Verdict.ADOPT
+    }
+    return decisions to overall
+}
+
+private fun gameConfig(
+    deck: Deck,
+    seed: Long,
+    skipMulligans: Boolean,
+    startingPlayer: Int,
+    p0: EntityId = EntityId("p0"),
+    p1: EntityId = EntityId("p1"),
+) = GameConfig(
+    players = listOf(
+        PlayerConfig("A", deck, playerId = p0),
+        PlayerConfig("B", deck, playerId = p1),
+    ),
+    skipMulligans = skipMulligans,
+    startingPlayerIndex = startingPlayer,
+    seed = seed,
+)
+
+private fun mixSeed(seed: Long, index: Long): Long {
+    var value = seed * -0x61c8864680b583ebL + index * -0x7ee3623a03d3c83fL
+    value = (value xor (value ushr 30)) * -0x40a7b892e31b1a47L
+    value = (value xor (value ushr 27)) * -0x6b2fb644ecceee15L
+    return value xor (value ushr 31)
+}

@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+.idea/
+build/
+**/build/
+out/
+*.log
+.env
+.env.*
+node_modules/
+private-evidence/
+reports/
+*.tsbuildinfo

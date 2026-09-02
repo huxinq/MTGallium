@@ -1,0 +1,15 @@
+name: Bounded proposal
+description: Propose a bounded technical change with explicit semantics.
+body:
+  - type: textarea
+    attributes:
+      label: Scope and question
+      description: State the narrow question, non-goals, and affected semantic boundary.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Verification
+      description: State the focused checks and what they would not establish.
+    validations:
+      required: true
