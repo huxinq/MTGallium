@@ -32,6 +32,20 @@ inspection and public artifacts are derived evidence, not a second canonical
 record. A safe-looking artifact is not safe solely because a path guard accepts
 it.
 
+### Source and evidence authority
+
+This public repository is the implementation authority for new first-party
+MTGallium work. Private research evidence stays external to the checkout. Each
+durable artifact remains bound to the exact MTGallium revision, Argentum
+revision, material configuration, and evidence identity that generated it;
+later source commits do not rewrite that historical identity. Public code may
+generate private evidence without making the generated evidence public.
+
+Public CI verifies explicitly self-contained public capabilities. Verification
+whose meaning requires private historical evidence remains separate; generic
+invariants should use synthetic or public-safe fixtures rather than treating a
+private fixture as a substitute for history.
+
 ```text
 agent/research-run
         ↑
