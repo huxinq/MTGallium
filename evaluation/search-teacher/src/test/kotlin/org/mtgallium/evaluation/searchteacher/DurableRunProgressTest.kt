@@ -5,7 +5,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class DurableRunProgressTest {
     @Test
     fun `paired experiments write the durable-run v1 progress wire format`() {

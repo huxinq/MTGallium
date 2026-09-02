@@ -9,8 +9,10 @@ import kotlinx.serialization.encodeToString
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.research.run.ResearchRunCheckpoints
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.io.TempDir
 
+@Tag("public-source")
 class Issue0031NeuralCohortContinuationDiagnosticTest {
     @TempDir
     lateinit var temporaryDirectory: Path

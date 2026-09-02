@@ -7,7 +7,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class NeuralMemorizationDiagnosticTest {
     @Test
     fun `full scorer audit proves a consistent repeated-state ranking constructively`() {

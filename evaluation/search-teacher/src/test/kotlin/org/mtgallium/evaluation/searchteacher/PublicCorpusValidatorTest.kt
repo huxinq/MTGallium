@@ -11,6 +11,7 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.junit.jupiter.api.Tag
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.LeafStateSource
@@ -31,6 +32,7 @@ import org.mtgallium.agent.infoset.core.PolicyTrajectoryStopReason
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceLocation
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 
+@Tag("public-source")
 class PublicCorpusValidatorTest {
     @Test
     fun `streams a valid public-only trajectory`() {
@@ -206,7 +208,8 @@ class PublicCorpusValidatorTest {
             passed = true,
             datasetIdentity = datasetIdentity,
         )
-        val manifestPath = EvidenceStore(root).latest("corpus/v5/manifest.json")
+        val manifestPath = root.resolve(EvidenceLocation.LATEST.relativePath("corpus/v5/manifest.json"))
+        Files.createDirectories(manifestPath.parent)
         Files.writeString(manifestPath, evidenceJson.encodeToString(manifest))
         return Fixture(root, manifestPath)
     }

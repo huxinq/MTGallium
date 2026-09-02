@@ -7,7 +7,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class NeuralCohortGradientDiagnosticTest {
     @Test
     fun `analytical cohort gradient matches the actual scalar objective`() {

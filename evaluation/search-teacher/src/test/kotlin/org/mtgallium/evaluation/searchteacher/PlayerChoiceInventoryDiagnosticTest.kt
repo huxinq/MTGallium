@@ -5,7 +5,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class PlayerChoiceInventoryDiagnosticTest {
     @ScenarioExecutionTest
     @Test

@@ -5,7 +5,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class SearchBudgetFrontierTest {
     @Test
     fun `frontier roster differs only in simulations`() {

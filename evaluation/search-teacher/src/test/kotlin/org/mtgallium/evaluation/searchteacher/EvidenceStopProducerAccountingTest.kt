@@ -7,7 +7,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class EvidenceStopProducerAccountingTest {
     private val acceptedTransitionStop = RepresentationBoundaryDetector { _, detectionPoint, _ ->
         if (detectionPoint == EvidenceStopDetectionPoint.AFTER_ACCEPTED_TRANSITION) {

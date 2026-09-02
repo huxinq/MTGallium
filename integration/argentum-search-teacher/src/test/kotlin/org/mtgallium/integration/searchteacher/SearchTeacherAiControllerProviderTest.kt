@@ -45,7 +45,7 @@ class SearchTeacherAiControllerProviderTest {
     @Test
     fun `live mulligan routes through declared search policy without authoritative mutation`() {
         val registry = fullRegistry()
-        val manifest = SearchTeacherDeckManifest.frozenMonoRed()
+        val manifest = publicMulliganFixtureManifest()
         val deck = Deck.of(*manifest.mainDeck.entries.map { it.key to it.value }.toTypedArray())
         val p0 = EntityId("human-test-p0")
         val p1 = EntityId("teacher-test-p1")
@@ -100,6 +100,7 @@ class SearchTeacherAiControllerProviderTest {
             PrintingRegistry(),
             TokenArtRegistry(),
             SearchTeacherRuntimeConfig(maxPolicyDecisions = 1),
+            manifest,
         )
         val controller = provider.create(
             AiControllerContext(
@@ -133,7 +134,7 @@ class SearchTeacherAiControllerProviderTest {
     @Test
     fun `second-seat teacher waits for the earlier human mulligan action`() {
         val registry = fullRegistry()
-        val manifest = SearchTeacherDeckManifest.frozenMonoRed()
+        val manifest = publicMulliganFixtureManifest()
         val deck = Deck.of(*manifest.mainDeck.entries.map { it.key to it.value }.toTypedArray())
         val human = EntityId("mulligan-human-p0")
         val teacher = EntityId("mulligan-teacher-p1")
@@ -171,6 +172,7 @@ class SearchTeacherAiControllerProviderTest {
             PrintingRegistry(),
             TokenArtRegistry(),
             SearchTeacherRuntimeConfig(maxPolicyDecisions = 1),
+            manifest,
         ).create(
             AiControllerContext(
                 playerId = teacher,
@@ -216,4 +218,18 @@ class SearchTeacherAiControllerProviderTest {
             set.basicLandsFallback?.let { register(it.basicLands) }
         }
     }
+
+    /**
+     * A self-contained witness for controller routing. It intentionally does not claim
+     * to represent the unpublished frozen experimental deck or profile.
+     */
+    private fun publicMulliganFixtureManifest() = SearchTeacherDeckManifest(
+        id = "public-mulligan-fixture-v1",
+        name = "Public mulligan fixture",
+        format = "synthetic",
+        publishedDate = "2026-09-02",
+        source = "first-party public test fixture",
+        mainDeck = mapOf("Mountain" to 60),
+        sideboard = emptyMap(),
+    )
 }

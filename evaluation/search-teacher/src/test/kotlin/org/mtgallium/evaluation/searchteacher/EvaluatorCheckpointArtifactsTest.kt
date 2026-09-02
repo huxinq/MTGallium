@@ -4,7 +4,9 @@ import java.nio.file.Files
 import kotlin.io.path.createTempFile
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class EvaluatorCheckpointArtifactsTest {
     @Test
     fun `completed checkpoint report schema remains readable`() {

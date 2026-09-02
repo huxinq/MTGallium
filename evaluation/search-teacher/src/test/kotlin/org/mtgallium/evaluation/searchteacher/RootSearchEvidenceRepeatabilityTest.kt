@@ -4,7 +4,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class RootSearchEvidenceRepeatabilityTest {
     @Test
     fun `summary keeps action allocation rank value and support evidence separate`() {

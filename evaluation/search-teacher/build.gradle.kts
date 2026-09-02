@@ -7,6 +7,7 @@ plugins {
 }
 
 val scenarioExecutionTag = "scenario-execution"
+val publicSourceTag = "public-source"
 
 dependencies {
     implementation(project(":agent:research-run"))
@@ -40,6 +41,20 @@ tasks.register<Test>("fastTest") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     useJUnitPlatform {
+        excludeTags(scenarioExecutionTag)
+    }
+}
+
+// This lane is an explicit public-source contract. Its tests are tagged because their
+// semantic prerequisites are first-party source or synthetic fixtures in this checkout;
+// it is not a missing-resource fallback for the ordinary private-oriented fast lane.
+tasks.register<Test>("publicSourceTest") {
+    group = "verification"
+    description = "Runs explicitly classified self-contained public-source Search Teacher tests."
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags(publicSourceTag)
         excludeTags(scenarioExecutionTag)
     }
 }

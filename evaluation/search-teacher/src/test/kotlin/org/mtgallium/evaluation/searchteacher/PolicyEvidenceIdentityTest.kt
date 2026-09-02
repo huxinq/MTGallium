@@ -12,7 +12,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.mtgallium.agent.infoset.core.PolicyBehaviorBinding
 import org.mtgallium.evaluation.searchteacher.evidence.RunProvenance
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class PolicyEvidenceIdentityTest {
     @Test
     fun `source provenance and policy identity distinguish every clean and dirty source state`() {

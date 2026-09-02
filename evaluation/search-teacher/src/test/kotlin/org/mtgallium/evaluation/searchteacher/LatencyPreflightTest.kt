@@ -6,7 +6,9 @@ import kotlin.test.assertTrue
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceLocation
+import org.junit.jupiter.api.Tag
 
+@Tag("public-source")
 class LatencyPreflightTest {
     private val caseIds = TacticalBenchmarkCatalog.cases.map(TacticalCaseDefinition::id)
     private val informationLeaf = latencyPreflightLeaves[0]
