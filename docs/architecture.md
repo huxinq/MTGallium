@@ -58,7 +58,6 @@ agent/search-teacher
 evaluation/search-teacher
 
 integration/argentum-search-teacher ──→ adapter + Search Teacher
-tools ──→ serialized domain models and local services
 ```
 
 Production tree reuse remains disabled until visits can be justified under the

@@ -102,7 +102,8 @@ verification, orchestration, serialization, and avoidable reasoning. Use the
 least intensive model or agent effort unlikely to reduce decision-relevant
 quality; raise it for semantic ambiguity or genuine difficulty.
 
-For substantial compute, use the repository-local durable-run facility after
-cheap preflight, then inspect retained outputs after completion rather than
-rerunning. Durable execution is an execution-layer concern; keep its private
-destinations, notifications, and credentials out of public source doctrine.
+Owner research environments may provide durable execution for substantial
+compute. When available, use it after cheap preflight and inspect retained
+outputs after completion rather than rerunning expensive work. Durable
+execution mechanics, notifications, destinations, and credentials are private
+execution-layer concerns.
