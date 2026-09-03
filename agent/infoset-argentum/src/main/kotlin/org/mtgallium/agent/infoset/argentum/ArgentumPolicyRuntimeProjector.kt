@@ -5,6 +5,9 @@ import com.wingedsheep.engine.event.SpeedAbilities
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.components.battlefield.AbilityActivatedThisTurnComponent
+import com.wingedsheep.engine.state.components.combat.AttackingComponent
+import com.wingedsheep.engine.state.components.combat.BlockedComponent
+import com.wingedsheep.engine.state.components.combat.BlockingComponent
 import com.wingedsheep.engine.state.components.battlefield.TriggeredAbilityFiredThisTurnComponent
 import com.wingedsheep.engine.state.components.battlefield.WarpedComponent
 import com.wingedsheep.engine.state.components.identity.WarpExiledComponent
@@ -22,6 +25,7 @@ import org.mtgallium.agent.infoset.core.PolicyRestrictedMana
 internal data class ArgentumPolicyRuntimeProjection(
     val cards: Map<EntityId, ArgentumPolicyCardRuntime> = emptyMap(),
     val players: Map<EntityId, ArgentumPolicyPlayerRuntime> = emptyMap(),
+    val combat: ArgentumPolicyCombatRuntime? = null,
     val currentTurnComplete: Boolean = false,
 ) {
     companion object {
@@ -43,6 +47,24 @@ internal data class ArgentumPolicyPlayerRuntime(
     val speedIncreaseFired: Boolean = false,
     val redNoncombatDamageDealt: Int = 0,
     val landDropsRemaining: Int = 0,
+    val speed: Int = 0,
+)
+
+internal data class ArgentumPolicyCombatRuntime(
+    val attackingPlayerId: EntityId?,
+    val attackers: List<ArgentumPolicyAttackerRuntime>,
+    val blockers: List<ArgentumPolicyBlockerRuntime>,
+)
+
+internal data class ArgentumPolicyAttackerRuntime(
+    val attackerId: EntityId,
+    val defenderId: EntityId,
+    val blockerIds: List<EntityId>,
+)
+
+internal data class ArgentumPolicyBlockerRuntime(
+    val blockerId: EntityId,
+    val blockedAttackerIds: List<EntityId>,
 )
 
 /**
@@ -113,9 +135,38 @@ internal object ArgentumPolicyRuntimeProjector {
                 redNoncombatDamageDealt = container.get<RedNoncombatDamageDealtThisTurnComponent>()
                     ?.amount ?: 0,
                 landDropsRemaining = (container.get<LandDropsComponent>() ?: LandDropsComponent()).remaining,
+                speed = state.speed(player.id),
             )
         }
-        return ArgentumPolicyRuntimeProjection(visibleCards, players, currentTurnComplete = true)
+        return ArgentumPolicyRuntimeProjection(
+            cards = visibleCards,
+            players = players,
+            combat = combat(state),
+            currentTurnComplete = true,
+        )
+    }
+
+    private fun combat(state: GameState): ArgentumPolicyCombatRuntime? {
+        val battlefield = state.turnOrder.flatMap(state::getBattlefield)
+        val attackers = battlefield.mapNotNull { entityId ->
+            val attacking = state.getEntity(entityId)?.get<AttackingComponent>() ?: return@mapNotNull null
+            ArgentumPolicyAttackerRuntime(
+                attackerId = entityId,
+                defenderId = attacking.defenderId,
+                blockerIds = state.getEntity(entityId)?.get<BlockedComponent>()?.blockerIds.orEmpty(),
+            )
+        }
+        val blockers = battlefield.mapNotNull { entityId ->
+            val blocking = state.getEntity(entityId)?.get<BlockingComponent>() ?: return@mapNotNull null
+            ArgentumPolicyBlockerRuntime(entityId, blocking.blockedAttackerIds)
+        }
+        if (attackers.isEmpty() && blockers.isEmpty()) return null
+        return ArgentumPolicyCombatRuntime(
+            attackingPlayerId = attackers.firstOrNull()?.attackerId
+                ?.let(state.projectedState::getController),
+            attackers = attackers,
+            blockers = blockers,
+        )
     }
 
     private data class RestrictedManaKey(

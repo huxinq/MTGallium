@@ -1,26 +1,7 @@
 package org.mtgallium.agent.infoset.argentum
 
-import com.wingedsheep.gym.contract.BatchYesNoChoiceSpec
-import com.wingedsheep.gym.contract.BudgetModesChoiceSpec
-import com.wingedsheep.gym.contract.CardsChoiceSpec
-import com.wingedsheep.gym.contract.ColorsChoiceSpec
-import com.wingedsheep.gym.contract.CombatResolutionChoiceSpec
-import com.wingedsheep.gym.contract.DamageAssignmentChoiceSpec
-import com.wingedsheep.gym.contract.DecisionChoiceSpec
-import com.wingedsheep.gym.contract.DistributionChoiceSpec
-import com.wingedsheep.gym.contract.LibraryReorderChoiceSpec
-import com.wingedsheep.gym.contract.LibrarySearchChoiceSpec
-import com.wingedsheep.gym.contract.ManaSourcesChoiceSpec
-import com.wingedsheep.gym.contract.ModesChoiceSpec
-import com.wingedsheep.gym.contract.NumberChoiceSpec
-import com.wingedsheep.gym.contract.OptionsChoiceSpec
-import com.wingedsheep.gym.contract.OrderChoiceSpec
-import com.wingedsheep.gym.contract.PilesChoiceSpec
-import com.wingedsheep.gym.contract.ReplacementChoiceSpec
-import com.wingedsheep.gym.contract.TargetsChoiceSpec
+import com.wingedsheep.engine.core.PendingDecision
 import com.wingedsheep.gym.contract.TrainingObservation
-import com.wingedsheep.gym.contract.YesNoChoiceSpec
-import com.wingedsheep.gym.contract.playerFacingEntityReferences
 import com.wingedsheep.sdk.model.EntityId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -89,9 +70,15 @@ class SafeObservationProjector {
         observation: TrainingObservation,
         playerAliases: Map<EntityId, String>?,
         runtime: ArgentumPolicyRuntimeProjection,
+        pendingDecision: PendingDecision? = null,
     ): SafeObservationProjection {
         val refs = SafeReferenceMap(observation, playerAliases, runtime.cards)
-        observation.pendingDecision?.choiceSpec?.let { refs.admitAuthorizedChoiceReferences(it) }
+        val chooserDecision = pendingDecision?.takeIf { decision ->
+            decision.id == observation.pendingDecision?.decisionId &&
+                decision.playerId == observation.perspectivePlayerId
+        }
+        val choiceSpec = chooserDecision?.toDecisionChoiceSpec()
+        choiceSpec?.let(refs::admitAuthorizedChoiceReferences)
 
         val safe = PolicyObservation(
             perspectivePlayerId = refs.player(observation.perspectivePlayerId),
@@ -119,7 +106,7 @@ class SafeObservationProjector {
                         colorless = player.manaPool.colorless,
                         restricted = runtime.players[player.id]?.restrictedMana.orEmpty(),
                     ),
-                    speed = player.speed,
+                    speed = playerRuntime.speed,
                     active = player.isActive,
                     priority = player.hasPriority,
                     lost = player.hasLost,
@@ -179,7 +166,7 @@ class SafeObservationProjector {
                     targets = stack.targets.map(refs::reference),
                 )
             },
-            combat = observation.combat?.let { combat ->
+            combat = runtime.combat?.let { combat ->
                 PolicyCombatView(
                     attackingPlayerId = combat.attackingPlayerId?.let(refs::player),
                     attackers = combat.attackers.map { attacker ->
@@ -199,18 +186,20 @@ class SafeObservationProjector {
             },
             currentTurnStateComplete = runtime.currentTurnComplete,
             pendingDecision = observation.pendingDecision?.let { decision ->
+                val liveDecision = pendingDecision?.takeIf { it.id == decision.decisionId }
                 PolicyPendingDecisionView(
-                    decisionKind = decision.kind.name,
+                    decisionKind = liveDecision?.policyKindName() ?: decision.kind.name,
                     playerId = refs.player(decision.playerId),
                     prompt = decision.prompt,
-                    sourceObjectRef = decision.sourceEntityId?.let(refs::reference),
+                    sourceObjectRef = refs.referenceOrNull(decision.sourceEntityId),
                     sourceName = decision.sourceName,
-                    triggeringObjectRef = decision.triggeringEntityId?.let(refs::reference),
+                    triggeringObjectRef = refs.referenceOrNull(decision.triggeringEntityId),
                     effectHint = decision.effectHint,
-                    phase = decision.phase.name,
-                    subjectObjectRef = decision.subjectEntityId?.let(refs::reference),
-                    canRespond = decision.canRespond,
-                    choiceSpec = decision.choiceSpec?.let { projectChoice(it, refs) },
+                    phase = liveDecision?.context?.phase?.name ?: "RESOLUTION",
+                    subjectObjectRef = refs.referenceOrNull(liveDecision?.context?.subjectEntityId),
+                    canRespond = (liveDecision?.playerId ?: decision.playerId) ==
+                        observation.perspectivePlayerId,
+                    choiceSpec = choiceSpec?.let { projectChoice(it, refs) },
                 )
             },
             observationDigest = "",
@@ -464,7 +453,7 @@ internal class SafeReferenceMap(
     fun admits(id: EntityId): Boolean = id.value in rawToSafe
 
     fun admitAuthorizedChoiceReferences(spec: DecisionChoiceSpec) {
-        spec.playerFacingEntityReferences().forEach { candidate ->
+        spec.entityReferences().forEach { candidate ->
             if (candidate.value !in rawToSafe) {
                 val safe = "choice:${privateIndex++}"
                 put(candidate, safe, safe)

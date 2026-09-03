@@ -1,7 +1,5 @@
 package org.mtgallium.agent.infoset.argentum
 
-import com.wingedsheep.ai.engine.hidden.Determinizer
-import com.wingedsheep.ai.engine.hidden.KnownDeckSampleResult
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.components.identity.CardComponent
@@ -158,7 +156,7 @@ class ArgentumKnownDeckBeliefWorldSource(
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "known-deck-construction",
 ) : BeliefWorldSource {
-    private val determinizer = Determinizer(cardRegistry)
+    private val materializer = KnownDeckWorldMaterializer(cardRegistry)
 
     override fun sample(
         rootInformation: PolicyInformationState,
@@ -194,10 +192,14 @@ class ArgentumKnownDeckBeliefWorldSource(
         val maximumAttempts = count * ARGENTUM_KNOWN_DECK_MAX_PROPOSAL_ATTEMPTS_PER_PARTICLE
         while (accepted.size < count && attempts < maximumAttempts) {
             val seed = ComponentSeeds.derive(beliefSeed, attempts, "belief-world")
-            when (val result = determinizer.sampleKnownDeckWorld(
-                pins.samplingState, viewer, rawDecks, GameRng.seeded(seed),
+            when (val result = materializer.materialize(
+                state = pins.samplingState,
+                viewerId = viewer,
+                decklists = rawDecks,
+                beliefRng = GameRng.seeded(seed),
+                futureRng = GameRng.seeded(ComponentSeeds.derive(seed, "known-deck-future")),
             )) {
-                is KnownDeckSampleResult.Success -> {
+                is KnownDeckWorldMaterializationResult.Materialized -> {
                     // The proposal seed continues to define hidden assignment exactly as before.
                     // withSampledState domain-separates a future game-chance stream from the same
                     // stable particle identity instead of retaining result.state.rng from the referee.
@@ -240,10 +242,8 @@ class ArgentumKnownDeckBeliefWorldSource(
                         )
                     }
                 }
-                is KnownDeckSampleResult.Unsupported -> {
-                    val redactedReasons = result.reasons.map { reason ->
-                        reason::class.simpleName ?: "Unknown"
-                    }.sorted()
+                is KnownDeckWorldMaterializationResult.Unsupported -> {
+                    val redactedReasons = result.reasons.map(KnownDeckWorldFailure::redactedCode).sorted()
                     redactedReasons.forEach { name ->
                         failures[name] = failures.getOrDefault(name, 0) + 1
                     }
@@ -318,7 +318,7 @@ class ArgentumConditionalRejuvenator(
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "conditional-rejuvenation",
 ) : ParticleRejuvenator {
-    private val determinizer = Determinizer(cardRegistry)
+    private val materializer = KnownDeckWorldMaterializer(cardRegistry)
 
     override fun rejuvenate(world: SearchWorld, duplicateIndex: Int, seed: Long): SearchWorld {
         require(duplicateIndex > 0) { "Only duplicate particles require rejuvenation" }
@@ -339,13 +339,14 @@ class ArgentumConditionalRejuvenator(
             val attemptSeed = if (attempt == 0) seed else {
                 ComponentSeeds.derive(seed, attempt, "remembered-fact-rejuvenation")
             }
-            when (val result = determinizer.sampleKnownDeckWorld(
-                pins.samplingState,
-                viewer,
-                rawDecks,
-                GameRng.seeded(attemptSeed),
+            when (val result = materializer.materialize(
+                state = pins.samplingState,
+                viewerId = viewer,
+                decklists = rawDecks,
+                beliefRng = GameRng.seeded(attemptSeed),
+                futureRng = GameRng.seeded(ComponentSeeds.derive(attemptSeed, "known-deck-future")),
             )) {
-                is KnownDeckSampleResult.Success -> {
+                is KnownDeckWorldMaterializationResult.Materialized -> {
                     val candidate = trusted.withSampledState(
                         pins.restore(result.state),
                         futureChanceStreamIdentity = attemptSeed,
@@ -383,10 +384,8 @@ class ArgentumConditionalRejuvenator(
                         )
                     )
                 }
-                is KnownDeckSampleResult.Unsupported -> {
-                    val redactedReasons = result.reasons.map { reason ->
-                        reason::class.simpleName ?: "Unknown"
-                    }.sorted()
+                is KnownDeckWorldMaterializationResult.Unsupported -> {
+                    val redactedReasons = result.reasons.map(KnownDeckWorldFailure::redactedCode).sorted()
                     redactedReasons.forEach { code ->
                         failures[code] = failures.getOrDefault(code, 0) + 1
                     }

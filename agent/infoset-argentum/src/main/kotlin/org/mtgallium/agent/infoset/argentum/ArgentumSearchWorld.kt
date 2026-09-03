@@ -1,7 +1,5 @@
 package org.mtgallium.agent.infoset.argentum
 
-import com.wingedsheep.ai.engine.hidden.Determinizer
-import com.wingedsheep.ai.engine.hidden.KnownDeckSampleResult
 import com.wingedsheep.ai.engine.AIPlayer
 import com.wingedsheep.ai.engine.AiProfile
 import com.wingedsheep.engine.core.BottomCards
@@ -9,6 +7,7 @@ import com.wingedsheep.engine.core.DecisionResponse
 import com.wingedsheep.engine.core.DeclareAttackers
 import com.wingedsheep.engine.core.DeclareBlockers
 import com.wingedsheep.engine.core.GameAction
+import com.wingedsheep.engine.core.GameEvent
 import com.wingedsheep.engine.core.KeepHand
 import com.wingedsheep.engine.core.PriorityChangedEvent
 import com.wingedsheep.engine.core.ReorderLibraryDecision
@@ -19,12 +18,12 @@ import com.wingedsheep.engine.core.TakeMulligan
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.ZoneKey
-import com.wingedsheep.ai.engine.SimulationTraceStep
 import com.wingedsheep.engine.state.components.identity.CardComponent
 import com.wingedsheep.engine.state.components.identity.FaceDownComponent
 import com.wingedsheep.engine.state.components.identity.RevealedToComponent
 import com.wingedsheep.engine.state.components.stack.SpellOnStackComponent
 import com.wingedsheep.gym.GameEnvironment
+import com.wingedsheep.gym.ExactOneSubmissionResult
 import com.wingedsheep.gym.contract.ObservationBuilder
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.sdk.core.Zone
@@ -56,6 +55,8 @@ class ArgentumSearchWorld private constructor(
     private val environment: GameEnvironment,
     private val gameId: String,
     private val seedBase: Long,
+    private val effectiveSetupSeed: Long,
+    private val cardRegistry: CardRegistry,
     private val aliases: Map<EntityId, String>,
     private val history: PerspectiveHistory,
     private var decisionIndex: Int,
@@ -135,6 +136,8 @@ class ArgentumSearchWorld private constructor(
             environment = permutedEnvironment,
             gameId = gameId,
             seedBase = seedBase,
+            effectiveSetupSeed = effectiveSetupSeed,
+            cardRegistry = cardRegistry,
             aliases = aliases,
             history = history.fork(),
             decisionIndex = decisionIndex,
@@ -240,6 +243,7 @@ class ArgentumSearchWorld private constructor(
         // accept and record one taken by a human or another policy.
         val expansion = exactObservedActionExpander.expand(
             environment,
+            cardRegistry,
             proposalSeed(),
             MAX_OBSERVED_EXPANSION,
         )
@@ -334,14 +338,15 @@ class ArgentumSearchWorld private constructor(
 
     /** Authoritative arena step recording exactly the submitted player action for replay. */
     fun stepWithReplayTrace(choice: SemanticChoice): ArgentumReplayStep {
-        val result = applyChoice(choice, traceRawAction = true)
-        return ArgentumReplayStep(result, environment.lastStepTrace)
+        val transitions = mutableListOf<ArgentumRawTransition>()
+        val result = applyChoice(choice, rawTraceSink = transitions)
+        return ArgentumReplayStep(result, transitions)
     }
 
     private fun applyChoice(
         choice: SemanticChoice,
         suppliedExpansion: UnifiedExpansionResult? = null,
-        traceRawAction: Boolean = false,
+        rawTraceSink: MutableList<ArgentumRawTransition>? = null,
     ): SearchStepResult {
         check(!environment.isTerminal) { "Cannot step a terminal search world" }
         val actor = requireNotNull(policyActor(environment))
@@ -388,20 +393,23 @@ class ArgentumSearchWorld private constructor(
             SemanticOperationFamily.DECISION_RESPONSE -> PolicyHistoryEventKind.DECISION
             else -> PolicyHistoryEventKind.ACTION
         }
-        when (engineChoice) {
-            is ArgentumEngineChoice.Action -> if (traceRawAction) {
-                environment.stepRawTraced(engineChoice.value)
-            } else {
-                environment.stepRaw(engineChoice.value)
-            }
-            is ArgentumEngineChoice.Decision -> if (traceRawAction) {
-                environment.stepRawTraced(SubmitDecision(actor, engineChoice.value))
-            } else {
-                environment.stepRaw(SubmitDecision(actor, engineChoice.value))
-            }
+        val submittedAction = when (engineChoice) {
+            is ArgentumEngineChoice.Action -> engineChoice.value
+            is ArgentumEngineChoice.Decision -> SubmitDecision(actor, engineChoice.value)
         }
-        if (environment.lastRejection != null) {
-            return SearchStepResult(false, environment.lastRejection)
+        val submission = environment.stepExactlyOne(submittedAction)
+        val rejection = (submission as? ExactOneSubmissionResult.Rejected)?.reason
+        rawTraceSink?.add(
+            ArgentumRawTransition(
+                action = submittedAction,
+                beforeState = beforeState,
+                afterState = environment.state,
+                events = environment.lastStepEvents,
+                rejectionReason = rejection,
+            )
+        )
+        if (rejection != null) {
+            return SearchStepResult(false, rejection)
         }
         history.recordChoice(
             actor,
@@ -485,6 +493,8 @@ class ArgentumSearchWorld private constructor(
         environment = environment.fork(),
         gameId = gameId,
         seedBase = seedBase,
+        effectiveSetupSeed = effectiveSetupSeed,
+        cardRegistry = cardRegistry,
         aliases = aliases,
         history = history.fork(),
         decisionIndex = decisionIndex,
@@ -520,6 +530,8 @@ class ArgentumSearchWorld private constructor(
             environment = environment.fork(),
             gameId = gameId,
             seedBase = seedBase,
+            effectiveSetupSeed = effectiveSetupSeed,
+            cardRegistry = cardRegistry,
             aliases = aliases,
             history = history.fork(),
             decisionIndex = decisionIndex,
@@ -559,6 +571,7 @@ class ArgentumSearchWorld private constructor(
         val cached = cachedExpansion?.takeIf { it.key == key && it.limit == limit }
         val base = cached?.base ?: expander.expandPrepared(
                 environment,
+                cardRegistry,
                 seed,
                 limit,
                 cachedExpansion?.takeIf { it.key == key && it.limit < limit }?.base,
@@ -629,14 +642,15 @@ class ArgentumSearchWorld private constructor(
             it.state === environment.state && it.decisionIndex == decisionIndex
         }?.let { return it.value }
         val legal = if (viewer == policyActor(environment)) environment.legalActions() else emptyList()
-        val observation = ObservationBuilder(environment.cardRegistry).build(environment.state, viewer, legal)
+        val observation = ObservationBuilder(cardRegistry).build(environment.state, viewer, legal)
             .observation as TrainingObservation
         val projection = cachedSafeProjections[viewer]?.takeIf {
             it.state === environment.state && it.decisionIndex == decisionIndex
         }?.value ?: projector.project(
             observation,
             aliases,
-            ArgentumPolicyRuntimeProjector.project(environment.state, viewer, environment.cardRegistry, observation),
+            ArgentumPolicyRuntimeProjector.project(environment.state, viewer, cardRegistry, observation),
+            pendingDecision = environment.pendingDecision,
         )
         return PreparedSemanticExpansionInput(
             actor = viewer,
@@ -740,7 +754,7 @@ class ArgentumSearchWorld private constructor(
             environment.state.getEntity(id)?.get<CardComponent>()?.name ?: "<missing:$id>"
         }
         val semanticPerspective = policyActor(environment) ?: environment.playerIds.first()
-        val semanticObservation = ObservationBuilder(environment.cardRegistry).build(
+        val semanticObservation = ObservationBuilder(cardRegistry).build(
             environment.state,
             semanticPerspective,
             if (environment.isTerminal) emptyList() else environment.legalActions(),
@@ -752,7 +766,7 @@ class ArgentumSearchWorld private constructor(
             hiddenHands = aliases.entries.associate { (raw, safe) -> safe to names(environment.state.getHand(raw)) },
             libraries = aliases.entries.associate { (raw, safe) -> safe to names(environment.state.getLibrary(raw)) },
             chanceTrace = listOf(
-                "initial-seed:${environment.state.initialSeed}",
+                "initial-seed:$effectiveSetupSeed",
                 "search-base-seed:$seedBase",
             ),
         )
@@ -766,7 +780,7 @@ class ArgentumSearchWorld private constructor(
     /**
      * Fork the complete authoritative position for a privileged offline search while replacing its
      * future game-chance stream. The identity must come from declared experiment/search randomness;
-     * this boundary deliberately never derives it from [GameState.rng] or [GameState.initialSeed].
+     * this boundary deliberately never derives it from [GameState.rng] or the current state.
      */
     fun forkForHypotheticalSearch(futureChanceStreamIdentity: Long): ArgentumSearchWorld =
         withHypotheticalState(environment.state, futureChanceStreamIdentity)
@@ -789,6 +803,8 @@ class ArgentumSearchWorld private constructor(
             environment = sampledEnvironment,
             gameId = gameId,
             seedBase = seedBase,
+            effectiveSetupSeed = effectiveSetupSeed,
+            cardRegistry = cardRegistry,
             aliases = aliases,
             history = history.fork(),
             decisionIndex = decisionIndex,
@@ -805,6 +821,8 @@ class ArgentumSearchWorld private constructor(
             environment = environment.fork(),
             gameId = gameId,
             seedBase = seedBase,
+            effectiveSetupSeed = effectiveSetupSeed,
+            cardRegistry = cardRegistry,
             aliases = aliases,
             history = reconstructedHistory.fork(),
             decisionIndex = decisionIndex,
@@ -833,28 +851,26 @@ class ArgentumSearchWorld private constructor(
             environment: GameEnvironment,
             gameId: String,
             seedBase: Long,
+            cardRegistry: CardRegistry,
+            effectiveSetupSeed: Long,
             expander: UnifiedSemanticExpander = UnifiedSemanticExpander(),
-            cardRegistry: CardRegistry? = null,
             knownDecks: Map<String, Map<String, Int>>? = null,
             projectionAuditSink: PerspectiveProjectionAuditSink = PerspectiveProjectionAuditSink.NONE,
             heuristicResolutionSink: (ArgentumHeuristicResolution) -> Unit = {},
         ): ArgentumSearchWorld {
             require(environment.playerIds.isNotEmpty()) { "Environment must be reset before wrapping" }
-            require((cardRegistry == null) == (knownDecks == null)) {
-                "Card registry and known decks must be supplied together for heuristic annotation"
-            }
             val aliases = environment.playerIds.mapIndexed { index, id -> id to "p$index" }.toMap()
             return ArgentumSearchWorld(
                 environment = environment,
                 gameId = gameId,
                 seedBase = seedBase,
+                effectiveSetupSeed = effectiveSetupSeed,
+                cardRegistry = cardRegistry,
                 aliases = aliases,
                 history = PerspectiveHistory(environment.playerIds, projectionAuditSink),
                 decisionIndex = 0,
                 expander = expander,
-                heuristicAnnotator = cardRegistry?.let {
-                    ArgentumHeuristicAnnotator(it, requireNotNull(knownDecks))
-                },
+                heuristicAnnotator = knownDecks?.let { ArgentumHeuristicAnnotator(cardRegistry, it) },
                 knownDecks = knownDecks.orEmpty(),
                 heuristicResolutionSink = heuristicResolutionSink,
             )
@@ -984,8 +1000,19 @@ data class ArgentumObservedStep(
 
 data class ArgentumReplayStep(
     val result: SearchStepResult,
-    val rawTransitions: List<SimulationTraceStep>,
+    val rawTransitions: List<ArgentumRawTransition>,
 )
+
+/** One MTGallium-submitted exact transition retained for private canonical replay construction. */
+data class ArgentumRawTransition(
+    val action: GameAction,
+    val beforeState: GameState,
+    val afterState: GameState,
+    val events: List<GameEvent>,
+    val rejectionReason: String?,
+) {
+    val accepted: Boolean get() = rejectionReason == null
+}
 
 /** Fail-closed boundary for authoritative states outside the frozen pool's visibility contract. */
 class UnsupportedInformationStateException(
@@ -1035,7 +1062,7 @@ private class ArgentumHeuristicAnnotator(
     private val cardRegistry: CardRegistry,
     private val knownDecks: Map<String, Map<String, Int>>,
 ) {
-    private val determinizer = Determinizer(cardRegistry)
+    private val materializer = KnownDeckWorldMaterializer(cardRegistry)
 
     fun annotate(
         environment: GameEnvironment,
@@ -1059,17 +1086,19 @@ private class ArgentumHeuristicAnnotator(
             ArgentumHeuristicUnavailableReason.DECK_ALIAS_MISMATCH,
         )
         val pins = pinRememberedObjects(environment.state, actor, rememberedObjectIds)
-        val sampledState = when (val sampled = determinizer.sampleKnownDeckWorld(
-            pins.samplingState,
-            actor,
-            rawDecks,
-            GameRng.seeded(ComponentSeeds.derive(seed, aliases.getValue(actor), "argentum-heuristic")),
+        val hypothesisSeed = ComponentSeeds.derive(seed, aliases.getValue(actor), "argentum-heuristic")
+        val sampledState = when (val sampled = materializer.materialize(
+            state = pins.samplingState,
+            viewerId = actor,
+            decklists = rawDecks,
+            beliefRng = GameRng.seeded(hypothesisSeed),
+            futureRng = GameRng.seeded(ComponentSeeds.derive(hypothesisSeed, "known-deck-future")),
         )) {
-            is KnownDeckSampleResult.Success -> pins.restore(sampled.state)
-            is KnownDeckSampleResult.Unsupported -> return unavailable(
+            is KnownDeckWorldMaterializationResult.Materialized -> pins.restore(sampled.state)
+            is KnownDeckWorldMaterializationResult.Unsupported -> return unavailable(
                 expansion,
                 ArgentumHeuristicUnavailableReason.DETERMINIZATION_UNSUPPORTED,
-                sampled.reasons.map { it::class.simpleName ?: "Unknown" }.distinct().sorted(),
+                sampled.reasons.map(KnownDeckWorldFailure::redactedCode).distinct().sorted(),
             )
         }
         val selectedEngineChoice = select(sampledState, actor, expansion)

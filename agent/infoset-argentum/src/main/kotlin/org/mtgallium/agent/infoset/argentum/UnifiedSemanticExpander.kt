@@ -11,15 +11,16 @@ import com.wingedsheep.engine.core.KeepHand
 import com.wingedsheep.engine.core.PassPriority
 import com.wingedsheep.engine.core.PlayLand
 import com.wingedsheep.engine.core.TakeMulligan
+import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.engine.state.components.combat.AttackingComponent
 import com.wingedsheep.engine.state.components.stack.ChosenTarget
 import com.wingedsheep.engine.state.components.player.MulliganStateComponent
 import com.wingedsheep.gym.GameEnvironment
+import com.wingedsheep.gym.ExactOneSubmissionResult
 import com.wingedsheep.gym.contract.ObservationBuilder
 import com.wingedsheep.gym.contract.TrainingObservation
-import com.wingedsheep.gym.contract.playerFacingEntityReferences
-import com.wingedsheep.gym.contract.sourceEntityIdOrNull
-import com.wingedsheep.gym.trainer.defaults.BoundedStructuredDecisionExpander
+import com.wingedsheep.gym.trainer.defaults.ExactStructuredDecisionExpander
+import com.wingedsheep.gym.trainer.spi.StructuredDecisionExpansion
 import com.wingedsheep.sdk.model.EntityId
 import java.math.BigInteger
 import kotlinx.serialization.Serializable
@@ -119,16 +120,21 @@ class UnifiedSemanticExpander(
         require(maxAttempts >= maxResponses)
     }
 
-    fun expand(environment: GameEnvironment, proposalSeed: Long): UnifiedExpansionResult =
-        expand(environment, proposalSeed, maxResponses)
+    fun expand(
+        environment: GameEnvironment,
+        cardRegistry: CardRegistry,
+        proposalSeed: Long,
+    ): UnifiedExpansionResult = expand(environment, cardRegistry, proposalSeed, maxResponses)
 
     fun expand(
         environment: GameEnvironment,
+        cardRegistry: CardRegistry,
         proposalSeed: Long,
         responseLimit: Int,
         validatedPrefix: UnifiedExpansionResult? = null,
     ): UnifiedExpansionResult = expandPrepared(
         environment,
+        cardRegistry,
         proposalSeed,
         responseLimit,
         validatedPrefix,
@@ -148,6 +154,7 @@ class UnifiedSemanticExpander(
 
     internal fun expandPrepared(
         environment: GameEnvironment,
+        cardRegistry: CardRegistry,
         proposalSeed: Long,
         responseLimit: Int,
         validatedPrefix: UnifiedExpansionResult? = null,
@@ -164,7 +171,7 @@ class UnifiedSemanticExpander(
         }
         val actor = requireNotNull(policyActor(environment)) { "Non-terminal environment has no actor" }
         val prepared = preparedInput ?: environment.legalActions().let { legalActions ->
-            val observation = ObservationBuilder(environment.cardRegistry).build(
+            val observation = ObservationBuilder(cardRegistry).build(
                 environment.state,
                 actor,
                 legalActions,
@@ -179,9 +186,10 @@ class UnifiedSemanticExpander(
                     runtime = ArgentumPolicyRuntimeProjector.project(
                         environment.state,
                         actor,
-                        environment.cardRegistry,
+                        cardRegistry,
                         observation,
                     ),
+                    pendingDecision = environment.pendingDecision,
                 ),
             )
         }
@@ -191,8 +199,17 @@ class UnifiedSemanticExpander(
         val refs = projection.references
 
         val generated = if (environment.pendingDecision != null) {
-            val expansion = BoundedStructuredDecisionExpander(responseLimit, maxAttempts)
-                .expand(environment.state, environment.pendingDecision!!)
+            val decision = environment.pendingDecision!!
+            val expansion = when (val exact = ExactStructuredDecisionExpander.expand(environment.state, decision)) {
+                is StructuredDecisionExpansion.Complete -> StructuredResponseProposal(
+                    responses = exact.responses,
+                    isExhaustive = true,
+                    estimatedResponseCount = exact.responses.size.toLong(),
+                )
+                StructuredDecisionExpansion.Unsupported ->
+                    BoundedDecisionResponseProposer(responseLimit, maxAttempts)
+                        .propose(environment.state, decision)
+            }
             GeneratedChoices(
                 choices = expansion.responses.asSequence().map { ArgentumEngineChoice.Decision(it) },
                 estimatedCount = expansion.estimatedResponseCount,
@@ -228,8 +245,13 @@ class UnifiedSemanticExpander(
             val engineChoice = iterator.next()
             scanned++
             val admittedReferences = when (engineChoice) {
-                is ArgentumEngineChoice.Action -> engineChoice.value.playerFacingEntityReferences()
-                is ArgentumEngineChoice.Decision -> engineChoice.value.playerFacingEntityReferences()
+                is ArgentumEngineChoice.Action -> engineChoice.value.completeEntityReferencesOrNull()
+                is ArgentumEngineChoice.Decision -> engineChoice.value.completeEntityReferencesOrNull()
+            }
+            if (admittedReferences == null) {
+                attempts++
+                rejected++
+                continue
             }
             if (admittedReferences.any { !refs.admits(it) }) {
                 attempts++
@@ -552,13 +574,13 @@ class UnifiedSemanticExpander(
 
     private fun isAccepted(environment: GameEnvironment, choice: ArgentumEngineChoice): Boolean {
         val child = environment.fork()
-        when (choice) {
-            is ArgentumEngineChoice.Action -> child.step(choice.value)
-            is ArgentumEngineChoice.Decision -> child.step(
+        val result = when (choice) {
+            is ArgentumEngineChoice.Action -> child.stepExactlyOne(choice.value)
+            is ArgentumEngineChoice.Decision -> child.stepExactlyOne(
                 com.wingedsheep.engine.core.SubmitDecision(choice.value.playerId(environment), choice.value)
             )
         }
-        return child.lastRejection == null
+        return result is ExactOneSubmissionResult.Applied
     }
 
     private fun DecisionResponse.playerId(environment: GameEnvironment): EntityId =
@@ -576,7 +598,7 @@ class UnifiedSemanticExpander(
                 "ACTION",
                 engineJson.encodeToJsonElement(GameAction.serializer(), choice.value),
                 actionDisplayLabel(choice.value, observation, legalActions),
-                choice.value.sourceEntityIdOrNull(),
+                choice.value.policySourceEntityIdOrNull(),
             )
             is ArgentumEngineChoice.Decision -> listOf(
                 "DECISION",
@@ -775,9 +797,9 @@ class UnifiedSemanticExpander(
         legalActions: List<com.wingedsheep.engine.legalactions.LegalAction>,
     ): String {
         if (action is DeclareAttackers) return attackDisplayLabel(action, observation)
-        val source = action.sourceEntityIdOrNull()
+        val source = action.policySourceEntityIdOrNull()
         val matching = legalActions.filter { legal ->
-            legal.action.sourceEntityIdOrNull() == source && legal.actionType == action::class.simpleName
+            legal.action.policySourceEntityIdOrNull() == source && legal.actionType == action::class.simpleName
         }
         val exact = matching.firstOrNull { legal ->
             val legalAction = legal.action
