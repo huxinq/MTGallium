@@ -39,6 +39,23 @@ for completeness.
 
 Prefer types, APIs, focused tests, and local comments over process ceremony.
 
+## Code Review Rules
+
+Reviewers should flag concrete defects in these interpretation-bearing areas:
+
+1. **Perspective safety:** policy-facing paths that expose referee state,
+   sampled hidden truth, raw engine identity, or uncertain inference as
+   represented fact.
+2. **Action and transition semantics:** changes that merge legal, proposed,
+   admitted, or accepted actions; alter semantic identity or rebinding;
+   confuse payload, routing, display, or legality; or silently consume a
+   genuine player decision without a reachable witness and focused regression.
+3. **Evidence and outcomes:** code that counts rejection, timeout, unsupported
+   representation, exclusion, stopped execution, or a heuristic settlement as
+   a terminal payoff or observed game result, or detaches an artifact from its
+   MTGallium revision, Argentum revision, material configuration, or
+   research-run identity.
+
 ## Source and evidence workflow
 
 Treat substantial work as:
