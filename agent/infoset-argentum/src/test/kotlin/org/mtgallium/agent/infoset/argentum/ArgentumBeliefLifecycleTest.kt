@@ -108,8 +108,8 @@ class ArgentumBeliefLifecycleTest {
             actorViewer = viewer,
             beforeState = state,
             afterState = state,
-            before = projections(state, fixture.environment.playerIds),
-            after = projections(state, fixture.environment.playerIds),
+            before = projections(state, fixture.environment.playerIds, fixture.registry),
+            after = projections(state, fixture.environment.playerIds, fixture.registry),
         )
         val world = fixture.world.withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -159,8 +159,8 @@ class ArgentumBeliefLifecycleTest {
             actorViewer = viewer,
             beforeState = environment.state,
             afterState = environment.state,
-            before = projections(environment.state, environment.playerIds),
-            after = projections(environment.state, environment.playerIds),
+            before = projections(environment.state, environment.playerIds, registry),
+            after = projections(environment.state, environment.playerIds, registry),
         )
         val decks = mapOf("p0" to uniqueDeck, "p1" to uniqueDeck)
         val world = ArgentumSearchWorld.create(
@@ -168,6 +168,7 @@ class ArgentumBeliefLifecycleTest {
             "belief-complete-hand",
             1_107L,
             cardRegistry = registry,
+            effectiveSetupSeed = 1_107L,
             knownDecks = decks,
         ).withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -226,8 +227,8 @@ class ArgentumBeliefLifecycleTest {
             actorViewer = viewer,
             beforeState = state,
             afterState = state,
-            before = projections(state, fixture.environment.playerIds),
-            after = projections(state, fixture.environment.playerIds),
+            before = projections(state, fixture.environment.playerIds, fixture.registry),
+            after = projections(state, fixture.environment.playerIds, fixture.registry),
         )
         val world = fixture.world.withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -276,8 +277,8 @@ class ArgentumBeliefLifecycleTest {
             actorViewer = viewer,
             beforeState = beforeState,
             afterState = beforeState,
-            before = projections(beforeState, fixture.environment.playerIds),
-            after = projections(beforeState, fixture.environment.playerIds),
+            before = projections(beforeState, fixture.environment.playerIds, fixture.registry),
+            after = projections(beforeState, fixture.environment.playerIds, fixture.registry),
         )
         history.recordEngineEvents(
             engineEvents = listOf(
@@ -292,8 +293,8 @@ class ArgentumBeliefLifecycleTest {
             actorViewer = viewer,
             beforeState = beforeState,
             afterState = afterState,
-            before = projections(beforeState, fixture.environment.playerIds),
-            after = projections(afterState, fixture.environment.playerIds),
+            before = projections(beforeState, fixture.environment.playerIds, fixture.registry),
+            after = projections(afterState, fixture.environment.playerIds, fixture.registry),
         )
         fixture.environment.restore(afterState, fixture.environment.playerIds, fixture.environment.stepCount)
         val world = ArgentumSearchWorld.create(
@@ -301,6 +302,7 @@ class ArgentumBeliefLifecycleTest {
             "belief-lifecycle-object",
             77L,
             cardRegistry = fixture.registry,
+            effectiveSetupSeed = 1_103L,
             knownDecks = knownDecks,
         ).withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -349,8 +351,8 @@ class ArgentumBeliefLifecycleTest {
             actorViewer = viewer,
             beforeState = beforeState,
             afterState = afterState,
-            before = projections(beforeState, fixture.environment.playerIds),
-            after = projections(afterState, fixture.environment.playerIds),
+            before = projections(beforeState, fixture.environment.playerIds, fixture.registry),
+            after = projections(afterState, fixture.environment.playerIds, fixture.registry),
         )
         fixture.environment.restore(afterState, fixture.environment.playerIds, fixture.environment.stepCount)
         val world = ArgentumSearchWorld.create(
@@ -358,6 +360,7 @@ class ArgentumBeliefLifecycleTest {
             "belief-lifecycle-stack",
             78L,
             cardRegistry = fixture.registry,
+            effectiveSetupSeed = 1_105L,
             knownDecks = knownDecks,
         ).withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -469,13 +472,18 @@ class ArgentumBeliefLifecycleTest {
                 "belief-lifecycle-$seed",
                 seed,
                 cardRegistry = registry,
+                effectiveSetupSeed = seed,
                 knownDecks = knownDecks,
             ),
         )
     }
 
-    private fun projections(state: GameState, players: List<EntityId>) = players.associateWith { viewer ->
-        val observation = ObservationBuilder().build(state, viewer, emptyList()).observation as TrainingObservation
+    private fun projections(
+        state: GameState,
+        players: List<EntityId>,
+        cardRegistry: CardRegistry,
+    ) = players.associateWith { viewer ->
+        val observation = ObservationBuilder(cardRegistry).build(state, viewer, emptyList()).observation as TrainingObservation
         SafeObservationProjector().project(observation)
     }
 

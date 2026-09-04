@@ -15,7 +15,6 @@ import com.wingedsheep.engine.state.components.identity.RevealedToComponent
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.gym.contract.ObservationBuilder
 import com.wingedsheep.gym.contract.TrainingObservation
-import com.wingedsheep.gym.contract.sourceEntityIdOrNull
 import com.wingedsheep.mtg.sets.definitions.ons.cards.FutureSight
 import com.wingedsheep.mtg.sets.definitions.por.PortalSet
 import com.wingedsheep.sdk.core.Format
@@ -52,14 +51,14 @@ class TypedVisibilityProductionAdapterTest {
             as TrainingObservation
         val safe = SafeObservationProjector().project(observation).observation
         val library = safe.zones.single { it.ownerId == "p0" && it.zone == Zone.LIBRARY.name }
-        val expansion = UnifiedSemanticExpander().expand(environment, proposalSeed = 701L)
+        val expansion = UnifiedSemanticExpander().expand(environment, registry, proposalSeed = 701L)
 
         assertTrue(library.hidden)
         assertEquals(1, library.cards.size)
         assertEquals(state.getEntity(top)?.get<CardComponent>()?.name, library.cards.single().name)
         assertNotEquals(top.value, library.cards.single().objectRef)
         assertTrue(expansion.engineChoices.values.any { choice ->
-            (choice as? ArgentumEngineChoice.Action)?.value?.sourceEntityIdOrNull() == top
+            (choice as? ArgentumEngineChoice.Action)?.value?.policySourceEntityIdOrNull() == top
         })
     }
 
@@ -83,12 +82,12 @@ class TypedVisibilityProductionAdapterTest {
         val command = SafeObservationProjector().project(observation).observation.zones.single {
             it.ownerId == "p0" && it.zone == Zone.COMMAND.name
         }
-        val expansion = UnifiedSemanticExpander().expand(environment, proposalSeed = 702L)
+        val expansion = UnifiedSemanticExpander().expand(environment, registry, proposalSeed = 702L)
 
         assertFalse(command.hidden)
         assertTrue(command.cards.any { it.name == "Raging Goblin" })
         assertTrue(expansion.engineChoices.values.any { choice ->
-            (choice as? ArgentumEngineChoice.Action)?.value?.sourceEntityIdOrNull() == commander
+            (choice as? ArgentumEngineChoice.Action)?.value?.policySourceEntityIdOrNull() == commander
         })
     }
 
@@ -139,6 +138,7 @@ class TypedVisibilityProductionAdapterTest {
         val projection = SafeObservationProjector().project(observation)
         val expansion = UnifiedSemanticExpander().expandPrepared(
             environment = environment,
+            cardRegistry = registry,
             proposalSeed = 703L,
             responseLimit = 2_048,
             preparedInput = PreparedSemanticExpansionInput(
@@ -152,7 +152,7 @@ class TypedVisibilityProductionAdapterTest {
         assertFalse(observation.legalActions.any { it.sourceEntityId == hidden })
         assertTrue(expansion.rejectedCandidates >= 1)
         assertFalse(expansion.engineChoices.values.any { choice ->
-            (choice as? ArgentumEngineChoice.Action)?.value?.sourceEntityIdOrNull() == hidden
+            (choice as? ArgentumEngineChoice.Action)?.value?.policySourceEntityIdOrNull() == hidden
         })
     }
 
@@ -195,7 +195,7 @@ class TypedVisibilityProductionAdapterTest {
                 environment.state.step == Step.PRECOMBAT_MAIN &&
                 environment.state.priorityPlayerId == environment.playerIds[0]
             ) return
-            environment.stepRaw(environment.legalActions().first { it.action is PassPriority }.action)
+            environment.stepExactlyOne(environment.legalActions().first { it.action is PassPriority }.action)
         }
         error("Did not reach the starting player's precombat main phase")
     }

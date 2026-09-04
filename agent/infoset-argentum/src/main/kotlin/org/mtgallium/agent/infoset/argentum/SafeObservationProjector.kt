@@ -211,7 +211,11 @@ class SafeObservationProjector {
         )
     }
 
-    private fun projectChoice(spec: DecisionChoiceSpec, refs: SafeReferenceMap): PolicyDecisionChoiceSpec {
+    /**
+     * Projects the MTGallium-owned chooser contract after its typed references have been admitted.
+     * The caller remains responsible for admitting only the live chooser-authorized contract.
+     */
+    internal fun projectChoice(spec: DecisionChoiceSpec, refs: SafeReferenceMap): PolicyDecisionChoiceSpec {
         val full = refs.maskChoiceSpecJson(spec)
         return when (spec) {
             is TargetsChoiceSpec -> PolicyDecisionChoiceSpec.Targets(

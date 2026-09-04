@@ -152,7 +152,7 @@ class RuntimeSemanticChoiceIdentityTest {
     fun `every current policy card runtime fact splits otherwise identical semantic references`() {
         val env = environment()
         val viewer = env.playerIds[0]
-        val observation = ObservationBuilder(env.cardRegistry).build(env.state, viewer, env.legalActions())
+        val observation = ObservationBuilder(registry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val identical = observation.zones.flatMap { it.cards }
             .filter { it.ownerId == viewer && it.name == "Mountain" }
@@ -285,6 +285,7 @@ class RuntimeSemanticChoiceIdentityTest {
             id,
             23_023L,
             cardRegistry = registry,
+            effectiveSetupSeed = 23_023L,
             knownDecks = knownDecks,
         )
     }

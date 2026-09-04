@@ -21,30 +21,8 @@ import com.wingedsheep.engine.core.TargetRequirementInfo
 import com.wingedsheep.engine.core.WaterbendPermanentChoice
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.gym.GameEnvironment
-import com.wingedsheep.gym.contract.BatchYesNoChoiceSpec
-import com.wingedsheep.gym.contract.BudgetModesChoiceSpec
-import com.wingedsheep.gym.contract.CardsChoiceSpec
-import com.wingedsheep.gym.contract.ColorsChoiceSpec
-import com.wingedsheep.gym.contract.CombatResolutionChoiceSpec
-import com.wingedsheep.gym.contract.DamageAssignmentChoiceSpec
-import com.wingedsheep.gym.contract.DecisionChoiceSpec
-import com.wingedsheep.gym.contract.DistributionChoiceSpec
-import com.wingedsheep.gym.contract.LibraryReorderChoiceSpec
-import com.wingedsheep.gym.contract.LibrarySearchChoiceSpec
-import com.wingedsheep.gym.contract.ManaSourceChoice
-import com.wingedsheep.gym.contract.ManaSourcesChoiceSpec
-import com.wingedsheep.gym.contract.ModesChoiceSpec
-import com.wingedsheep.gym.contract.NumberChoiceSpec
 import com.wingedsheep.gym.contract.ObservationBuilder
-import com.wingedsheep.gym.contract.OptionsChoiceSpec
-import com.wingedsheep.gym.contract.OrderChoiceSpec
-import com.wingedsheep.gym.contract.PendingDecisionKind
-import com.wingedsheep.gym.contract.PendingDecisionView
-import com.wingedsheep.gym.contract.PilesChoiceSpec
-import com.wingedsheep.gym.contract.ReplacementChoiceSpec
-import com.wingedsheep.gym.contract.TargetsChoiceSpec
 import com.wingedsheep.gym.contract.TrainingObservation
-import com.wingedsheep.gym.contract.YesNoChoiceSpec
 import com.wingedsheep.mtg.sets.definitions.por.PortalSet
 import com.wingedsheep.sdk.core.Color
 import com.wingedsheep.sdk.model.Deck
@@ -64,18 +42,18 @@ import org.mtgallium.agent.infoset.core.PolicyJson
 
 class TypedDecisionReferenceProjectionTest {
     @Test
-    fun `all eighteen pending-decision schemas admit only their typed entity positions`() {
+    fun `all eighteen local decision schemas admit only their typed entity positions`() {
         val (base, actor) = observationWithMaliciousVisibleId()
         val hidden = EntityId("hidden-choice-reference")
         val info = SearchCardInfo("Known choice", "{1}", "Creature")
         val metadata = OptionMetadata(id = "edges", description = "edges", iconKey = "edges")
         val specs = listOf(
-            PendingDecisionKind.CHOOSE_TARGETS to TargetsChoiceSpec(
+            TargetsChoiceSpec(
                 listOf(TargetRequirementInfo(0, "edges")),
                 mapOf(0 to listOf(hidden)),
                 canCancel = true,
             ),
-            PendingDecisionKind.SELECT_CARDS to CardsChoiceSpec(
+            CardsChoiceSpec(
                 options = listOf(hidden),
                 minSelections = 0,
                 maxSelections = 1,
@@ -88,40 +66,40 @@ class TypedDecisionReferenceProjectionTest {
                     ConditionalSelectionMinimum(1, 1, listOf(hidden), description = "edges")
                 ),
             ),
-            PendingDecisionKind.YES_NO to YesNoChoiceSpec("edges", "No", "edges"),
-            PendingDecisionKind.BATCH_YES_NO to BatchYesNoChoiceSpec(2, "edges", "No"),
-            PendingDecisionKind.CHOOSE_MODE to ModesChoiceSpec(
+            YesNoChoiceSpec("edges", "No", "edges"),
+            BatchYesNoChoiceSpec(2, "edges", "No"),
+            ModesChoiceSpec(
                 listOf(ModeOption(0, "edges")),
                 minModes = 1,
                 maxModes = 1,
             ),
-            PendingDecisionKind.CHOOSE_COLOR to ColorsChoiceSpec(listOf(Color.RED)),
-            PendingDecisionKind.CHOOSE_NUMBER to NumberChoiceSpec(0, 3),
-            PendingDecisionKind.DISTRIBUTE to DistributionChoiceSpec(
+            ColorsChoiceSpec(listOf(Color.RED)),
+            NumberChoiceSpec(0, 3),
+            DistributionChoiceSpec(
                 2,
                 listOf(hidden),
                 0,
                 mapOf(hidden to 2),
                 false,
             ),
-            PendingDecisionKind.ORDER_OBJECTS to OrderChoiceSpec(
+            OrderChoiceSpec(
                 listOf(hidden),
                 mapOf(hidden to info),
             ),
-            PendingDecisionKind.SPLIT_PILES to PilesChoiceSpec(
+            PilesChoiceSpec(
                 listOf(hidden),
                 2,
                 listOf("edges", "Other"),
                 mapOf(hidden to info),
             ),
-            PendingDecisionKind.CHOOSE_OPTION to OptionsChoiceSpec(
+            OptionsChoiceSpec(
                 options = listOf("edges"),
                 defaultSearch = "edges",
                 optionCardIds = mapOf(0 to listOf(hidden)),
                 optionMetadata = listOf(metadata),
                 canCancel = true,
             ),
-            PendingDecisionKind.CHOOSE_REPLACEMENT to ReplacementChoiceSpec(
+            ReplacementChoiceSpec(
                 fromOptions = listOf("edges"),
                 toOptions = listOf("Other"),
                 fromMetadata = listOf(metadata),
@@ -129,18 +107,18 @@ class TypedDecisionReferenceProjectionTest {
                 allowedToByFrom = listOf(listOf(0)),
                 defaultFromIndex = 0,
             ),
-            PendingDecisionKind.SEARCH_LIBRARY to LibrarySearchChoiceSpec(
+            LibrarySearchChoiceSpec(
                 listOf(hidden),
                 0,
                 1,
                 mapOf(hidden to info),
                 "edges",
             ),
-            PendingDecisionKind.REORDER_LIBRARY to LibraryReorderChoiceSpec(
+            LibraryReorderChoiceSpec(
                 listOf(hidden),
                 mapOf(hidden to info),
             ),
-            PendingDecisionKind.ASSIGN_DAMAGE to DamageAssignmentChoiceSpec(
+            DamageAssignmentChoiceSpec(
                 hidden,
                 2,
                 listOf(hidden),
@@ -150,8 +128,8 @@ class TypedDecisionReferenceProjectionTest {
                 hasTrample = true,
                 hasDeathtouch = false,
             ),
-            PendingDecisionKind.COMBAT_RESOLUTION to combatSpec(hidden, actor),
-            PendingDecisionKind.SELECT_MANA_SOURCES to ManaSourcesChoiceSpec(
+            combatSpec(hidden, actor),
+            ManaSourcesChoiceSpec(
                 availableSources = listOf(
                     ManaSourceChoice(hidden, "edges", listOf(Color.RED), false, false, false)
                 ),
@@ -160,17 +138,16 @@ class TypedDecisionReferenceProjectionTest {
                 canDecline = true,
                 waterbendPermanents = listOf(WaterbendPermanentChoice(hidden, "edges", true)),
             ),
-            PendingDecisionKind.BUDGET_MODAL to BudgetModesChoiceSpec(
+            BudgetModesChoiceSpec(
                 3,
                 listOf(BudgetModeOption(1, "edges")),
             ),
         )
 
-        val projectedTypes = specs.map { (kind, spec) ->
-            val projected = project(base, actor, kind, spec)
-            val choice = assertNotNull(projected.pendingDecision?.choiceSpec)
+        val projectedTypes = specs.map { spec ->
+            val choice = project(base, spec)
             val encoded = PolicyJson.format.encodeToString(PolicyDecisionChoiceSpec.serializer(), choice)
-            assertFalse("hidden-choice-reference" in encoded, "raw typed reference leaked for $kind")
+            assertFalse("hidden-choice-reference" in encoded, "raw typed reference leaked for ${spec::class.simpleName}")
             choice::class.simpleName
         }
 
@@ -184,8 +161,7 @@ class TypedDecisionReferenceProjectionTest {
         val hidden = EntityId("hidden-choice-reference")
 
         val combat = assertIs<PolicyDecisionChoiceSpec.CombatResolution>(
-            project(base, actor, PendingDecisionKind.COMBAT_RESOLUTION, combatSpec(hidden, actor))
-                .pendingDecision?.choiceSpec
+            project(base, combatSpec(hidden, actor))
         ).contract
         assertNotNull(combat["edges"])
         val combatEdge = combat.getValue("edges").jsonArray.single().jsonObject
@@ -195,8 +171,6 @@ class TypedDecisionReferenceProjectionTest {
         val mana = assertIs<PolicyDecisionChoiceSpec.ManaSources>(
             project(
                 base,
-                actor,
-                PendingDecisionKind.SELECT_MANA_SOURCES,
                 ManaSourcesChoiceSpec(
                     listOf(ManaSourceChoice(hidden, "edges", listOf(Color.RED), false, false, false)),
                     "edges",
@@ -204,7 +178,7 @@ class TypedDecisionReferenceProjectionTest {
                     false,
                     listOf(WaterbendPermanentChoice(hidden, "edges", true)),
                 ),
-            ).pendingDecision?.choiceSpec
+            )
         ).contract
         val manaSource = mana.getValue("availableSources").jsonArray.single().jsonObject
         assertEquals("edges", manaSource.getValue("name").jsonPrimitive.content)
@@ -213,10 +187,8 @@ class TypedDecisionReferenceProjectionTest {
         val options = assertIs<PolicyDecisionChoiceSpec.Options>(
             project(
                 base,
-                actor,
-                PendingDecisionKind.CHOOSE_OPTION,
                 OptionsChoiceSpec(listOf("edges"), "edges", mapOf(0 to listOf(hidden)), emptyList(), false),
-            ).pendingDecision?.choiceSpec
+            )
         )
         assertEquals(listOf("edges"), options.options)
         assertEquals("edges", options.defaultSearch)
@@ -229,7 +201,6 @@ class TypedDecisionReferenceProjectionTest {
         val combatPrepared = prepared(
             base,
             actor,
-            PendingDecisionKind.COMBAT_RESOLUTION,
             combatSpec(hidden, actor),
         )
         val combatBody = UnifiedSemanticExpander().encodePreparedChoice(
@@ -254,7 +225,6 @@ class TypedDecisionReferenceProjectionTest {
         val manaPrepared = prepared(
             base,
             actor,
-            PendingDecisionKind.SELECT_MANA_SOURCES,
             ManaSourcesChoiceSpec(
                 listOf(ManaSourceChoice(hidden, "edges", listOf(Color.RED), false, false, false)),
                 "edges",
@@ -297,31 +267,24 @@ class TypedDecisionReferenceProjectionTest {
 
     private fun project(
         base: TrainingObservation,
-        actor: EntityId,
-        kind: PendingDecisionKind,
         choice: DecisionChoiceSpec,
-    ) = prepared(base, actor, kind, choice).projection.observation
+    ): PolicyDecisionChoiceSpec {
+        val refs = SafeReferenceMap(base).also { it.admitAuthorizedChoiceReferences(choice) }
+        return SafeObservationProjector().projectChoice(choice, refs)
+    }
 
     private fun prepared(
         base: TrainingObservation,
         actor: EntityId,
-        kind: PendingDecisionKind,
         choice: DecisionChoiceSpec,
     ): PreparedSemanticExpansionInput {
-        val observation = base.copy(
-            pendingDecision = PendingDecisionView(
-                decisionId = "routing",
-                kind = kind,
-                playerId = actor,
-                prompt = "edges",
-                choiceSpec = choice,
-            ),
-        )
+        val visible = SafeObservationProjector().project(base)
+        val references = SafeReferenceMap(base).also { it.admitAuthorizedChoiceReferences(choice) }
         return PreparedSemanticExpansionInput(
             actor = actor,
             legalActions = emptyList(),
-            observation = observation,
-            projection = SafeObservationProjector().project(observation),
+            observation = base,
+            projection = SafeObservationProjection(visible.observation, references),
         )
     }
 

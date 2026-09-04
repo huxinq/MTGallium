@@ -25,9 +25,6 @@ import com.wingedsheep.gym.contract.ObservationBuilder
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.gym.contract.StackItemKind
 import com.wingedsheep.gym.contract.StackItemView
-import com.wingedsheep.gym.contract.CombatView
-import com.wingedsheep.gym.contract.AttackerView
-import com.wingedsheep.gym.contract.BlockerView
 import com.wingedsheep.mtg.sets.definitions.por.PortalSet
 import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.sdk.model.Deck
@@ -52,13 +49,18 @@ import org.mtgallium.agent.infoset.core.SemanticChoiceDisplay
 import org.mtgallium.agent.infoset.core.SemanticChoiceKind
 
 class SafeObservationProjectorTest {
+    private val cardRegistry = CardRegistry().apply {
+        register(PortalSet.cards)
+        register(PortalSet.basicLands)
+    }
+
     @Test
     fun `incremental pure-priority projection is byte-identical to full projection`() {
         val env = environment()
         val viewer = env.playerIds[0]
         val next = env.playerIds[1]
         val aliases = env.playerIds.mapIndexed { index, id -> id to "p$index" }.toMap()
-        val before = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val before = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val after = before.copy(
             priorityPlayerId = next,
@@ -82,7 +84,7 @@ class SafeObservationProjectorTest {
         val env = environment()
         val viewer = env.playerIds[0]
         val discardingPlayer = env.playerIds[1]
-        val gym = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val gym = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val projection = SafeObservationProjector().project(gym)
 
@@ -113,21 +115,21 @@ class SafeObservationProjectorTest {
         val env = environment()
         val viewer = env.playerIds[0]
         val opponent = env.playerIds[1]
-        val original = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val original = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val visibleCards = original.zones.flatMap { it.cards }
         val attacker = visibleCards[0].entityId
         val blocker = visibleCards[1].entityId
-        val enriched = original.copy(
-            players = original.players.map { it.copy(speed = if (it.id == viewer) 2 else 0) },
-            combat = CombatView(
+        val runtime = ArgentumPolicyRuntimeProjection(
+            players = mapOf(viewer to ArgentumPolicyPlayerRuntime(speed = 2)),
+            combat = ArgentumPolicyCombatRuntime(
                 attackingPlayerId = viewer,
-                attackers = listOf(AttackerView(attacker, opponent, listOf(blocker))),
-                blockers = listOf(BlockerView(blocker, listOf(attacker))),
+                attackers = listOf(ArgentumPolicyAttackerRuntime(attacker, opponent, listOf(blocker))),
+                blockers = listOf(ArgentumPolicyBlockerRuntime(blocker, listOf(attacker))),
             ),
         )
 
-        val safe = SafeObservationProjector().project(enriched).observation
+        val safe = SafeObservationProjector().project(original, null, runtime).observation
 
         assertEquals(2, safe.players.single { it.playerId == "p0" }.speed)
         val combat = assertNotNull(safe.combat)
@@ -141,7 +143,7 @@ class SafeObservationProjectorTest {
     fun `a public stack target that is no longer visible receives only a structural reference`() {
         val env = environment()
         val viewer = env.playerIds[0]
-        val original = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val original = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val departedTarget = EntityId.generate()
         val stackObject = EntityId.generate()
@@ -170,7 +172,7 @@ class SafeObservationProjectorTest {
     fun `countered abilities are retained as public causal history`() {
         val env = environment()
         val viewer = env.playerIds[0]
-        val gym = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val gym = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val projection = SafeObservationProjector().project(gym)
         val sourceId = env.state.getHand(viewer).first()
@@ -210,7 +212,7 @@ class SafeObservationProjectorTest {
         val actor = env.playerIds[0]
         val opponent = env.playerIds[1]
         val projections = env.playerIds.associateWith { viewer ->
-            val observation = ObservationBuilder().build(env.state, viewer, emptyList())
+            val observation = ObservationBuilder(cardRegistry).build(env.state, viewer, emptyList())
                 .observation as TrainingObservation
             SafeObservationProjector().project(observation)
         }
@@ -250,7 +252,7 @@ class SafeObservationProjectorTest {
             .get<com.wingedsheep.engine.state.components.identity.CardComponent>()!!
         val projections = env.playerIds.associateWith { perspective ->
             SafeObservationProjector().project(
-                ObservationBuilder().build(env.state, perspective, emptyList()).observation as TrainingObservation,
+                ObservationBuilder(cardRegistry).build(env.state, perspective, emptyList()).observation as TrainingObservation,
             )
         }
         val history = PerspectiveHistory(env.playerIds)
@@ -304,7 +306,7 @@ class SafeObservationProjectorTest {
         val opponent = env.playerIds[1]
         val hiddenCard = env.state.getLibrary(opponent).first()
         val projection = SafeObservationProjector().project(
-            ObservationBuilder().build(env.state, viewer, emptyList()).observation as TrainingObservation,
+            ObservationBuilder(cardRegistry).build(env.state, viewer, emptyList()).observation as TrainingObservation,
         )
 
         val projected = PerspectiveEventProjector.project(
@@ -337,7 +339,7 @@ class SafeObservationProjectorTest {
             )
         }
         val projection = SafeObservationProjector().project(
-            ObservationBuilder().build(revealedState, viewer, emptyList()).observation as TrainingObservation,
+            ObservationBuilder(cardRegistry).build(revealedState, viewer, emptyList()).observation as TrainingObservation,
         )
 
         val projected = PerspectiveEventProjector.project(
@@ -365,7 +367,7 @@ class SafeObservationProjectorTest {
         val card = env.state.getLibrary(viewer).first()
         val projections = env.playerIds.associateWith { player ->
             SafeObservationProjector().project(
-                ObservationBuilder().build(env.state, player, emptyList()).observation as TrainingObservation,
+                ObservationBuilder(cardRegistry).build(env.state, player, emptyList()).observation as TrainingObservation,
             )
         }
         val history = PerspectiveHistory(env.playerIds)
@@ -416,7 +418,7 @@ class SafeObservationProjectorTest {
         ).name
         fun projected(state: com.wingedsheep.engine.state.GameState) = env.playerIds.associateWith { player ->
             SafeObservationProjector().project(
-                ObservationBuilder().build(state, player, emptyList()).observation as TrainingObservation,
+                ObservationBuilder(cardRegistry).build(state, player, emptyList()).observation as TrainingObservation,
             )
         }
         val beforeProjection = projected(env.state)
@@ -485,7 +487,7 @@ class SafeObservationProjectorTest {
         val afterState = beforeState.removeEntity(objectId)
         fun projected(state: com.wingedsheep.engine.state.GameState) = env.playerIds.associateWith { player ->
             SafeObservationProjector().project(
-                ObservationBuilder().build(state, player, emptyList()).observation as TrainingObservation,
+                ObservationBuilder(cardRegistry).build(state, player, emptyList()).observation as TrainingObservation,
             )
         }
         val history = PerspectiveHistory(env.playerIds)
@@ -531,11 +533,7 @@ class SafeObservationProjectorTest {
     }
 
     private fun environment(): GameEnvironment {
-        val registry = CardRegistry().apply {
-            register(PortalSet.cards)
-            register(PortalSet.basicLands)
-        }
-        return GameEnvironment.create(registry).also { env ->
+        return GameEnvironment.create(cardRegistry).also { env ->
             env.reset(
                 GameConfig(
                     players = listOf(
@@ -555,7 +553,7 @@ class SafeObservationProjectorTest {
         val env = environment()
         val viewer = env.playerIds[0]
         val opponent = env.playerIds[1]
-        val original = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val original = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val permutedState = env.state.copy(
             zones = env.state.zones + mapOf(
@@ -564,7 +562,7 @@ class SafeObservationProjectorTest {
                 ZoneKey(viewer, Zone.LIBRARY) to env.state.getLibrary(viewer).reversed(),
             )
         )
-        val permuted = ObservationBuilder().build(permutedState, viewer, env.legalActions())
+        val permuted = ObservationBuilder(cardRegistry).build(permutedState, viewer, env.legalActions())
             .observation as TrainingObservation
 
         val projector = SafeObservationProjector()
@@ -581,14 +579,14 @@ class SafeObservationProjectorTest {
     fun `visible unordered-zone storage order does not rename policy objects`() {
         val env = environment()
         val viewer = env.playerIds[0]
-        val original = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val original = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val reorderedState = env.state.copy(
             zones = env.state.zones + (
                 ZoneKey(viewer, Zone.HAND) to env.state.getHand(viewer).reversed()
             ),
         )
-        val reordered = ObservationBuilder().build(reorderedState, viewer, env.legalActions())
+        val reordered = ObservationBuilder(cardRegistry).build(reorderedState, viewer, env.legalActions())
             .observation as TrainingObservation
 
         val projector = SafeObservationProjector()
@@ -615,13 +613,23 @@ class SafeObservationProjectorTest {
 
         for (decision in decisions) {
             val state = env.state.copy(pendingDecision = decision)
-            val unauthorized = ObservationBuilder().build(state, observer, emptyList())
+            val unauthorized = ObservationBuilder(cardRegistry).build(state, observer, emptyList())
                 .observation as TrainingObservation
-            val authorized = ObservationBuilder().build(state, chooser, emptyList())
+            val authorized = ObservationBuilder(cardRegistry).build(state, chooser, emptyList())
                 .observation as TrainingObservation
 
-            val hidden = SafeObservationProjector().project(unauthorized).observation.pendingDecision
-            val visible = SafeObservationProjector().project(authorized).observation.pendingDecision
+            val hidden = SafeObservationProjector().project(
+                unauthorized,
+                playerAliases = null,
+                runtime = ArgentumPolicyRuntimeProjection.EMPTY,
+                pendingDecision = decision,
+            ).observation.pendingDecision
+            val visible = SafeObservationProjector().project(
+                authorized,
+                playerAliases = null,
+                runtime = ArgentumPolicyRuntimeProjection.EMPTY,
+                pendingDecision = decision,
+            ).observation.pendingDecision
 
             assertFalse(assertNotNull(hidden).canRespond)
             assertNull(hidden.choiceSpec)
@@ -654,7 +662,7 @@ class SafeObservationProjectorTest {
     fun `raw runtime ids do not occur as visible object references`() {
         val env = environment()
         val viewer = env.playerIds[0]
-        val gym = ObservationBuilder().build(env.state, viewer, env.legalActions())
+        val gym = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
         val safe = SafeObservationProjector().project(gym).observation
         val rawVisible = gym.zones.flatMap { it.cards }.map { it.entityId.value }.toSet()
