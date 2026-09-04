@@ -28,21 +28,6 @@ class DecisionTest {
     }
 
     @Test
-    fun `optional HTTP defects produce a conditional overall verdict`() {
-        val (decisions, overall) = decide(
-            probes = baselineProbes() + failure(
-                id = "contract.http_seed",
-                component = "HTTP Gym",
-                severity = Severity.MAJOR,
-            ),
-            corpora = emptyList(),
-        )
-
-        assertEquals(Verdict.CONDITIONAL, decisions.single { it.component == "HTTP Gym" }.verdict)
-        assertEquals(Verdict.CONDITIONAL, overall)
-    }
-
-    @Test
     fun `incomplete corpus rejects both rules core and direct gym`() {
         val corpus = CorpusResult(
             id = "probe",

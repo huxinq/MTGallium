@@ -485,6 +485,7 @@ class BehavioralCloningAdmissionTest {
                 environment = environment,
                 gameId = gameId,
                 seedBase = 99L,
+                effectiveSetupSeed = 17L,
                 expander = UnifiedSemanticExpander(
                     actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
                 ),

@@ -1787,6 +1787,7 @@ internal class NeuralBehavioralCloningExperiment(
             environment = environment,
             gameId = gameId,
             seedBase = baseSeed xor 0x534d4f4b454e42L,
+            effectiveSetupSeed = baseSeed xor 0x4e42534d4f4b45L,
             expander = UnifiedSemanticExpander(actionSpaceProfile = profile.actionSpaceProfile),
             cardRegistry = registry,
             knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),

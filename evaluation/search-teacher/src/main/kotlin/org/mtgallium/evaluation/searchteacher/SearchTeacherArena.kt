@@ -522,6 +522,7 @@ internal class SearchTeacherArena(
             environment = environment,
             gameId = gameId,
             seedBase = baseSeed,
+            effectiveSetupSeed = gameSeed,
             expander = UnifiedSemanticExpander(actionSpaceProfile = actionSpaceProfile),
             cardRegistry = registry,
             knownDecks = knownDecks,
@@ -1345,7 +1346,7 @@ internal class SearchTeacherArena(
                         finalState = world.authoritativeStateForHost(),
                         complete = false,
                         winnerId = null,
-                        incompleteReason = com.wingedsheep.engine.replay.ReplayIncompleteReason.RECORDING_FAILURE,
+                        incompleteReason = org.mtgallium.evaluation.searchteacher.replay.ReplayIncompleteReason.RECORDING_FAILURE,
                     )
                 }.getOrElse {
                     writer.preservePartial()

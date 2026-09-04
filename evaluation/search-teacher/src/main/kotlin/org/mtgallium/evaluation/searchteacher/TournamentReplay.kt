@@ -193,6 +193,7 @@ internal class TournamentReplayVerifier(
             environment = environment,
             gameId = header.gameId,
             seedBase = header.baseSeed,
+            effectiveSetupSeed = header.gameSeed,
             expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
             cardRegistry = registry,
             knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),

@@ -3,8 +3,8 @@ package org.mtgallium.evaluation.searchteacher
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.registry.CardRegistry
-import com.wingedsheep.engine.replay.CanonicalReplayHeader
-import com.wingedsheep.engine.replay.CanonicalReplayTransition
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayHeader
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayTransition
 import com.wingedsheep.gym.GameEnvironment
 import java.nio.file.Files
 import java.nio.file.Path
@@ -263,6 +263,7 @@ internal fun reconstructReplayReviewWorld(
         environment = environment,
         gameId = gameId,
         seedBase = searchBaseSeed,
+        effectiveSetupSeed = gameSeed,
         expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
         cardRegistry = registry,
         knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),

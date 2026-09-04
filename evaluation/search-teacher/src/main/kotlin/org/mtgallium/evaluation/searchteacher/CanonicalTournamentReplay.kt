@@ -1,15 +1,13 @@
 package org.mtgallium.evaluation.searchteacher
 
-import com.wingedsheep.ai.engine.SimulationActionOrigin
-import com.wingedsheep.ai.engine.SimulationTraceStep
-import com.wingedsheep.engine.replay.CanonicalReplayHeader
-import com.wingedsheep.engine.replay.CanonicalReplayJson
-import com.wingedsheep.engine.replay.CanonicalReplayRecord
-import com.wingedsheep.engine.replay.CanonicalReplayRecorder
-import com.wingedsheep.engine.replay.CanonicalReplayReconstructor
-import com.wingedsheep.engine.replay.ReplayCompletionStatus
-import com.wingedsheep.engine.replay.ReplayIncompleteReason
-import com.wingedsheep.engine.replay.ReplayTransitionOrigin
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayHeader
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayJson
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayRecord
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayRecorder
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayReconstructor
+import org.mtgallium.evaluation.searchteacher.replay.ReplayCompletionStatus
+import org.mtgallium.evaluation.searchteacher.replay.ReplayIncompleteReason
+import org.mtgallium.evaluation.searchteacher.replay.ReplayTransitionOrigin
 import com.wingedsheep.engine.state.GameState
 import java.io.BufferedWriter
 import java.io.Closeable
@@ -30,6 +28,7 @@ import kotlinx.serialization.json.buildJsonObject
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionDiagnostic
 import org.mtgallium.agent.infoset.core.SemanticChoice
+import org.mtgallium.agent.infoset.argentum.ArgentumRawTransition
 
 /** New-write-only canonical replay path; TournamentReplay.kt remains the legacy decoder. */
 internal class CanonicalTournamentReplayWriter private constructor(
@@ -48,7 +47,7 @@ internal class CanonicalTournamentReplayWriter private constructor(
         decisionIndex: Int,
         semanticChoice: SemanticChoice,
         opponentPolicyDecision: OpponentPolicyDecisionDiagnostic?,
-        rawTransitions: List<SimulationTraceStep>,
+        rawTransitions: List<ArgentumRawTransition>,
     ) {
         require(rawTransitions.isNotEmpty()) { "A canonical replay choice needs at least one raw transition" }
         rawTransitions.forEachIndexed { rawIndex, raw ->
@@ -72,11 +71,7 @@ internal class CanonicalTournamentReplayWriter private constructor(
             } else JsonObject(emptyMap())
             appendRecord(
                 recorder.appendAction(
-                    origin = when (raw.origin) {
-                        SimulationActionOrigin.SUBMITTED -> ReplayTransitionOrigin.POLICY
-                        SimulationActionOrigin.AUTO_PASS -> ReplayTransitionOrigin.AUTO_PASS
-                        SimulationActionOrigin.AUTO_DECISION -> ReplayTransitionOrigin.AUTO_DECISION
-                    },
+                    origin = ReplayTransitionOrigin.POLICY,
                     action = raw.action,
                     accepted = raw.accepted,
                     rejectionReason = raw.rejectionReason,
@@ -191,7 +186,7 @@ internal object CanonicalTournamentReplayVerifier {
         )
     }.getOrElse { error ->
         val replayFrame = error.stackTrace.firstOrNull {
-            it.className.startsWith("com.wingedsheep.engine.replay.")
+            it.className.startsWith("org.mtgallium.evaluation.searchteacher.replay.")
         }
         ReplayVerificationResult(
             false,

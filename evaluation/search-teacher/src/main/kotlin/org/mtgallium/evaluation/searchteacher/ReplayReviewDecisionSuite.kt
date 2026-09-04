@@ -204,6 +204,7 @@ internal object ReplayReviewDecisionCatalog {
             environment = environment,
             gameId = case.source.gameId,
             seedBase = case.searchBaseSeed,
+            effectiveSetupSeed = case.gameSeed,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
             ),

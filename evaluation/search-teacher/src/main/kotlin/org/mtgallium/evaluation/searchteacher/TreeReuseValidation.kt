@@ -278,10 +278,10 @@ internal class TreeReuseValidationRunner(
             environment.step(pass.action)
         }
         check(playedLand) { "Could not reach the fast-profile singleton fixture" }
-        val exact = UnifiedSemanticExpander().expand(environment, seed).policy
+        val exact = UnifiedSemanticExpander().expand(environment, registry, seed).policy
         val fast = UnifiedSemanticExpander(
             actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-        ).expand(environment, seed).policy
+        ).expand(environment, registry, seed).policy
         val automatic = SearchTeacherAutomaticSelection.classify(fast)
         val semanticChoicePreserved = automatic == null && fast.candidates.singleOrNull() != null
         val passed = exact.candidates.any { it.operationFamily == SemanticOperationFamily.MANA_ABILITY } &&

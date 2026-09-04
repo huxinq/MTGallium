@@ -790,6 +790,7 @@ internal class Issue0024NeuralCapacityDiagnostic(
             environment = environment,
             gameId = gameId,
             seedBase = baseSeed xor 0x4e455552414cL,
+            effectiveSetupSeed = baseSeed xor 0x4930303234L,
             expander = UnifiedSemanticExpander(actionSpaceProfile = currentProfile.actionSpaceProfile),
             cardRegistry = registry,
             knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),

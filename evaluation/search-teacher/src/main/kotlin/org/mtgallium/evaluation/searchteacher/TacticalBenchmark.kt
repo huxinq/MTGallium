@@ -500,7 +500,6 @@ internal class TacticalScenarioFactory(
         var state = arrangePlayer(environment.state, playerIds[0], p0Hand, p0Battlefield, p0Life)
         state = arrangePlayer(state, playerIds[1], p1Hand, p1Battlefield, p1Life)
         state = state.copy(
-            initialSeed = case.rootSeed,
             phase = phase,
             step = step,
             activePlayerId = playerIds[0],
@@ -572,6 +571,7 @@ internal class TacticalScenarioFactory(
         environment = environment,
         gameId = gameId,
         seedBase = seed,
+        effectiveSetupSeed = seed,
         expander = UnifiedSemanticExpander(actionSpaceProfile = actionSpaceProfile),
         cardRegistry = registry,
         knownDecks = knownDecks,

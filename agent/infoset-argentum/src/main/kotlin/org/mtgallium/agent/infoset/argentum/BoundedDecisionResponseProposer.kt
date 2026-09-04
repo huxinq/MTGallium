@@ -49,7 +49,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /** A downstream proposal set; [isExhaustive] is true only after the source was fully enumerated. */
-internal data class StructuredResponseProposal(
+data class StructuredResponseProposal(
     val responses: List<DecisionResponse>,
     val isExhaustive: Boolean,
     val estimatedResponseCount: Long?,
@@ -64,7 +64,7 @@ internal data class StructuredResponseProposal(
  * from a deterministic traversal. Every proposal is checked by [DecisionValidators], and a
  * truncated source never claims completeness.
  */
-internal class BoundedDecisionResponseProposer(
+class BoundedDecisionResponseProposer(
     private val maxResponses: Int = 64,
     private val maxAttempts: Int = 2_048,
 ) {

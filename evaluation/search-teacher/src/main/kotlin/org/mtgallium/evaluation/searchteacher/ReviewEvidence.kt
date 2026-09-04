@@ -177,6 +177,7 @@ internal class ReviewEvidenceGenerator(
             environment = environment,
             gameId = source.header.gameId,
             seedBase = replaySeeds.searchBaseSeed,
+            effectiveSetupSeed = replaySeeds.gameSeed,
             expander = UnifiedSemanticExpander(actionSpaceProfile = source.header.actionSpaceProfile),
             cardRegistry = registry,
             knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),

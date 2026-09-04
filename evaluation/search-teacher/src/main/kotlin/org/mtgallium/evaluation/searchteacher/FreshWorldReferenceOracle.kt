@@ -392,6 +392,7 @@ private data class OracleFixture(
             environment = fork,
             gameId = "issue-0013-stage-a:$id",
             seedBase = ISSUE_0013_STAGE_A_SEED,
+            effectiveSetupSeed = ISSUE_0013_STAGE_A_SEED,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
             ),

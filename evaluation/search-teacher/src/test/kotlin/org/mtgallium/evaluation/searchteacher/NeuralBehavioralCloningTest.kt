@@ -482,6 +482,7 @@ class NeuralBehavioralCloningTest {
             environment = environment,
             gameId = "neural-bc-test",
             seedBase = 902L,
+            effectiveSetupSeed = 901L,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchTeacherArena.smokeProfile().actionSpaceProfile,
             ),

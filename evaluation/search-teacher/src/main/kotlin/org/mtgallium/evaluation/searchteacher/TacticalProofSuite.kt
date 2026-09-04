@@ -549,7 +549,6 @@ internal class TacticalProofScenarioFactory(
         val activeId = if (activePlayer == "p0") ids[0] else ids[1]
         val priorityId = if (priorityPlayer == "p0") ids[0] else ids[1]
         state = state.copy(
-            initialSeed = case.rootSeed,
             phase = phase,
             step = step,
             activePlayerId = activeId,
@@ -566,6 +565,7 @@ internal class TacticalProofScenarioFactory(
             environment = environment,
             gameId = "${case.id}-paired-hidden",
             seedBase = case.rootSeed,
+            effectiveSetupSeed = case.rootSeed,
             cardRegistry = registry,
             knownDecks = knownDecks,
         )

@@ -41,13 +41,13 @@ import com.wingedsheep.engine.core.YesNoResponse
 import com.wingedsheep.engine.handlers.actions.decision.DecisionValidators
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.registry.CardRegistry
-import com.wingedsheep.gym.trainer.defaults.BoundedStructuredDecisionExpander
 import com.wingedsheep.sdk.core.Color
 import com.wingedsheep.sdk.model.EntityId
 import java.time.Instant
 import kotlinx.serialization.Serializable
 import org.mtgallium.agent.infoset.argentum.ArgentumResolvedChoice
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
+import org.mtgallium.agent.infoset.argentum.BoundedDecisionResponseProposer
 import org.mtgallium.agent.infoset.core.PolicyExpansion
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
@@ -332,13 +332,14 @@ private data class M02DecisionFixture(
 )
 
 internal fun authoredDecisionProbes(): List<M02DecisionProbe> {
-    val expander = BoundedStructuredDecisionExpander(maxResponses = 4_096, maxAttempts = 4_096)
+    val expander = BoundedDecisionResponseProposer(maxResponses = 4_096, maxAttempts = 4_096)
     return decisionFixtures().map { fixture ->
-        val expansion = expander.expand(GameState(), fixture.decision)
-        val trivial = TrivialDecisions.responseFor(GameState(), fixture.decision)
+        val expansion = expander.propose(GameState(), fixture.decision)
+        val trivial = TrivialDecisions.responseFor(fixture.decision)
         val fastRollout = FastDecisionResponder().respond(
             GameState(),
             fixture.decision,
+            fixture.decision.playerId,
         )
         val declines = expansion.responses.count(::isCancelOrDecline)
         M02DecisionProbe(

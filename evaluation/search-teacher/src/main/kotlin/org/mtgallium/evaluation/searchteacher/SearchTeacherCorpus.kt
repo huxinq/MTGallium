@@ -271,6 +271,7 @@ internal class SearchTeacherCorpus(
             environment = environment,
             gameId = header.gameId,
             seedBase = replaySeeds.searchBaseSeed,
+            effectiveSetupSeed = replaySeeds.gameSeed,
             expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
             cardRegistry = registry,
             knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),

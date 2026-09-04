@@ -5,11 +5,11 @@ import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.core.TakeMulligan
-import com.wingedsheep.engine.replay.CanonicalReplayHeader
-import com.wingedsheep.engine.replay.CanonicalReplayJson
-import com.wingedsheep.engine.replay.CanonicalReplayRecord
-import com.wingedsheep.engine.replay.CanonicalReplayTerminal
-import com.wingedsheep.engine.replay.ReplayCompletionStatus
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayHeader
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayJson
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayRecord
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayTerminal
+import org.mtgallium.evaluation.searchteacher.replay.ReplayCompletionStatus
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.gym.GameEnvironment
 import java.nio.file.Files
@@ -89,6 +89,7 @@ class SearchTeacherEvaluationTest {
             environment = environment,
             gameId = "pregame-policy-owner",
             seedBase = 99L,
+            effectiveSetupSeed = 17L,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.RULES_EXACT_V1,
             ),
@@ -147,6 +148,7 @@ class SearchTeacherEvaluationTest {
             environment = environment,
             gameId = "sequential-double-mulligan",
             seedBase = 99L,
+            effectiveSetupSeed = 17L,
             cardRegistry = registry,
             knownDecks = knownDecks,
         )
@@ -402,12 +404,12 @@ class SearchTeacherEvaluationTest {
         assertEquals(
             (0 until game.decisions).toList(),
             replayLines.mapNotNull { record ->
-                (record as? com.wingedsheep.engine.replay.CanonicalReplayTransition)
+                (record as? org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayTransition)
                     ?.extensions?.get("mtgallium.decisionIndex")?.jsonPrimitive?.content?.toInt()
             },
         )
         val replayOpponentDecisions = replayLines.mapNotNull { record ->
-            (record as? com.wingedsheep.engine.replay.CanonicalReplayTransition)
+            (record as? org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayTransition)
                 ?.extensions?.get("mtgallium.opponentPolicyDecision")?.let { encoded ->
                     PolicyJson.format.decodeFromJsonElement(
                         OpponentPolicyDecisionDiagnostic.serializer(),

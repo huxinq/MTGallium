@@ -1,7 +1,7 @@
 package org.mtgallium.evaluation.searchteacher
 
-import com.wingedsheep.engine.replay.CanonicalReplayHeader
-import com.wingedsheep.engine.replay.CanonicalReplayTransition
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayHeader
+import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayTransition
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.Serializable

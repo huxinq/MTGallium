@@ -193,6 +193,7 @@ internal class PolicyBoundaryProfiler(
             environment,
             "policy-boundary-probe",
             1L,
+            effectiveSetupSeed = 1L,
             cardRegistry = registry,
             knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),
         )

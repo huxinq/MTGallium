@@ -741,12 +741,19 @@ internal class TacticalHorizonScenarioFactory(
         val activeId = if (activePlayer == "p0") ids[0] else ids[1]
         val priorityId = if (priorityPlayer == "p0") ids[0] else ids[1]
         state = state.copy(
-            initialSeed = case.rootSeed, phase = phase, step = step, activePlayerId = activeId,
+            phase = phase, step = step, activePlayerId = activeId,
             priorityPlayerId = priorityId, priorityPassedBy = emptySet(), stack = emptyList(),
             pendingDecision = null, continuationStack = emptyList(), winnerId = null, gameOver = false,
         )
         environment.restore(state, ids)
-        return ArgentumSearchWorld.create(environment, case.id, case.rootSeed, cardRegistry = registry, knownDecks = knownDecks)
+        return ArgentumSearchWorld.create(
+            environment,
+            case.id,
+            case.rootSeed,
+            effectiveSetupSeed = case.rootSeed,
+            cardRegistry = registry,
+            knownDecks = knownDecks,
+        )
     }
 
     private fun arrangePlayer(
