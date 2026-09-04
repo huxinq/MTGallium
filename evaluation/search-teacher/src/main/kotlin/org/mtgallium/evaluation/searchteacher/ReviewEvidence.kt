@@ -178,9 +178,8 @@ internal class ReviewEvidenceGenerator(
             gameId = source.header.gameId,
             seedBase = replaySeeds.searchBaseSeed,
             effectiveSetupSeed = replaySeeds.gameSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = source.header.actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+           expander = UnifiedSemanticExpander(actionSpaceProfile = source.header.actionSpaceProfile),
+           knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
         prefix.forEachIndexed { index, choice ->
             val before = debug[index * 2]

@@ -320,9 +320,8 @@ class UnifiedSemanticExpanderTest {
             seedBase = 41L,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-            ),
-            cardRegistry = registry,
-            effectiveSetupSeed = 117L,
+           ),
+           effectiveSetupSeed = 117L,
         )
         val observed = world.applyObservedAction(manaAction)
         assertTrue(observed.result.accepted)

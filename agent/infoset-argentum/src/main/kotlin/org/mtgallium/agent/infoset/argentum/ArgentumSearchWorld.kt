@@ -56,7 +56,6 @@ class ArgentumSearchWorld private constructor(
     private val gameId: String,
     private val seedBase: Long,
     private val effectiveSetupSeed: Long,
-    private val cardRegistry: CardRegistry,
     private val aliases: Map<EntityId, String>,
     private val history: PerspectiveHistory,
     private var decisionIndex: Int,
@@ -65,6 +64,8 @@ class ArgentumSearchWorld private constructor(
     private val knownDecks: Map<String, Map<String, Int>>,
     private val heuristicResolutionSink: (ArgentumHeuristicResolution) -> Unit,
 ) : ProgressiveSearchWorld, ReusableSearchWorld, PolicyAnnotatedSearchWorld, DerivedCacheTransferSearchWorld {
+    /** The engine environment owns the registry used for transition, projection, and materialization. */
+    private val cardRegistry: CardRegistry = environment.cardRegistry
     private val projector = SafeObservationProjector()
     private val exactObservedActionExpander = UnifiedSemanticExpander()
     private var cachedExpansion: CachedExpansion? = null
@@ -137,7 +138,6 @@ class ArgentumSearchWorld private constructor(
             gameId = gameId,
             seedBase = seedBase,
             effectiveSetupSeed = effectiveSetupSeed,
-            cardRegistry = cardRegistry,
             aliases = aliases,
             history = history.fork(),
             decisionIndex = decisionIndex,
@@ -494,7 +494,6 @@ class ArgentumSearchWorld private constructor(
         gameId = gameId,
         seedBase = seedBase,
         effectiveSetupSeed = effectiveSetupSeed,
-        cardRegistry = cardRegistry,
         aliases = aliases,
         history = history.fork(),
         decisionIndex = decisionIndex,
@@ -531,7 +530,6 @@ class ArgentumSearchWorld private constructor(
             gameId = gameId,
             seedBase = seedBase,
             effectiveSetupSeed = effectiveSetupSeed,
-            cardRegistry = cardRegistry,
             aliases = aliases,
             history = history.fork(),
             decisionIndex = decisionIndex,
@@ -806,7 +804,6 @@ class ArgentumSearchWorld private constructor(
             gameId = gameId,
             seedBase = seedBase,
             effectiveSetupSeed = effectiveSetupSeed,
-            cardRegistry = cardRegistry,
             aliases = aliases,
             history = history.fork(),
             decisionIndex = decisionIndex,
@@ -824,7 +821,6 @@ class ArgentumSearchWorld private constructor(
             gameId = gameId,
             seedBase = seedBase,
             effectiveSetupSeed = effectiveSetupSeed,
-            cardRegistry = cardRegistry,
             aliases = aliases,
             history = reconstructedHistory.fork(),
             decisionIndex = decisionIndex,
@@ -853,7 +849,6 @@ class ArgentumSearchWorld private constructor(
             environment: GameEnvironment,
             gameId: String,
             seedBase: Long,
-            cardRegistry: CardRegistry,
             effectiveSetupSeed: Long,
             expander: UnifiedSemanticExpander = UnifiedSemanticExpander(),
             knownDecks: Map<String, Map<String, Int>>? = null,
@@ -867,12 +862,11 @@ class ArgentumSearchWorld private constructor(
                 gameId = gameId,
                 seedBase = seedBase,
                 effectiveSetupSeed = effectiveSetupSeed,
-                cardRegistry = cardRegistry,
                 aliases = aliases,
                 history = PerspectiveHistory(environment.playerIds, projectionAuditSink),
                 decisionIndex = 0,
                 expander = expander,
-                heuristicAnnotator = knownDecks?.let { ArgentumHeuristicAnnotator(cardRegistry, it) },
+                heuristicAnnotator = knownDecks?.let { ArgentumHeuristicAnnotator(environment.cardRegistry, it) },
                 knownDecks = knownDecks.orEmpty(),
                 heuristicResolutionSink = heuristicResolutionSink,
             )

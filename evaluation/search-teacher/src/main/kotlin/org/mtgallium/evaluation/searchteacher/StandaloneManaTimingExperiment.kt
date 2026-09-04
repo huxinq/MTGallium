@@ -552,9 +552,8 @@ internal class StandaloneManaTimingExperiment(
         val session = runCatching {
             SearchTeacherPolicySession(
                 root = world,
-                viewer = prepared.audit.actor,
-                registry = registry,
-                knownDecks = knownDecks,
+               viewer = prepared.audit.actor,
+               knownDecks = knownDecks,
                 parameters = parameters(prepared.searchBaseSeed, profile),
                 opponentPolicy = opponentPolicy,
                 gameId = "$STANDALONE_MANA_TIMING_PROTOCOL:${prepared.unblinded.caseId}:$repetition",

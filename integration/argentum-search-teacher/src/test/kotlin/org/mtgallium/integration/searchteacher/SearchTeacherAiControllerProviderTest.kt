@@ -87,7 +87,6 @@ class SearchTeacherAiControllerProviderTest {
             environment.fork(),
             gameId = "second-seat-information-stability",
             seedBase = 20260825L,
-            cardRegistry = registry,
             effectiveSetupSeed = 818L,
             knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
@@ -170,10 +169,14 @@ class SearchTeacherAiControllerProviderTest {
             seatRoster = emptyList(),
         )
         val cases = listOf(
-            "REPLAY_HISTORY_UNAVAILABLE" to AiReplayHistory.Unavailable,
-            "REPLAY_HISTORY_TRUNCATED" to
+            Triple("REPLAY_HISTORY_UNAVAILABLE", AiReplayHistory.Unavailable, null),
+            Triple(
+                "REPLAY_HISTORY_TRUNCATED",
                 AiReplayHistory.TruncatedPrefix(setup, emptyList(), emptyList()),
-            "PERSISTENT_YIELD_HISTORY_UNSUPPORTED" to
+                0,
+            ),
+            Triple(
+                "PERSISTENT_YIELD_HISTORY_UNSUPPORTED",
                 AiReplayHistory.Complete(
                     setup,
                     emptyList(),
@@ -185,9 +188,11 @@ class SearchTeacherAiControllerProviderTest {
                         )
                     ),
                 ),
+                0,
+            ),
         )
 
-        for ((expectedCode, history) in cases) {
+        for ((expectedCode, history, expectedActionIndex) in cases) {
             val insights = mutableListOf<SearchTeacherInsight>()
             val controller = SearchTeacherAiControllerProvider(
                 registry,
@@ -215,6 +220,7 @@ class SearchTeacherAiControllerProviderTest {
 
             assertTrue(failure.message.orEmpty().startsWith(expectedCode))
             assertEquals(expectedCode, insights.single().failureCode)
+            assertEquals(expectedActionIndex, insights.single().actionIndex)
         }
     }
 

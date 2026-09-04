@@ -272,9 +272,8 @@ internal class SearchTeacherCorpus(
             gameId = header.gameId,
             seedBase = replaySeeds.searchBaseSeed,
             effectiveSetupSeed = replaySeeds.gameSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+           expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
+           knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
         debug.chunked(2).forEachIndexed { index, pair ->
             val choice = requireNotNull(pair[1].chosenChoice) { "privileged replay choice missing at $index" }

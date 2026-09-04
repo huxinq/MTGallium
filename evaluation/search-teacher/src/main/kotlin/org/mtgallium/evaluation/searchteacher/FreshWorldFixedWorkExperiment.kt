@@ -356,9 +356,8 @@ internal class FreshWorldFixedWorkExperiment(
         val parameters = parameters(frozen.searchBaseSeed)
         val session = SearchTeacherPolicySession(
             root = actual,
-            viewer = frozen.perspectivePlayerId,
-            registry = registry,
-            knownDecks = knownDecks,
+           viewer = frozen.perspectivePlayerId,
+           knownDecks = knownDecks,
             parameters = parameters,
             opponentPolicy = defaultMonoRedOpponentPolicy(),
             gameId = "${frozen.gameId}:$ISSUE_0013_FIXED_WORK_PROTOCOL:$repetition",

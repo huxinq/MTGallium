@@ -253,14 +253,12 @@ private class SearchTeacherController(
             gameId = gameSessionId,
             seedBase = config.baseSeed,
             expander = UnifiedSemanticExpander(actionSpaceProfile = config.actionSpaceProfile),
-            cardRegistry = registry,
             effectiveSetupSeed = setup.seed,
             knownDecks = knownDecks,
         )
         val runtime = SearchTeacherRuntimeSession(
             world = world,
             teacher = "p$teacherIndex",
-            registry = registry,
             knownDecks = knownDecks,
             gameId = gameSessionId,
             config = config,
@@ -328,6 +326,7 @@ private class SearchTeacherController(
         val snapshot = context.snapshot()
         val code = when {
             failure.message?.startsWith("UNSUPPORTED_INFORMATION_STATE") == true -> "UNSUPPORTED_INFORMATION_STATE"
+            failure.message?.startsWith("REPLAY_HISTORY_UNAVAILABLE") == true -> "REPLAY_HISTORY_UNAVAILABLE"
             failure.message?.startsWith("REPLAY_HISTORY_TRUNCATED") == true -> "REPLAY_HISTORY_TRUNCATED"
             failure.message?.startsWith("PERSISTENT_YIELD_HISTORY_UNSUPPORTED") == true ->
                 "PERSISTENT_YIELD_HISTORY_UNSUPPORTED"
@@ -337,7 +336,7 @@ private class SearchTeacherController(
         }
         publishInsight(
             SearchTeacherInsight(
-                actionIndex = snapshot?.replayHistory?.actions?.size ?: synchronized?.actions?.size ?: 0,
+                actionIndex = failureActionIndex(snapshot),
                 failureCode = code,
                 diagnostic = (failure.message ?: failure::class.simpleName ?: "Search Teacher failure").take(500),
                 authoritativeFingerprint = snapshot?.state?.let(ArgentumStateFingerprint::of),
@@ -345,6 +344,20 @@ private class SearchTeacherController(
             )
         )
         throw SearchTeacherControllerFailure("$code: ${failure.message}", failure)
+    }
+
+    /**
+     * Failure telemetry reports only a count whose provenance is explicit: a complete or
+     * truncated recorded prefix, or the already synchronized replay. An unavailable history has
+     * no action count, so it remains null rather than being presented as an inferred zero.
+     */
+    private fun failureActionIndex(
+        snapshot: com.wingedsheep.gameserver.ai.AiRuntimeSnapshot?,
+    ): Int? = when (val replay = snapshot?.replayHistory) {
+        null -> synchronized?.actions?.size
+        AiReplayHistory.Unavailable -> null
+        is AiReplayHistory.Complete -> replay.actions.size
+        is AiReplayHistory.TruncatedPrefix -> replay.actions.size
     }
 
     private fun <T> unsupported(kind: String): T = throw SearchTeacherControllerFailure(

@@ -572,9 +572,8 @@ internal class TacticalScenarioFactory(
         gameId = gameId,
         seedBase = seed,
         effectiveSetupSeed = seed,
-        expander = UnifiedSemanticExpander(actionSpaceProfile = actionSpaceProfile),
-        cardRegistry = registry,
-        knownDecks = knownDecks,
+       expander = UnifiedSemanticExpander(actionSpaceProfile = actionSpaceProfile),
+       knownDecks = knownDecks,
     )
 }
 

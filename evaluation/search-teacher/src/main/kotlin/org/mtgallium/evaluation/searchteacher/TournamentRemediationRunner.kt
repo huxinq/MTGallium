@@ -345,9 +345,8 @@ internal class TournamentRemediationRunner(
             gameId = header.gameId,
             seedBase = header.baseSeed,
             effectiveSetupSeed = header.gameSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+           expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
+           knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
         val opening = mutableListOf<PrivilegedOpeningDiagnostic>()
         val cleanup = mutableListOf<PrivilegedCleanupDiagnostic>()

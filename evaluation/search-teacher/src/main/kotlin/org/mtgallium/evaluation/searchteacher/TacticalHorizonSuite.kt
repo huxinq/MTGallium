@@ -750,9 +750,8 @@ internal class TacticalHorizonScenarioFactory(
             environment,
             case.id,
             case.rootSeed,
-            effectiveSetupSeed = case.rootSeed,
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           effectiveSetupSeed = case.rootSeed,
+           knownDecks = knownDecks,
         )
     }
 

@@ -159,9 +159,8 @@ class ReachableSemanticTrustTest {
         val world = ArgentumSearchWorld.create(
             env,
             "actual-warp-cast",
-            9_020L,
-            cardRegistry = registry,
-            effectiveSetupSeed = 9_018L,
+           9_020L,
+           effectiveSetupSeed = 9_018L,
             knownDecks = mapOf("p0" to deck, "p1" to deck),
         )
         val warp = world.expandChoices().candidates.single { choice ->
@@ -536,9 +535,8 @@ class ReachableSemanticTrustTest {
         val world = ArgentumSearchWorld.create(
             env,
             "known-mulligan-bottom",
-            9_021L,
-            cardRegistry = registry,
-            effectiveSetupSeed = 9_018L,
+           9_021L,
+           effectiveSetupSeed = 9_018L,
             knownDecks = knownDecks,
         )
 
@@ -635,9 +633,8 @@ class ReachableSemanticTrustTest {
         return ArgentumSearchWorld.create(
             environment,
             id,
-            9_018L,
-            cardRegistry = registry,
-            effectiveSetupSeed = 9_018L,
+           9_018L,
+           effectiveSetupSeed = 9_018L,
             knownDecks = knownDecks,
         )
     }

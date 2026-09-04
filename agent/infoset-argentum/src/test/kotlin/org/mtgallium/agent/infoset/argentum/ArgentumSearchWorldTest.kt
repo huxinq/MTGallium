@@ -74,7 +74,6 @@ class ArgentumSearchWorldTest {
     fun `pure priority transfer keeps typed history without redundant catch-all transition`() {
         val world = ArgentumSearchWorld.create(
             environment(), "pure-priority", 89L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val beforeP0 = world.informationState("p0").history.size
@@ -102,7 +101,6 @@ class ArgentumSearchWorldTest {
         val env = environment()
         val world = ArgentumSearchWorld.create(
             env, "game-a", 90L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val parentInfo = world.informationState("p0")
@@ -119,7 +117,6 @@ class ArgentumSearchWorldTest {
     fun `exact forks preserve cached expansion semantics and invalidate after a step`() {
         val world = ArgentumSearchWorld.create(
             environment(), "cached-fork", 91L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val parentExpansion = world.expandChoices()
@@ -138,7 +135,6 @@ class ArgentumSearchWorldTest {
         val env = environment()
         val world = ArgentumSearchWorld.create(
             env, "live-resolution", 92L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val before = world.authoritativeFingerprint()
@@ -194,7 +190,6 @@ class ArgentumSearchWorldTest {
             env,
             "response-window",
             94L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 813L,
             knownDecks = knownDecks,
         )
@@ -233,7 +228,6 @@ class ArgentumSearchWorldTest {
     fun `private reuse identity is equality only and always redacted`() {
         val world = ArgentumSearchWorld.create(
             environment(), "reuse-key", 93L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val fork = world.fork() as ArgentumSearchWorld
@@ -263,7 +257,6 @@ class ArgentumSearchWorldTest {
         }
         val world = ArgentumSearchWorld.create(
             env, "live-mulligan", 93L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 812L,
         )
         var tookMulligan = false
@@ -313,13 +306,11 @@ class ArgentumSearchWorldTest {
         val knownDecks = mapOf("p0" to deck, "p1" to deck)
         val leftRoot = ArgentumSearchWorld.create(
             originalEnv, "same-game", 4L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
             knownDecks = knownDecks,
         )
         val rightRoot = ArgentumSearchWorld.create(
             permutedEnv, "same-game", 4L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
             knownDecks = knownDecks,
         )
@@ -378,7 +369,6 @@ class ArgentumSearchWorldTest {
             env,
             "future-chance-boundary",
             101L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
             knownDecks = knownDecks,
         )
@@ -391,7 +381,6 @@ class ArgentumSearchWorldTest {
             env.fork(),
             "future-chance-referee",
             101L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
 
@@ -424,7 +413,6 @@ class ArgentumSearchWorldTest {
                 source,
                 "reproducible-future-chance",
                 202L,
-                cardRegistry = cardRegistry,
                 effectiveSetupSeed = 811L,
                 knownDecks = knownDecks,
             )
@@ -452,7 +440,6 @@ class ArgentumSearchWorldTest {
     fun `sampled world evaluator is an allowlist`() {
         val world = ArgentumSearchWorld.create(
             environment(), "game-eval", 2L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         world.sampledWorldLeafValue("p0", ArgentumSearchWorld.ARGENTUM_BOARD_EVALUATOR_V1)
@@ -471,7 +458,6 @@ class ArgentumSearchWorldTest {
             val failure = assertFailsWith<UnsupportedInformationStateException> {
                 ArgentumSearchWorld.create(
                     fork, "visibility-audit", 9L,
-                    cardRegistry = cardRegistry,
                     effectiveSetupSeed = 811L,
                 ).informationState("p0")
             }
@@ -493,7 +479,6 @@ class ArgentumSearchWorldTest {
         val env = environment(cardRegistry)
         val root = ArgentumSearchWorld.create(
             env, "search-game", 17L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val rootInformation = root.informationState("p0")
@@ -534,7 +519,6 @@ class ArgentumSearchWorldTest {
         val env = environment(cardRegistry)
         val root = ArgentumSearchWorld.create(
             env, "rejuvenate-game", 19L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 811L,
         )
         val knownDecks = mapOf("p0" to deck, "p1" to deck)
@@ -572,7 +556,6 @@ class ArgentumSearchWorldTest {
                 env,
                 gameId = "tag-game",
                 seedBase = 44L,
-                cardRegistry = cardRegistry,
                 effectiveSetupSeed = 811L,
                 knownDecks = knownDecks,
             )
@@ -612,7 +595,6 @@ class ArgentumSearchWorldTest {
                     expander = UnifiedSemanticExpander(
                         actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
                     ),
-                    cardRegistry = cardRegistry,
                     effectiveSetupSeed = 811L,
                     knownDecks = knownDecks,
                 )
@@ -669,7 +651,6 @@ class ArgentumSearchWorldTest {
             env,
             "hybrid-strata",
             8L,
-            cardRegistry = cardRegistry,
             effectiveSetupSeed = 901L,
             knownDecks = knownDecks,
         )

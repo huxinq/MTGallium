@@ -57,9 +57,8 @@ internal class SemanticReducerPlaySession(
             environment = environment,
             gameId = gameId,
             seedBase = seed,
-            effectiveSetupSeed = seed,
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           effectiveSetupSeed = seed,
+           knownDecks = knownDecks,
         )
 
         output.println("MTGallium semantic reducer play")

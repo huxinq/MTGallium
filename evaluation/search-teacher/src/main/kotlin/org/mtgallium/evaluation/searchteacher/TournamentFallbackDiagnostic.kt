@@ -215,9 +215,8 @@ internal class TournamentFallbackDiagnosticRunner(
             gameId = header.gameId,
             seedBase = header.baseSeed,
             effectiveSetupSeed = header.gameSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+           expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
+           knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
         val policyKinds = mapOf("p0" to header.p0Policy.kind, "p1" to header.p1Policy.kind)
         return buildList {

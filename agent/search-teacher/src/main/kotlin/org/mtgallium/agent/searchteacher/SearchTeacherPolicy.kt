@@ -1,6 +1,5 @@
 package org.mtgallium.agent.searchteacher
 
-import com.wingedsheep.engine.registry.CardRegistry
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
@@ -175,7 +174,6 @@ object SearchTeacherAutomaticSelection {
 class SearchTeacherPolicySession(
     root: ArgentumSearchWorld,
     private val viewer: String,
-    registry: CardRegistry,
     knownDecks: Map<String, Map<String, Int>>,
     private val parameters: SearchTeacherPolicyParameters,
     private val opponentPolicy: OpponentPolicy,

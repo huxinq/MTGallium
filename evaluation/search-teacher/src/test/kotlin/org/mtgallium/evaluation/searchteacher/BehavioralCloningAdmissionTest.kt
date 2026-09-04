@@ -488,9 +488,8 @@ class BehavioralCloningAdmissionTest {
                 effectiveSetupSeed = 17L,
                 expander = UnifiedSemanticExpander(
                     actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-                ),
-                cardRegistry = registry,
-                knownDecks = knownDecks,
+               ),
+               knownDecks = knownDecks,
             )
             val actor = assertNotNull(world.actorToAct())
             assertEquals("p0", actor)
@@ -509,9 +508,8 @@ class BehavioralCloningAdmissionTest {
             )
             val session = SearchTeacherPolicySession(
                 root = world,
-                viewer = actor,
-                registry = registry,
-                knownDecks = knownDecks,
+               viewer = actor,
+               knownDecks = knownDecks,
                 parameters = parameters,
                 opponentPolicy = opponent,
                 gameId = gameId,

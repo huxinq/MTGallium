@@ -1,7 +1,6 @@
 package org.mtgallium.agent.searchteacher
 
 import com.wingedsheep.engine.core.GameAction
-import com.wingedsheep.engine.registry.CardRegistry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.mtgallium.agent.infoset.argentum.ArgentumObservedStep
@@ -199,7 +198,6 @@ data class SearchTeacherDecision(
 class SearchTeacherRuntimeSession(
     private val world: ArgentumSearchWorld,
     private val teacher: String,
-    registry: CardRegistry,
     knownDecks: Map<String, Map<String, Int>>,
     private val gameId: String,
     private val config: SearchTeacherRuntimeConfig = SearchTeacherRuntimeConfig(),
@@ -209,7 +207,6 @@ class SearchTeacherRuntimeSession(
     private val policy = SearchTeacherPolicySession(
         root = world,
         viewer = teacher,
-        registry = registry,
         knownDecks = knownDecks,
         parameters = parameters,
         opponentPolicy = opponentModel,

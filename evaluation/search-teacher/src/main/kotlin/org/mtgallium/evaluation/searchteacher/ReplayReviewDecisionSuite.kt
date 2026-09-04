@@ -207,9 +207,8 @@ internal object ReplayReviewDecisionCatalog {
             effectiveSetupSeed = case.gameSeed,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-            ),
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           ),
+           knownDecks = knownDecks,
         )
 
         case.semanticPrefix.forEachIndexed { index, intent ->
@@ -365,9 +364,8 @@ internal class ReplayReviewDecisionRunner(
                 )
                 val session = SearchTeacherPolicySession(
                     root = position.world,
-                    viewer = position.actor,
-                    registry = registry,
-                    knownDecks = knownDecks,
+                   viewer = position.actor,
+                   knownDecks = knownDecks,
                     parameters = parameters,
                     opponentPolicy = defaultMonoRedOpponentPolicy(),
                     gameId = position.gameId,

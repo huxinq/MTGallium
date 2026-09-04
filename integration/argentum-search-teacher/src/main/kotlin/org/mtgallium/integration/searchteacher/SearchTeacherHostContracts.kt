@@ -24,7 +24,8 @@ data class SearchTeacherCandidateInsight(
 
 /** Read-only Search Teacher diagnostics containing no authoritative state or hidden-card data. */
 data class SearchTeacherInsight(
-    val actionIndex: Int,
+    /** Exact recorded-prefix length when available; null when the host supplied no replay history. */
+    val actionIndex: Int?,
     val chosenLabel: String? = null,
     val chosenSignature: String? = null,
     val candidates: List<SearchTeacherCandidateInsight> = emptyList(),

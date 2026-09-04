@@ -523,9 +523,8 @@ internal class SearchTeacherArena(
             gameId = gameId,
             seedBase = baseSeed,
             effectiveSetupSeed = gameSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           expander = UnifiedSemanticExpander(actionSpaceProfile = actionSpaceProfile),
+           knownDecks = knownDecks,
             projectionAuditSink = projectionAuditSink,
             heuristicResolutionSink = { resolution ->
                 heuristicResolutionCounters.computeIfAbsent(resolution.name) { AtomicInteger() }
@@ -560,9 +559,8 @@ internal class SearchTeacherArena(
             val policy = seatPolicies.getValue(viewer)
             SearchTeacherPolicySession(
                 root = world,
-                viewer = viewer,
-                registry = registry,
-                knownDecks = knownDecks,
+               viewer = viewer,
+               knownDecks = knownDecks,
                 parameters = parameters,
                 opponentPolicy = opponentModel,
                 gameId = gameId,

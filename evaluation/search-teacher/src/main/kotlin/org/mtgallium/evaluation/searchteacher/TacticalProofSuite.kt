@@ -565,9 +565,8 @@ internal class TacticalProofScenarioFactory(
             environment = environment,
             gameId = "${case.id}-paired-hidden",
             seedBase = case.rootSeed,
-            effectiveSetupSeed = case.rootSeed,
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           effectiveSetupSeed = case.rootSeed,
+           knownDecks = knownDecks,
         )
     }
 

@@ -92,17 +92,15 @@ class SearchTeacherEvaluationTest {
             effectiveSetupSeed = 17L,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.RULES_EXACT_V1,
-            ),
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           ),
+           knownDecks = knownDecks,
         )
         val expansion = world.expandChoices()
         assertEquals(2, expansion.candidates.size)
         val selection = SearchTeacherPolicySession(
             root = world,
-            viewer = "p0",
-            registry = registry,
-            knownDecks = knownDecks,
+           viewer = "p0",
+           knownDecks = knownDecks,
             parameters = SearchTeacherPolicyParameters(
                 particles = 1,
                 simulations = 1,
@@ -148,15 +146,13 @@ class SearchTeacherEvaluationTest {
             environment = environment,
             gameId = "sequential-double-mulligan",
             seedBase = 99L,
-            effectiveSetupSeed = 17L,
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           effectiveSetupSeed = 17L,
+           knownDecks = knownDecks,
         )
         val session = SearchTeacherPolicySession(
             root = world,
-            viewer = "p0",
-            registry = registry,
-            knownDecks = knownDecks,
+           viewer = "p0",
+           knownDecks = knownDecks,
             parameters = SearchTeacherPolicyParameters(
                 particles = 8,
                 simulations = 1,

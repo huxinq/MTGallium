@@ -791,9 +791,8 @@ internal class Issue0024NeuralCapacityDiagnostic(
             gameId = gameId,
             seedBase = baseSeed xor 0x4e455552414cL,
             effectiveSetupSeed = baseSeed xor 0x4930303234L,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = currentProfile.actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),
+           expander = UnifiedSemanticExpander(actionSpaceProfile = currentProfile.actionSpaceProfile),
+           knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),
         )
         val candidateCounts = mutableListOf<Int>()
         val decisionFamilies = mutableListOf<String>()

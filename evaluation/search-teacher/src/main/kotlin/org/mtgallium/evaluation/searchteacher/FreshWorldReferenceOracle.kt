@@ -395,9 +395,8 @@ private data class OracleFixture(
             effectiveSetupSeed = ISSUE_0013_STAGE_A_SEED,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-            ),
-            cardRegistry = registry,
-            knownDecks = knownDecks,
+           ),
+           knownDecks = knownDecks,
         )
     }
 }

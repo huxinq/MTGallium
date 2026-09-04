@@ -166,9 +166,8 @@ class ArgentumBeliefLifecycleTest {
         val world = ArgentumSearchWorld.create(
             environment,
             "belief-complete-hand",
-            1_107L,
-            cardRegistry = registry,
-            effectiveSetupSeed = 1_107L,
+           1_107L,
+           effectiveSetupSeed = 1_107L,
             knownDecks = decks,
         ).withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -300,9 +299,8 @@ class ArgentumBeliefLifecycleTest {
         val world = ArgentumSearchWorld.create(
             fixture.environment,
             "belief-lifecycle-object",
-            77L,
-            cardRegistry = fixture.registry,
-            effectiveSetupSeed = 1_103L,
+           77L,
+           effectiveSetupSeed = 1_103L,
             knownDecks = knownDecks,
         ).withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -358,9 +356,8 @@ class ArgentumBeliefLifecycleTest {
         val world = ArgentumSearchWorld.create(
             fixture.environment,
             "belief-lifecycle-stack",
-            78L,
-            cardRegistry = fixture.registry,
-            effectiveSetupSeed = 1_105L,
+           78L,
+           effectiveSetupSeed = 1_105L,
             knownDecks = knownDecks,
         ).withRememberedHistoryForVerification(history)
         val expected = world.informationState("p0")
@@ -470,9 +467,8 @@ class ArgentumBeliefLifecycleTest {
             ArgentumSearchWorld.create(
                 environment,
                 "belief-lifecycle-$seed",
-                seed,
-                cardRegistry = registry,
-                effectiveSetupSeed = seed,
+               seed,
+               effectiveSetupSeed = seed,
                 knownDecks = knownDecks,
             ),
         )

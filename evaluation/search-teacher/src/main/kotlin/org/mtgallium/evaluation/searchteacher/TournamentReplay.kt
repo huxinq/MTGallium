@@ -194,9 +194,8 @@ internal class TournamentReplayVerifier(
             gameId = header.gameId,
             seedBase = header.baseSeed,
             effectiveSetupSeed = header.gameSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+           expander = UnifiedSemanticExpander(actionSpaceProfile = header.actionSpaceProfile),
+           knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
         require(replayEvidence(world, header.schemaVersion).fingerprint == header.initialAuthoritativeFingerprint) {
             "Initial authoritative fingerprint mismatch"

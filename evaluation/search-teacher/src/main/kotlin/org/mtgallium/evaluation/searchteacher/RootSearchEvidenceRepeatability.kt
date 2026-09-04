@@ -569,9 +569,8 @@ internal class RootSearchEvidenceRepeatabilityExperiment(
         val searchIdentity = "$ROOT_SEARCH_EVIDENCE_PROTOCOL:${rootDescriptor.rootId}:${specification.repetition}"
         val session = SearchTeacherPolicySession(
             root = actual,
-            viewer = rootDescriptor.actor,
-            registry = registry,
-            knownDecks = knownDecks,
+           viewer = rootDescriptor.actor,
+           knownDecks = knownDecks,
             parameters = parameters,
             opponentPolicy = opponentPolicy,
             gameId = searchIdentity,

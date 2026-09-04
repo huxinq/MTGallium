@@ -264,9 +264,8 @@ internal fun reconstructReplayReviewWorld(
         gameId = gameId,
         seedBase = searchBaseSeed,
         effectiveSetupSeed = gameSeed,
-        expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
-        cardRegistry = registry,
-        knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+       expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
+       knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
     ).also { world ->
         semanticPrefix.forEachIndexed { index, choice ->
             val exact = world.expandChoices().candidates.singleOrNull { it.signature == choice.signature }

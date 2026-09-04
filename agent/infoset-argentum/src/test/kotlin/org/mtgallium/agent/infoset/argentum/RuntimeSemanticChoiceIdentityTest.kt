@@ -283,9 +283,8 @@ class RuntimeSemanticChoiceIdentityTest {
         return ArgentumSearchWorld.create(
             environment,
             id,
-            23_023L,
-            cardRegistry = registry,
-            effectiveSetupSeed = 23_023L,
+           23_023L,
+           effectiveSetupSeed = 23_023L,
             knownDecks = knownDecks,
         )
     }

@@ -485,9 +485,8 @@ class NeuralBehavioralCloningTest {
             effectiveSetupSeed = 901L,
             expander = UnifiedSemanticExpander(
                 actionSpaceProfile = SearchTeacherArena.smokeProfile().actionSpaceProfile,
-            ),
-            cardRegistry = registry,
-            knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),
+           ),
+           knownDecks = mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck),
         )
         val actor = requireNotNull(world.actorToAct())
         val input = BoundedPolicyInputCompiler.compile(world.informationState(actor))
