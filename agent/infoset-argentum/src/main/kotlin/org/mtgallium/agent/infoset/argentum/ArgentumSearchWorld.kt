@@ -164,12 +164,11 @@ class ArgentumSearchWorld private constructor(
 
     fun verifyKnowledgeSupport(
         viewer: String,
-        cardRegistry: CardRegistry,
         seed: Long,
         particleCount: Int = 8,
     ): KnowledgeSupportVerification = runCatching {
         val information = informationState(viewer)
-        val batch = ArgentumKnownDeckBeliefWorldSource(this, cardRegistry)
+        val batch = ArgentumKnownDeckBeliefWorldSource(this)
             .sample(information, knownDecks, seed, particleCount)
         val codes = batch.particles.mapNotNull { particle ->
             val sampledWorld = particle.value as? ArgentumSearchWorld ?: return@mapNotNull "WORLD_TYPE"

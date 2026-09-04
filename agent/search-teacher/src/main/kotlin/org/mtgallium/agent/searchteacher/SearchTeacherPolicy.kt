@@ -201,7 +201,6 @@ class SearchTeacherPolicySession(
     private val belief = SearchTeacherBeliefTracker(
         root = root,
         viewer = viewer,
-        registry = registry,
         knownDecks = knownDecks,
         parameters = parameters,
         opponentModel = opponentPolicy,

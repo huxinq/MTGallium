@@ -196,7 +196,7 @@ internal class TacticalHorizonBenchmarkRunner(
                 accepted -> legal.candidates.any { it.signature == accepted }
             })
             val beliefStarted = System.nanoTime()
-            val belief = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+            val belief = ArgentumKnownDeckBeliefWorldSource(world).sample(
                 information,
                 knownDecks,
                 ComponentSeeds.derive(case.rootSeed, "horizon-benchmark-belief"),

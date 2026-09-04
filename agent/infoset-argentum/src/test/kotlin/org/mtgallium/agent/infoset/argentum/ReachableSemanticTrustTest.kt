@@ -131,7 +131,7 @@ class ReachableSemanticTrustTest {
         assertTrue(opponentNova.isWarpExiled)
         assertFalse(opponentNova.playableFromExile)
 
-        val rebuilt = ArgentumKnownDeckBeliefWorldSource(permitted, registry).sample(
+        val rebuilt = ArgentumKnownDeckBeliefWorldSource(permitted).sample(
             permittedInformation,
             knownDecks,
             beliefSeed = 9_019L,
@@ -587,7 +587,7 @@ class ReachableSemanticTrustTest {
             .single { it.playerId == "p0" }.bottom.isEmpty())
         assertEquals(action.cardIds, world.authoritativeState().getLibrary(env.playerIds[0]).takeLast(2))
 
-        val rebuilt = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+        val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
             information,
             knownDecks,
             beliefSeed = 9_022L,

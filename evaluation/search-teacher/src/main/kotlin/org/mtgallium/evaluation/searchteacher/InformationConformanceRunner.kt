@@ -56,7 +56,6 @@ internal class InformationConformanceRunner(
                         }
                         val support = world.verifyKnowledgeSupport(
                             actor,
-                            registry,
                             ComponentSeeds.derive(baseSeed, index, "support:$decisionIndex"),
                         )
                         supportParticles += support.particlesChecked

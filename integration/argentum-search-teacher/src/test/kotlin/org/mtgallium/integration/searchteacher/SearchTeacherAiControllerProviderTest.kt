@@ -93,7 +93,7 @@ class SearchTeacherAiControllerProviderTest {
         )
         val firstInformation = world.informationState("p1")
         repeat(10) { assertEquals(firstInformation, world.informationState("p1"), "projection call $it") }
-        val beliefSource = ArgentumKnownDeckBeliefWorldSource(world, registry)
+        val beliefSource = ArgentumKnownDeckBeliefWorldSource(world)
         assertEquals(firstInformation, world.informationState("p1"))
         beliefSource.sample(
             firstInformation,

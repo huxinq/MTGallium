@@ -57,7 +57,7 @@ class ArgentumBeliefLifecycleTest {
         }
 
         val expected = world.informationState("p0")
-        val rebuilt = ArgentumKnownDeckBeliefWorldSource(world, fixture.registry).sample(
+        val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
             expected,
             knownDecks,
             beliefSeed = 41_106L,
@@ -174,7 +174,7 @@ class ArgentumBeliefLifecycleTest {
         val expected = world.informationState("p0")
         val rememberedNames = rememberedHand.associateWith { cardName(environment.state, it) }
 
-        val rebuilt = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+        val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
             expected,
             decks,
             beliefSeed = 41_107L,
@@ -193,7 +193,7 @@ class ArgentumBeliefLifecycleTest {
         }
 
         val rejuvenated = assertIs<ArgentumSearchWorld>(
-            ArgentumConditionalRejuvenator(registry, decks, "p0").rejuvenate(
+            ArgentumConditionalRejuvenator(decks, "p0").rejuvenate(
                 rebuilt.particles.first().value,
                 duplicateIndex = 1,
                 seed = 51_107L,
@@ -409,9 +409,9 @@ class ArgentumBeliefLifecycleTest {
         property: String,
     ) {
         val expected = world.informationState(viewer)
-        val rejuvenator = ArgentumConditionalRejuvenator(registry, knownDecks, viewer)
+        val rejuvenator = ArgentumConditionalRejuvenator(knownDecks, viewer)
         repeat(PROPERTY_TRIALS) { trial ->
-            val rebuilt = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+            val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
                 expected,
                 knownDecks,
                 beliefSeed = 20_000L + trial,

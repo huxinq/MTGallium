@@ -202,7 +202,7 @@ internal class TacticalProofLeafBenchmarkRunner(
         var searchMillis = 0.0
         return runCatching {
             val beliefStarted = System.nanoTime()
-            val belief = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+            val belief = ArgentumKnownDeckBeliefWorldSource(world).sample(
                 information,
                 knownDecks,
                 ComponentSeeds.derive(case.rootSeed, "proof-leaf-benchmark-belief"),

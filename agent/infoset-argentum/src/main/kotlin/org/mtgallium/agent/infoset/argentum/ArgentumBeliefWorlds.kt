@@ -1,6 +1,5 @@
 package org.mtgallium.agent.infoset.argentum
 
-import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.components.identity.CardComponent
 import com.wingedsheep.engine.state.components.identity.RevealedToComponent
@@ -152,15 +151,10 @@ object ArgentumBeliefSupport {
  */
 class ArgentumKnownDeckBeliefWorldSource(
     private val root: ArgentumSearchWorld,
-    cardRegistry: CardRegistry,
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "known-deck-construction",
 ) : BeliefWorldSource {
-    private val materializer = KnownDeckWorldMaterializer(root.cardRegistry()).also {
-        require(cardRegistry === root.cardRegistry()) {
-            "Belief construction must use the root world's card registry authority"
-        }
-    }
+    private val materializer = KnownDeckWorldMaterializer(root.cardRegistry())
 
     override fun sample(
         rootInformation: PolicyInformationState,
@@ -316,7 +310,6 @@ class ArgentumKnownDeckBeliefWorldSource(
 
 /** Re-samples only hidden identities after duplicate-particle resampling. */
 class ArgentumConditionalRejuvenator(
-    cardRegistry: CardRegistry,
     private val knownDecks: Map<String, Map<String, Int>>,
     private val viewerAlias: String,
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
@@ -326,9 +319,6 @@ class ArgentumConditionalRejuvenator(
         require(duplicateIndex > 0) { "Only duplicate particles require rejuvenation" }
         val trusted = world as? ArgentumSearchWorld
             ?: error("Argentum rejuvenation received an untrusted world implementation")
-        require(cardRegistry === trusted.cardRegistry()) {
-            "Belief rejuvenation must use the sampled world's card registry authority"
-        }
         val materializer = KnownDeckWorldMaterializer(trusted.cardRegistry())
         val players = trusted.rawPlayerIds()
         require(knownDecks.keys == players.keys) { "Known decks must exactly cover ${players.keys}" }

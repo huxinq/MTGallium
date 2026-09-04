@@ -579,7 +579,7 @@ internal class M01ResponseWindowDiagnostic(
         return runCatching {
             val beliefStarted = System.nanoTime()
             val information = root.informationState(actor)
-            val sampled = ArgentumKnownDeckBeliefWorldSource(root, registry).sample(
+            val sampled = ArgentumKnownDeckBeliefWorldSource(root).sample(
                 information,
                 mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
                 beliefSeed,

@@ -291,7 +291,7 @@ internal class FreshWorldReferenceOracle(
         require(exactProbabilities.isNotEmpty())
         require(kotlin.math.abs(exactProbabilities.values.sum() - 1.0) < 1e-12)
         val information = root.informationState(viewerAlias)
-        val source = ArgentumKnownDeckBeliefWorldSource(root, registry)
+        val source = ArgentumKnownDeckBeliefWorldSource(root)
         val counts = mutableMapOf<String, Int>()
         var supportViolations = 0
         var attempts = 0

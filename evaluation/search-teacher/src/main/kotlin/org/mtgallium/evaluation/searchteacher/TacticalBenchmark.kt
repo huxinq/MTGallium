@@ -682,7 +682,7 @@ internal class TacticalBenchmarkRunner(
             heuristicFallbackSeed,
         )
         val beliefStarted = System.nanoTime()
-        val belief = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+        val belief = ArgentumKnownDeckBeliefWorldSource(world).sample(
             world.informationState(actor),
             knownDecks,
             ComponentSeeds.derive(case.rootSeed, "tactical-belief"),
@@ -716,7 +716,7 @@ internal class TacticalBenchmarkRunner(
                 heuristicSignature = heuristic.signature,
             )
             includeStrategicReference && !case.mechanicallyVerifiable && case.hiddenFamily == null -> {
-                val referenceBelief = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+                val referenceBelief = ArgentumKnownDeckBeliefWorldSource(world).sample(
                     world.informationState(actor),
                     knownDecks,
                     ComponentSeeds.derive(case.rootSeed, "tactical-reference-belief"),

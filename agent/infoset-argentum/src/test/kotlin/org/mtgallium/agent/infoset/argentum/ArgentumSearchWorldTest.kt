@@ -327,9 +327,9 @@ class ArgentumSearchWorldTest {
         assertEquals(rootInfo, rightRoot.informationState("p0"))
         val beforeState = originalEnv.state
 
-        val left = ArgentumKnownDeckBeliefWorldSource(leftRoot, cardRegistry)
+        val left = ArgentumKnownDeckBeliefWorldSource(leftRoot)
             .sample(rootInfo, knownDecks, 29L, 16)
-        val right = ArgentumKnownDeckBeliefWorldSource(rightRoot, cardRegistry)
+        val right = ArgentumKnownDeckBeliefWorldSource(rightRoot)
             .sample(rootInfo, knownDecks, 29L, 16)
 
         val leftOpponentViews = left.particles.map { it.value.informationState("p1").observation }
@@ -343,9 +343,9 @@ class ArgentumSearchWorldTest {
             (particle.value as ArgentumSearchWorld).knowledgeSupportFailure("p0", rootInfo) == null
         })
 
-        val leftHybrid = ArgentumHybridBeliefWorldSource(leftRoot, cardRegistry)
+        val leftHybrid = ArgentumHybridBeliefWorldSource(leftRoot)
             .sample(rootInfo, knownDecks, 41L, 8)
-        val rightHybrid = ArgentumHybridBeliefWorldSource(rightRoot, cardRegistry)
+        val rightHybrid = ArgentumHybridBeliefWorldSource(rightRoot)
             .sample(rootInfo, knownDecks, 41L, 8)
         val search = InformationSetSearch(
             InformationSetSearchConfig(
@@ -384,7 +384,7 @@ class ArgentumSearchWorldTest {
         )
         val information = root.informationState("p0")
         val before = env.state
-        val sampled = ArgentumKnownDeckBeliefWorldSource(root, cardRegistry)
+        val sampled = ArgentumKnownDeckBeliefWorldSource(root)
             .sample(information, knownDecks, beliefSeed = 313L, count = 1)
             .particles.single().value as ArgentumSearchWorld
         val refereeContinuation = ArgentumSearchWorld.create(
@@ -429,7 +429,7 @@ class ArgentumSearchWorldTest {
                 knownDecks = knownDecks,
             )
             val information = root.informationState("p0")
-            return ArgentumKnownDeckBeliefWorldSource(root, cardRegistry)
+            return ArgentumKnownDeckBeliefWorldSource(root)
                 .sample(information, knownDecks, beliefSeed = 414L, count = 4)
                 .particles
                 .map { weighted ->
@@ -498,7 +498,7 @@ class ArgentumSearchWorldTest {
         )
         val rootInformation = root.informationState("p0")
         val knownDecks = mapOf("p0" to deck, "p1" to deck)
-        val belief = ArgentumKnownDeckBeliefWorldSource(root, cardRegistry)
+        val belief = ArgentumKnownDeckBeliefWorldSource(root)
             .sample(rootInformation, knownDecks, beliefSeed = 81L, count = 8)
         val search = InformationSetSearch(
             config = InformationSetSearchConfig(
@@ -540,7 +540,7 @@ class ArgentumSearchWorldTest {
         val knownDecks = mapOf("p0" to deck, "p1" to deck)
         val before = env.state
 
-        val rejuvenated = ArgentumConditionalRejuvenator(cardRegistry, knownDecks, "p0")
+        val rejuvenated = ArgentumConditionalRejuvenator(knownDecks, "p0")
             .rejuvenate(root, duplicateIndex = 1, seed = 123L)
 
         assertEquals(root.informationState("p0"), rejuvenated.informationState("p0"))
@@ -675,7 +675,7 @@ class ArgentumSearchWorldTest {
         )
         val information = root.informationState("p0")
 
-        val batch = ArgentumHybridBeliefWorldSource(root, cardRegistry)
+        val batch = ArgentumHybridBeliefWorldSource(root)
             .sample(information, knownDecks, beliefSeed = 77L, count = 8)
 
         assertEquals(BeliefArchitecture.HYBRID_C_V1, batch.diagnostics.architecture)

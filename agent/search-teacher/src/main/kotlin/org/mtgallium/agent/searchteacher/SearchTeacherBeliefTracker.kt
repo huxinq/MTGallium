@@ -1,6 +1,5 @@
 package org.mtgallium.agent.searchteacher
 
-import com.wingedsheep.engine.registry.CardRegistry
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefSupport
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.argentum.ArgentumConditionalRejuvenator
@@ -61,7 +60,6 @@ data class SearchTeacherBeliefLifecycleDiagnostics(
 internal class SearchTeacherBeliefTracker(
     root: ArgentumSearchWorld,
     private val viewer: String,
-    private val registry: CardRegistry,
     private val knownDecks: Map<String, Map<String, Int>>,
     private val parameters: SearchTeacherPolicyParameters,
     private val opponentModel: OpponentPolicy,
@@ -69,7 +67,6 @@ internal class SearchTeacherBeliefTracker(
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink,
 ) {
     private val rejuvenator = ArgentumConditionalRejuvenator(
-        registry,
         knownDecks,
         viewer,
         proposalAuditSink,
@@ -412,7 +409,6 @@ internal class SearchTeacherBeliefTracker(
             BeliefArchitecture.SNAPSHOT_A_V1,
             BeliefArchitecture.SEQUENTIAL_B_V1 -> ArgentumKnownDeckBeliefWorldSource(
                 actual,
-                registry,
                 proposalAuditSink,
                 "$viewer:$purpose",
             )
@@ -424,7 +420,6 @@ internal class SearchTeacherBeliefTracker(
                 }
             BeliefArchitecture.HYBRID_C_V1 -> ArgentumHybridBeliefWorldSource(
                 actual,
-                registry,
                 proposalAuditSink,
                 "$viewer:$purpose",
             )

@@ -361,7 +361,7 @@ class SearchTeacherEvaluationTest {
             rootProbe = { world, actor, decisionIndex ->
                 if (decisionIndex == 0) {
                     hiddenProbePassed = world.hiddenTruthConformanceProbe(actor).passed
-                    supportProbePassed = world.verifyKnowledgeSupport(actor, registry, 123L, 4).passed
+                    supportProbePassed = world.verifyKnowledgeSupport(actor, 123L, 4).passed
                 }
             },
             replay = GameReplayOptions(
@@ -1015,7 +1015,7 @@ class SearchTeacherEvaluationTest {
             TacticalBenchmarkCatalog.cases.single { it.id == "lethal-01" }
         )
         val actor = requireNotNull(world.actorToAct())
-        val belief = ArgentumKnownDeckBeliefWorldSource(world, registry).sample(
+        val belief = ArgentumKnownDeckBeliefWorldSource(world).sample(
             world.informationState(actor),
             mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
             ComponentSeeds.derive("independent-test"),

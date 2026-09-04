@@ -1,7 +1,6 @@
 package org.mtgallium.agent.infoset.argentum
 
 import com.wingedsheep.engine.state.components.identity.CardComponent
-import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.sdk.core.Zone
 import kotlin.math.ln
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
@@ -26,13 +25,11 @@ class HybridBeliefUnsupportedException(message: String) : IllegalStateException(
  */
 class ArgentumHybridBeliefWorldSource(
     private val root: ArgentumSearchWorld,
-    cardRegistry: CardRegistry,
     proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     proposalContext: String = "hybrid-known-deck-construction",
 ) : BeliefWorldSource {
     private val delegate = ArgentumKnownDeckBeliefWorldSource(
         root,
-        cardRegistry,
         proposalAuditSink,
         proposalContext,
     )

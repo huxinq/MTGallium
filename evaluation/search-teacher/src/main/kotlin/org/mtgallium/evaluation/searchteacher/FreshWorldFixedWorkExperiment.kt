@@ -404,7 +404,6 @@ internal class FreshWorldFixedWorkExperiment(
         val started = System.nanoTime()
         val fresh = ArgentumKnownDeckBeliefWorldSource(
             root = currentRoot,
-            cardRegistry = registry,
             proposalContext = "$ISSUE_0013_FIXED_WORK_PROTOCOL:${frozen.id}:$repetition:fresh",
         ).sample(
             rootInformation = currentRoot.informationState(actor),
