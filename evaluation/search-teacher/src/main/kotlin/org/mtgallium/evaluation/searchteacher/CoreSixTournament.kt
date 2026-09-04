@@ -8,7 +8,9 @@ import kotlinx.serialization.Serializable
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
 import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ComponentSeeds
+import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.searchteacher.PolicyCompressionConfig
@@ -36,21 +38,38 @@ internal data class ArenaPolicySpec(
     val searchPlanner: SearchPlannerKind = SearchPlannerKind.SHARED_TREE,
     val policyCompression: PolicyCompressionConfig = PolicyCompressionConfig(),
     val searchReuse: SearchReuseConfig = SearchReuseConfig(),
+    /**
+     * A session-bound evaluator implementation. Its configuration identity, rather than the
+     * implementation object, is retained by the arena-owned behavior specification.
+     */
+    val informationEvaluator: ConfiguredInformationStateEvaluator? = null,
 ) {
     init {
         require(id.isNotBlank())
         require((kind == ArenaPolicyKind.SEARCH) == (profile != null || parameters != null))
         require(profile == null || parameters == null)
+        require(informationEvaluator == null ||
+            (kind == ArenaPolicyKind.SEARCH && searchPlanner == SearchPlannerKind.SHARED_TREE)
+        ) { "An information-state evaluator is valid only for a shared-tree Search policy" }
     }
 
     fun effectiveParameters(arenaBaseSeed: Long): SearchTeacherPolicyParameters =
-        parameters ?: requireNotNull(profile).policyParameters(
+        (parameters ?: requireNotNull(profile).policyParameters(
             baseSeed = arenaBaseSeed,
             beliefMode = beliefMode,
             beliefArchitecture = beliefArchitecture,
             policyCompression = policyCompression,
             searchReuse = searchReuse,
-        )
+        )).also { effective ->
+            informationEvaluator?.let { evaluator ->
+                require(effective.leaf.stateSource == LeafStateSource.CURRENT_INFORMATION_STATE) {
+                    "Arena information-state evaluator requires a CURRENT_INFORMATION_STATE leaf"
+                }
+                require(evaluator.id == effective.leaf.evaluator.evaluatorId) {
+                    "Arena evaluator ${evaluator.id} does not match configured ${effective.leaf.evaluator.evaluatorId} leaf"
+                }
+            }
+        }
 }
 
 @Serializable

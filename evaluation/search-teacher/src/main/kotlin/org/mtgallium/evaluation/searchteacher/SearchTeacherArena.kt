@@ -360,6 +360,7 @@ internal class SearchTeacherArena(
             val specification = policy.effectiveParameters(baseSeed).behaviorSpecification(
                 knownDecks = knownDecks,
                 opponentPolicy = opponentModel,
+                informationEvaluator = policy.informationEvaluator,
                 integration = SearchTeacherIntegrationSpecification(
                     hostMode = "evaluation-arena-v1",
                     searchPlanner = policy.searchPlanner.name,
@@ -564,6 +565,7 @@ internal class SearchTeacherArena(
                 parameters = parameters,
                 opponentPolicy = opponentModel,
                 gameId = gameId,
+                informationEvaluator = policy.informationEvaluator,
                 integration = SearchTeacherIntegrationSpecification(
                     hostMode = "evaluation-arena-v1",
                     searchPlanner = policy.searchPlanner.name,
