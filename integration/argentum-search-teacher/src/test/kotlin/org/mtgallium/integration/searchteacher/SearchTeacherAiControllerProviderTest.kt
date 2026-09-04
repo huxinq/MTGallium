@@ -5,12 +5,11 @@ import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.KeepHand
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.registry.CardRegistry
-import com.wingedsheep.engine.registry.PrintingRegistry
-import com.wingedsheep.engine.registry.TokenArtRegistry
 import com.wingedsheep.gameserver.ai.AiControllerContext
 import com.wingedsheep.gameserver.ai.AiRuntimeSnapshot
 import com.wingedsheep.gameserver.replay.ReplayPlayerSetup
 import com.wingedsheep.gameserver.replay.ReplaySetup
+import com.wingedsheep.gym.ExactOneSubmissionResult
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.mtg.sets.MtgSetCatalog
 import com.wingedsheep.mtg.sets.tokens.PredefinedTokens
@@ -37,7 +36,7 @@ class SearchTeacherAiControllerProviderTest {
     fun `provider fails before game start when the frozen manifest is unavailable`() {
         assertFailsWith<IllegalArgumentException> {
             SearchTeacherAiControllerProvider(
-                CardRegistry(), PrintingRegistry(), TokenArtRegistry(), SearchTeacherRuntimeConfig(),
+                CardRegistry(), SearchTeacherRuntimeConfig(),
             )
         }
     }
@@ -76,13 +75,14 @@ class SearchTeacherAiControllerProviderTest {
             ),
             seatRoster = emptyList(),
         )
-        val insights = mutableListOf<com.wingedsheep.gameserver.ai.SearchTeacherInsight>()
+        val insights = mutableListOf<SearchTeacherInsight>()
         val snapshot = AiRuntimeSnapshot(environment.state, setup, emptyList())
         val world = ArgentumSearchWorld.create(
             environment.fork(),
             gameId = "second-seat-information-stability",
             seedBase = 20260825L,
             cardRegistry = registry,
+            effectiveSetupSeed = 818L,
             knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
         )
         val firstInformation = world.informationState("p1")
@@ -97,17 +97,15 @@ class SearchTeacherAiControllerProviderTest {
         )
         val provider = SearchTeacherAiControllerProvider(
             registry,
-            PrintingRegistry(),
-            TokenArtRegistry(),
             SearchTeacherRuntimeConfig(maxPolicyDecisions = 1),
             manifest,
+            insightSink = { _, insight -> insights += insight },
         )
         val controller = provider.create(
             AiControllerContext(
                 playerId = p1,
                 gameSessionId = "live-mulligan-test",
                 snapshot = { snapshot },
-                publishInsight = insights::add,
             )
         )
         controller.setDeckList(manifest.mainDeck)
@@ -169,8 +167,6 @@ class SearchTeacherAiControllerProviderTest {
         val actions = mutableListOf<com.wingedsheep.engine.core.GameAction>()
         val controller = SearchTeacherAiControllerProvider(
             registry,
-            PrintingRegistry(),
-            TokenArtRegistry(),
             SearchTeacherRuntimeConfig(maxPolicyDecisions = 1),
             manifest,
         ).create(
@@ -182,7 +178,6 @@ class SearchTeacherAiControllerProviderTest {
                         AiRuntimeSnapshot(environment.state, setup, actions.toList())
                     }
                 },
-                publishInsight = {},
             )
         )
 
@@ -201,7 +196,7 @@ class SearchTeacherAiControllerProviderTest {
 
         synchronized(lock) {
             val action = KeepHand(human)
-            environment.stepRaw(action)
+            assertTrue(environment.stepExactlyOne(action) is ExactOneSubmissionResult.Applied)
             assertTrue(environment.lastRejection == null)
             actions += action
         }

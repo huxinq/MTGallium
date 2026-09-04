@@ -11,19 +11,11 @@ import com.wingedsheep.engine.core.KeepHand
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.core.TakeMulligan
 import com.wingedsheep.engine.registry.CardRegistry
-import com.wingedsheep.engine.registry.PrintingRegistry
-import com.wingedsheep.engine.registry.TokenArtRegistry
 import com.wingedsheep.engine.view.ClientGameState
 import com.wingedsheep.engine.view.LegalActionInfo
 import com.wingedsheep.gameserver.GameServerApplication
 import com.wingedsheep.gameserver.ai.AiControllerContext
-import com.wingedsheep.gameserver.ai.AiControllerFatalException
-import com.wingedsheep.gameserver.ai.AiControllerMode
 import com.wingedsheep.gameserver.ai.AiControllerProvider
-import com.wingedsheep.gameserver.ai.AiLockedQuickGameContract
-import com.wingedsheep.gameserver.ai.SearchTeacherCandidateInsight
-import com.wingedsheep.gameserver.ai.SearchTeacherInsight
-import com.wingedsheep.gameserver.config.GameProperties
 import com.wingedsheep.gameserver.replay.ReplaySetup
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.sdk.model.EntityId
@@ -36,36 +28,34 @@ import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.searchteacher.SearchTeacherRuntimeConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherRuntimeSession
 import org.springframework.boot.SpringApplication
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Import
 
 @Configuration(proxyBeanMethods = false)
 @Import(GameServerApplication::class)
+@EnableConfigurationProperties(SearchTeacherHostProperties::class)
 class ArgentumSearchTeacherConfiguration {
     @Bean
     fun searchTeacherControllerProvider(
         registry: CardRegistry,
-        printingRegistry: PrintingRegistry,
-        tokenArtRegistry: TokenArtRegistry,
-        properties: GameProperties,
+        properties: SearchTeacherHostProperties,
     ): AiControllerProvider = SearchTeacherAiControllerProvider(
         registry,
-        printingRegistry,
-        tokenArtRegistry,
         SearchTeacherRuntimeConfig(
-            baseSeed = properties.ai.searchTeacher.baseSeed,
+            baseSeed = properties.baseSeed,
         ).let { current -> current.copy(
             profileId = if (
-                properties.ai.searchTeacher.particles == current.particles &&
-                properties.ai.searchTeacher.simulations == current.simulations &&
-                properties.ai.searchTeacher.maxPolicyDecisions == current.maxPolicyDecisions &&
-                properties.ai.searchTeacher.explorationConstant == current.explorationConstant
+                properties.particles == current.particles &&
+                properties.simulations == current.simulations &&
+                properties.maxPolicyDecisions == current.maxPolicyDecisions &&
+                properties.explorationConstant == current.explorationConstant
             ) current.profileId else "experimental-override",
-            particles = properties.ai.searchTeacher.particles,
-            simulations = properties.ai.searchTeacher.simulations,
-            maxPolicyDecisions = properties.ai.searchTeacher.maxPolicyDecisions,
-            explorationConstant = properties.ai.searchTeacher.explorationConstant,
+            particles = properties.particles,
+            simulations = properties.simulations,
+            maxPolicyDecisions = properties.maxPolicyDecisions,
+            explorationConstant = properties.explorationConstant,
         ) },
     )
 }
@@ -76,18 +66,11 @@ fun main(args: Array<String>) {
 
 class SearchTeacherAiControllerProvider(
     private val registry: CardRegistry,
-    private val printingRegistry: PrintingRegistry,
-    private val tokenArtRegistry: TokenArtRegistry,
     private val runtimeConfig: SearchTeacherRuntimeConfig,
     private val manifest: SearchTeacherDeckManifest = SearchTeacherDeckManifest.frozenMonoRed(),
+    private val insightSink: (AiControllerContext, SearchTeacherInsight) -> Unit = { _, _ -> },
 ) : AiControllerProvider {
-    override val mode = AiControllerMode.SEARCH_TEACHER
-    override val lockedQuickGame = AiLockedQuickGameContract(
-        deckId = manifest.id,
-        deckName = manifest.name,
-        deckList = manifest.mainDeck,
-        profileLabel = runtimeConfig.displayName,
-    )
+    override val mode = "search-teacher"
 
     init {
         val missing = manifest.mainDeck.keys.filter { registry.getCard(it) == null }
@@ -101,20 +84,18 @@ class SearchTeacherAiControllerProvider(
     override fun create(context: AiControllerContext): AiPlayerController = SearchTeacherController(
         context,
         registry,
-        printingRegistry,
-        tokenArtRegistry,
         runtimeConfig,
         manifest,
+        publishInsight = { insight -> insightSink(context, insight) },
     )
 }
 
 private class SearchTeacherController(
     private val context: AiControllerContext,
     private val registry: CardRegistry,
-    private val printingRegistry: PrintingRegistry,
-    private val tokenArtRegistry: TokenArtRegistry,
     private val config: SearchTeacherRuntimeConfig,
     private val manifest: SearchTeacherDeckManifest,
+    private val publishInsight: (SearchTeacherInsight) -> Unit,
 ) : AiPlayerController {
     private var synchronized: SynchronizedRuntime? = null
 
@@ -194,7 +175,7 @@ private class SearchTeacherController(
         val authoritative = ArgentumStateFingerprint.of(snapshot.state)
         val shadow = next.runtime.authoritativeFingerprint
         if (authoritative != shadow) {
-            context.publishInsight(
+            publishInsight(
                 SearchTeacherInsight(
                     actionIndex = snapshot.actions.size,
                     failureCode = "AUTHORITATIVE_FINGERPRINT_MISMATCH",
@@ -220,11 +201,7 @@ private class SearchTeacherController(
         }
         require(setup.teams == null) { "Search Teacher v1 does not support teams" }
         require(!setup.useHandSmoother) { "Search Teacher requires hand smoothing to be disabled" }
-        val environment = GameEnvironment.create(
-            registry,
-            printingRegistry = printingRegistry,
-            tokenArtRegistry = tokenArtRegistry,
-        )
+        val environment = GameEnvironment.create(registry)
         environment.reset(
             GameConfig(
                 players = setup.players.map { player ->
@@ -255,12 +232,16 @@ private class SearchTeacherController(
         }
         val teacherIndex = setup.players.indexOfFirst { it.playerId == context.playerId.value }
         require(teacherIndex >= 0) { "Search Teacher seat is absent from replay setup" }
+        val gameSessionId = requireNotNull(context.gameSessionId) {
+            "Search Teacher controllers can choose only after attachment to a live game"
+        }
         val world = ArgentumSearchWorld.create(
             environment = environment,
-            gameId = context.gameSessionId,
+            gameId = gameSessionId,
             seedBase = config.baseSeed,
             expander = UnifiedSemanticExpander(actionSpaceProfile = config.actionSpaceProfile),
             cardRegistry = registry,
+            effectiveSetupSeed = setup.seed,
             knownDecks = knownDecks,
         )
         val runtime = SearchTeacherRuntimeSession(
@@ -268,7 +249,7 @@ private class SearchTeacherController(
             teacher = "p$teacherIndex",
             registry = registry,
             knownDecks = knownDecks,
-            gameId = context.gameSessionId,
+            gameId = gameSessionId,
             config = config,
         )
         actions.forEach(runtime::applyObserved)
@@ -283,7 +264,7 @@ private class SearchTeacherController(
     private fun publishDecision(decision: SearchTeacherDecision, fingerprint: String) {
         val search = decision.search
         val diagnostics = search?.diagnostics
-        context.publishInsight(
+        publishInsight(
             SearchTeacherInsight(
                 actionIndex = decision.decisionIndex,
                 chosenLabel = decision.choice.display.label,
@@ -328,7 +309,7 @@ private class SearchTeacherController(
 
     private inline fun <T> failClosed(block: () -> T): T = try {
         block()
-    } catch (fatal: AiControllerFatalException) {
+    } catch (fatal: SearchTeacherControllerFailure) {
         throw fatal
     } catch (failure: Throwable) {
         val snapshot = context.snapshot()
@@ -338,7 +319,7 @@ private class SearchTeacherController(
             failure.message?.contains("Observed") == true -> "REDUCER_FAILURE"
             else -> "SEARCH_TEACHER_FAILURE"
         }
-        context.publishInsight(
+        publishInsight(
             SearchTeacherInsight(
                 actionIndex = snapshot?.actions?.size ?: synchronized?.actions?.size ?: 0,
                 failureCode = code,
@@ -347,10 +328,10 @@ private class SearchTeacherController(
                 shadowFingerprint = synchronized?.runtime?.authoritativeFingerprint,
             )
         )
-        throw AiControllerFatalException("$code: ${failure.message}", failure)
+        throw SearchTeacherControllerFailure("$code: ${failure.message}", failure)
     }
 
-    private fun <T> unsupported(kind: String): T = throw AiControllerFatalException(
+    private fun <T> unsupported(kind: String): T = throw SearchTeacherControllerFailure(
         "UNSUPPORTED_GAME_TYPE: Search Teacher v1 does not support $kind"
     )
 
