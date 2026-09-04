@@ -156,7 +156,11 @@ class ArgentumKnownDeckBeliefWorldSource(
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "known-deck-construction",
 ) : BeliefWorldSource {
-    private val materializer = KnownDeckWorldMaterializer(cardRegistry)
+    private val materializer = KnownDeckWorldMaterializer(root.cardRegistry()).also {
+        require(cardRegistry === root.cardRegistry()) {
+            "Belief construction must use the root world's card registry authority"
+        }
+    }
 
     override fun sample(
         rootInformation: PolicyInformationState,
@@ -318,12 +322,14 @@ class ArgentumConditionalRejuvenator(
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "conditional-rejuvenation",
 ) : ParticleRejuvenator {
-    private val materializer = KnownDeckWorldMaterializer(cardRegistry)
-
     override fun rejuvenate(world: SearchWorld, duplicateIndex: Int, seed: Long): SearchWorld {
         require(duplicateIndex > 0) { "Only duplicate particles require rejuvenation" }
         val trusted = world as? ArgentumSearchWorld
             ?: error("Argentum rejuvenation received an untrusted world implementation")
+        require(cardRegistry === trusted.cardRegistry()) {
+            "Belief rejuvenation must use the sampled world's card registry authority"
+        }
+        val materializer = KnownDeckWorldMaterializer(trusted.cardRegistry())
         val players = trusted.rawPlayerIds()
         require(knownDecks.keys == players.keys) { "Known decks must exactly cover ${players.keys}" }
         val expected = trusted.informationState(viewerAlias)

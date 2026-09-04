@@ -16,7 +16,7 @@ import com.wingedsheep.engine.state.components.combat.AttackingComponent
 import com.wingedsheep.engine.state.components.stack.ChosenTarget
 import com.wingedsheep.engine.state.components.player.MulliganStateComponent
 import com.wingedsheep.gym.GameEnvironment
-import com.wingedsheep.gym.ExactOneSubmissionResult
+import com.wingedsheep.gym.ExactlyOneSubmissionResult
 import com.wingedsheep.gym.contract.ObservationBuilder
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.gym.trainer.defaults.ExactStructuredDecisionExpander
@@ -200,7 +200,7 @@ class UnifiedSemanticExpander(
 
         val generated = if (environment.pendingDecision != null) {
             val decision = environment.pendingDecision!!
-            val expansion = when (val exact = ExactStructuredDecisionExpander.expand(environment.state, decision)) {
+            val expansion = when (val exact = ExactStructuredDecisionExpander.Default.expand(environment.state, decision)) {
                 is StructuredDecisionExpansion.Complete -> StructuredResponseProposal(
                     responses = exact.responses,
                     isExhaustive = true,
@@ -580,7 +580,7 @@ class UnifiedSemanticExpander(
                 com.wingedsheep.engine.core.SubmitDecision(choice.value.playerId(environment), choice.value)
             )
         }
-        return result is ExactOneSubmissionResult.Applied
+        return result is ExactlyOneSubmissionResult.Applied
     }
 
     private fun DecisionResponse.playerId(environment: GameEnvironment): EntityId =

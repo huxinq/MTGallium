@@ -12,7 +12,7 @@ import com.wingedsheep.gameserver.replay.ReplayPlayerSetup
 import com.wingedsheep.gameserver.replay.ReplaySetup
 import com.wingedsheep.gameserver.replay.ReplayYieldEntry
 import com.wingedsheep.gameserver.replay.ReplayYieldOp
-import com.wingedsheep.gym.ExactOneSubmissionResult
+import com.wingedsheep.gym.ExactlyOneSubmissionResult
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.mtg.sets.MtgSetCatalog
 import com.wingedsheep.mtg.sets.tokens.PredefinedTokens
@@ -170,6 +170,7 @@ class SearchTeacherAiControllerProviderTest {
             seatRoster = emptyList(),
         )
         val cases = listOf(
+            "REPLAY_HISTORY_UNAVAILABLE" to AiReplayHistory.Unavailable,
             "REPLAY_HISTORY_TRUNCATED" to
                 AiReplayHistory.TruncatedPrefix(setup, emptyList(), emptyList()),
             "PERSISTENT_YIELD_HISTORY_UNSUPPORTED" to
@@ -287,7 +288,7 @@ class SearchTeacherAiControllerProviderTest {
 
         synchronized(lock) {
             val action = KeepHand(human)
-            assertTrue(environment.stepExactlyOne(action) is ExactOneSubmissionResult.Applied)
+            assertTrue(environment.stepExactlyOne(action) is ExactlyOneSubmissionResult.Applied)
             assertTrue(environment.lastRejection == null)
             actions += action
         }

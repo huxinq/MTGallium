@@ -165,6 +165,9 @@ private class SearchTeacherController(
 
     private fun synchronize(snapshot: com.wingedsheep.gameserver.ai.AiRuntimeSnapshot): SynchronizedRuntime {
         val history = when (val replay = snapshot.replayHistory) {
+            AiReplayHistory.Unavailable -> error(
+                "REPLAY_HISTORY_UNAVAILABLE: Search Teacher cannot reconstruct the live state without recorded replay inputs"
+            )
             is AiReplayHistory.Complete -> replay
             is AiReplayHistory.TruncatedPrefix -> error(
                 "REPLAY_HISTORY_TRUNCATED: Search Teacher cannot reconstruct the live state from a replay prefix"

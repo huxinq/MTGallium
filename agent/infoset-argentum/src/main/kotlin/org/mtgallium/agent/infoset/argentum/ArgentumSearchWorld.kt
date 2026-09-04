@@ -23,7 +23,7 @@ import com.wingedsheep.engine.state.components.identity.FaceDownComponent
 import com.wingedsheep.engine.state.components.identity.RevealedToComponent
 import com.wingedsheep.engine.state.components.stack.SpellOnStackComponent
 import com.wingedsheep.gym.GameEnvironment
-import com.wingedsheep.gym.ExactOneSubmissionResult
+import com.wingedsheep.gym.ExactlyOneSubmissionResult
 import com.wingedsheep.gym.contract.ObservationBuilder
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.sdk.core.Zone
@@ -291,6 +291,7 @@ class ArgentumSearchWorld private constructor(
 
     override fun copyDerivedCachesFrom(source: SearchWorld): Boolean {
         val other = source as? ArgentumSearchWorld ?: return false
+        if (cardRegistry !== other.cardRegistry) return false
         if (environment.state !== other.environment.state || decisionIndex != other.decisionIndex) return false
         if (aliases.keys.any { viewer -> !history.sharesLedgerPrefixWith(other.history, viewer) }) return false
         cachedExpansion = other.cachedExpansion
@@ -398,7 +399,7 @@ class ArgentumSearchWorld private constructor(
             is ArgentumEngineChoice.Decision -> SubmitDecision(actor, engineChoice.value)
         }
         val submission = environment.stepExactlyOne(submittedAction)
-        val rejection = (submission as? ExactOneSubmissionResult.Rejected)?.reason
+        val rejection = (submission as? ExactlyOneSubmissionResult.Rejected)?.reason
         rawTraceSink?.add(
             ArgentumRawTransition(
                 action = submittedAction,
@@ -690,6 +691,8 @@ class ArgentumSearchWorld private constructor(
         ?: error("Unknown safe player id $alias")
 
     internal fun rawPlayerIds(): Map<String, EntityId> = aliases.entries.associate { (raw, safe) -> safe to raw }
+    /** Root-owned card authority for this trusted world and every world derived from it. */
+    internal fun cardRegistry(): CardRegistry = cardRegistry
     internal fun authoritativeState(): GameState = environment.state
     internal fun rememberedKnowledgeObjectIds(
         viewerAlias: String,
