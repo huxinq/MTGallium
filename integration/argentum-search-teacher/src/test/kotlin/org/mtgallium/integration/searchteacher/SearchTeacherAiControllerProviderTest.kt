@@ -6,9 +6,12 @@ import com.wingedsheep.engine.core.KeepHand
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.gameserver.ai.AiControllerContext
+import com.wingedsheep.gameserver.ai.AiReplayHistory
 import com.wingedsheep.gameserver.ai.AiRuntimeSnapshot
 import com.wingedsheep.gameserver.replay.ReplayPlayerSetup
 import com.wingedsheep.gameserver.replay.ReplaySetup
+import com.wingedsheep.gameserver.replay.ReplayYieldEntry
+import com.wingedsheep.gameserver.replay.ReplayYieldOp
 import com.wingedsheep.gym.ExactOneSubmissionResult
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.mtg.sets.MtgSetCatalog
@@ -76,7 +79,10 @@ class SearchTeacherAiControllerProviderTest {
             seatRoster = emptyList(),
         )
         val insights = mutableListOf<SearchTeacherInsight>()
-        val snapshot = AiRuntimeSnapshot(environment.state, setup, emptyList())
+        val snapshot = AiRuntimeSnapshot(
+            environment.state,
+            AiReplayHistory.Complete(setup, emptyList(), emptyList()),
+        )
         val world = ArgentumSearchWorld.create(
             environment.fork(),
             gameId = "second-seat-information-stability",
@@ -130,6 +136,88 @@ class SearchTeacherAiControllerProviderTest {
     }
 
     @Test
+    fun `provider refuses replay inputs that cannot reproduce the live state`() {
+        val registry = fullRegistry()
+        val manifest = publicMulliganFixtureManifest()
+        val deck = Deck.of(*manifest.mainDeck.entries.map { it.key to it.value }.toTypedArray())
+        val p0 = EntityId("history-test-p0")
+        val p1 = EntityId("history-test-p1")
+        val environment = GameEnvironment.create(registry).also { env ->
+            env.reset(
+                GameConfig(
+                    players = listOf(
+                        PlayerConfig("Human", deck, playerId = p0),
+                        PlayerConfig("Search Teacher", deck, playerId = p1),
+                    ),
+                    skipMulligans = false,
+                    useHandSmoother = false,
+                    startingPlayerIndex = 1,
+                    seed = 828L,
+                )
+            )
+        }
+        val setup = ReplaySetup(
+            seed = 828L,
+            format = Format.Standard,
+            attackMode = AttackMode.MULTIPLE,
+            skipMulligans = false,
+            useHandSmoother = false,
+            startingPlayerIndex = 1,
+            players = listOf(
+                ReplayPlayerSetup(p0.value, "Human", deck),
+                ReplayPlayerSetup(p1.value, "Search Teacher", deck),
+            ),
+            seatRoster = emptyList(),
+        )
+        val cases = listOf(
+            "REPLAY_HISTORY_TRUNCATED" to
+                AiReplayHistory.TruncatedPrefix(setup, emptyList(), emptyList()),
+            "PERSISTENT_YIELD_HISTORY_UNSUPPORTED" to
+                AiReplayHistory.Complete(
+                    setup,
+                    emptyList(),
+                    listOf(
+                        ReplayYieldEntry(
+                            afterActionCount = 0,
+                            playerId = p1.value,
+                            op = ReplayYieldOp.CLEAR_ALL,
+                        )
+                    ),
+                ),
+        )
+
+        for ((expectedCode, history) in cases) {
+            val insights = mutableListOf<SearchTeacherInsight>()
+            val controller = SearchTeacherAiControllerProvider(
+                registry,
+                SearchTeacherRuntimeConfig(maxPolicyDecisions = 1),
+                manifest,
+                insightSink = { _, insight -> insights += insight },
+            ).create(
+                AiControllerContext(
+                    playerId = p1,
+                    gameSessionId = "history-contract-test",
+                    snapshot = { AiRuntimeSnapshot(environment.state, history) },
+                )
+            )
+
+            val failure = assertFailsWith<SearchTeacherControllerFailure> {
+                controller.decideMulligan(
+                    MulliganInfo(
+                        hand = environment.state.getHand(p1),
+                        mulliganCount = 0,
+                        cardsToPutOnBottom = 0,
+                        isOnThePlay = true,
+                    )
+                )
+            }
+
+            assertTrue(failure.message.orEmpty().startsWith(expectedCode))
+            assertEquals(expectedCode, insights.single().failureCode)
+        }
+    }
+
+    @Test
     fun `second-seat teacher waits for the earlier human mulligan action`() {
         val registry = fullRegistry()
         val manifest = publicMulliganFixtureManifest()
@@ -175,7 +263,10 @@ class SearchTeacherAiControllerProviderTest {
                 gameSessionId = "ordered-mulligan-test",
                 snapshot = {
                     synchronized(lock) {
-                        AiRuntimeSnapshot(environment.state, setup, actions.toList())
+                        AiRuntimeSnapshot(
+                            environment.state,
+                            AiReplayHistory.Complete(setup, actions.toList(), emptyList()),
+                        )
                     }
                 },
             )

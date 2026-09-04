@@ -16,6 +16,7 @@ import com.wingedsheep.engine.view.LegalActionInfo
 import com.wingedsheep.gameserver.GameServerApplication
 import com.wingedsheep.gameserver.ai.AiControllerContext
 import com.wingedsheep.gameserver.ai.AiControllerProvider
+import com.wingedsheep.gameserver.ai.AiReplayHistory
 import com.wingedsheep.gameserver.replay.ReplaySetup
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.sdk.model.EntityId
@@ -163,21 +164,30 @@ private class SearchTeacherController(
     }
 
     private fun synchronize(snapshot: com.wingedsheep.gameserver.ai.AiRuntimeSnapshot): SynchronizedRuntime {
+        val history = when (val replay = snapshot.replayHistory) {
+            is AiReplayHistory.Complete -> replay
+            is AiReplayHistory.TruncatedPrefix -> error(
+                "REPLAY_HISTORY_TRUNCATED: Search Teacher cannot reconstruct the live state from a replay prefix"
+            )
+        }
+        check(history.yields.isEmpty()) {
+            "PERSISTENT_YIELD_HISTORY_UNSUPPORTED: Search Teacher cannot yet replay out-of-band yields"
+        }
         val previous = synchronized
-        val next = if (previous != null && snapshot.actions.size >= previous.actions.size &&
-            snapshot.actions.subList(0, previous.actions.size) == previous.actions
+        val next = if (previous != null && history.actions.size >= previous.actions.size &&
+            history.actions.subList(0, previous.actions.size) == previous.actions
         ) {
-            snapshot.actions.drop(previous.actions.size).forEach(previous.runtime::applyObserved)
-            previous.copy(actions = snapshot.actions.toList())
+            history.actions.drop(previous.actions.size).forEach(previous.runtime::applyObserved)
+            previous.copy(actions = history.actions.toList())
         } else {
-            rebuild(snapshot.replaySetup, snapshot.actions)
+            rebuild(history.setup, history.actions)
         }
         val authoritative = ArgentumStateFingerprint.of(snapshot.state)
         val shadow = next.runtime.authoritativeFingerprint
         if (authoritative != shadow) {
             publishInsight(
                 SearchTeacherInsight(
-                    actionIndex = snapshot.actions.size,
+                    actionIndex = history.actions.size,
                     failureCode = "AUTHORITATIVE_FINGERPRINT_MISMATCH",
                     diagnostic = "Shadow reconstruction did not match the authoritative action prefix",
                     authoritativeFingerprint = authoritative,
@@ -315,13 +325,16 @@ private class SearchTeacherController(
         val snapshot = context.snapshot()
         val code = when {
             failure.message?.startsWith("UNSUPPORTED_INFORMATION_STATE") == true -> "UNSUPPORTED_INFORMATION_STATE"
+            failure.message?.startsWith("REPLAY_HISTORY_TRUNCATED") == true -> "REPLAY_HISTORY_TRUNCATED"
+            failure.message?.startsWith("PERSISTENT_YIELD_HISTORY_UNSUPPORTED") == true ->
+                "PERSISTENT_YIELD_HISTORY_UNSUPPORTED"
             failure.message?.contains("FINGERPRINT") == true -> "SYNCHRONIZATION_FAILURE"
             failure.message?.contains("Observed") == true -> "REDUCER_FAILURE"
             else -> "SEARCH_TEACHER_FAILURE"
         }
         publishInsight(
             SearchTeacherInsight(
-                actionIndex = snapshot?.actions?.size ?: synchronized?.actions?.size ?: 0,
+                actionIndex = snapshot?.replayHistory?.actions?.size ?: synchronized?.actions?.size ?: 0,
                 failureCode = code,
                 diagnostic = (failure.message ?: failure::class.simpleName ?: "Search Teacher failure").take(500),
                 authoritativeFingerprint = snapshot?.state?.let(ArgentumStateFingerprint::of),
