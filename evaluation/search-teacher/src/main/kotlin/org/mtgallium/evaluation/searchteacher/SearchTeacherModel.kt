@@ -411,7 +411,8 @@ data class EvidenceRunAttemptSummary(
 
 @Serializable
 data class GameRunResult(
-    val schemaVersion: Int = 3,
+    /** V4 adds explicit availability for nested successful-backup settlement provenance. */
+    val schemaVersion: Int = 4,
     val gameId: String,
     val seed: Long,
     val p0Policy: ArenaPolicyKind,
@@ -460,6 +461,7 @@ data class GameRunResult(
     val elapsedMillis: Double? = null,
 ) {
     init {
+        require(schemaVersion in 3..4) { "Unknown GameRunResult schema $schemaVersion" }
         when (disposition) {
             GameRunDisposition.GAME_ENDED -> {
                 require(terminal) { "GAME_ENDED requires an engine terminal state" }
@@ -529,6 +531,14 @@ data class ArenaSeatDiagnostics(
 )
 
 @Serializable
+enum class SettlementCountsAvailability {
+    /** Older retained diagnostics did not record origin partitions; zeroes are not evidence. */
+    UNAVAILABLE_HISTORICAL,
+    /** This arena record retains the exact partition of successful backups for one search. */
+    EXACT_SUCCESSFUL_BACKUPS_V1,
+}
+
+@Serializable
 data class ArenaSearchDecisionDiagnostic(
     val decisionIndex: Int,
     val turnNumber: Int,
@@ -536,11 +546,25 @@ data class ArenaSearchDecisionDiagnostic(
     val step: String,
     val latencyMillis: Double,
     val searchDiagnostics: org.mtgallium.agent.infoset.core.InformationSetSearchDiagnostics,
+    /** Exact successful-backup origins for this completed search, retained by the arena. */
+    val settlementCounts: org.mtgallium.agent.infoset.core.SearchSettlementCounts =
+        org.mtgallium.agent.infoset.core.SearchSettlementCounts(),
+    /** Distinguishes unavailable historical origin accounting from a measured zero. */
+    val settlementCountsAvailability: SettlementCountsAvailability =
+        SettlementCountsAvailability.UNAVAILABLE_HISTORICAL,
     /** Root evidence retained so a surprising live choice can be reviewed without rerunning it. */
     val chosen: org.mtgallium.agent.infoset.core.SemanticChoice? = null,
     val rootValue: Double? = null,
     val candidateStatistics: List<org.mtgallium.agent.infoset.core.SearchCandidateStatistics> = emptyList(),
-)
+) {
+    init {
+        if (settlementCountsAvailability == SettlementCountsAvailability.EXACT_SUCCESSFUL_BACKUPS_V1) {
+            require(settlementCounts.successfulBackups == searchDiagnostics.simulations) {
+                "Exact settlement counts must partition completed simulations"
+            }
+        }
+    }
+}
 
 @Serializable
 data class PairedArenaReport(

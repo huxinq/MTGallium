@@ -964,6 +964,11 @@ internal class SearchTeacherArena(
                         step = information.observation.step,
                         latencyMillis = selection.latencyMillis,
                         searchDiagnostics = search.diagnostics,
+                        settlementCounts = search.candidateSettlementCounts.values.fold(
+                            org.mtgallium.agent.infoset.core.SearchSettlementCounts(),
+                        ) { total, counts -> total.plus(counts) },
+                        settlementCountsAvailability =
+                            SettlementCountsAvailability.EXACT_SUCCESSFUL_BACKUPS_V1,
                         chosen = selection.choice,
                         rootValue = search.rootValue,
                         candidateStatistics = search.candidates,
