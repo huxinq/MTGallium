@@ -43,6 +43,7 @@ internal object SearchTeacherSuites {
         "decision-local-root-freeze",
         "decision-local-throughput-preflight",
         "decision-local-sibling-outcome",
+        "decision-local-sibling-signal",
         "baseline-factorial-tournament",
         "baseline-factorial-smoke",
         "tree-reuse-validation",
@@ -240,6 +241,7 @@ internal data class SearchTeacherCli(
                     "decision-local-root-freeze",
                     "decision-local-throughput-preflight",
                     "decision-local-sibling-outcome",
+                    "decision-local-sibling-signal",
                 )) {
                 require(deckManifest != null && fixedRootPilot != null && outcomeCorpus != null &&
                     fixedRootGate != null && outputPath != null) {
@@ -247,10 +249,13 @@ internal data class SearchTeacherCli(
                         "--fixed-root-gate, and --output"
                 }
             }
-            if (suite in setOf("decision-local-throughput-preflight", "decision-local-sibling-outcome")) {
+            if (suite in setOf("decision-local-throughput-preflight", "decision-local-sibling-outcome", "decision-local-sibling-signal")) {
                 require(fixedRootManifest != null) {
                     "Decision-local execution requires the frozen --fixed-root-manifest"
                 }
+            }
+            require(suite != "decision-local-sibling-signal" || challengeManifests.isEmpty()) {
+                "Stage one does not admit --challenge-manifest"
             }
             require(suite != "decision-local-sibling-outcome" || challengeManifests.size == 2) {
                 "Decision-local execution requires exactly two secondary --challenge-manifest inputs; " +

@@ -95,7 +95,7 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         )
         return
     }
-    if (options.suite == "decision-local-sibling-outcome") {
+    if (options.suite in setOf("decision-local-sibling-outcome", "decision-local-sibling-signal")) {
         val output = diagnosticOutput(requireNotNull(options.outputPath))
         val progress = System.getenv("MTGALLIUM_PROGRESS_FILE")?.takeIf(String::isNotBlank)?.let(Path::of)
         val report = DecisionLocalExperimentRunner(root, registry, manifest).run(
@@ -106,6 +106,7 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
             challengeManifestPaths = options.challengeManifests,
             output = output,
             progressPath = progress,
+            signalOnly = options.suite == "decision-local-sibling-signal",
         )
         println(
             "Decision-local sibling outcome experiment ${report.scientificEvidenceIdentity}; " +

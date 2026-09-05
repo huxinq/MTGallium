@@ -3,12 +3,40 @@ package org.mtgallium.evaluation.searchteacher
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
 
 @org.junit.jupiter.api.Tag("public-source")
 class DecisionLocalSiblingOutcomeExperimentTest {
+    @Test
+    fun `stage one accepts no challenge input and refuses later stage panels`() {
+        val args = arrayOf(
+            "--suite", "decision-local-sibling-signal", "--deck-manifest", "deck.json",
+            "--fixed-root-pilot", "pilot", "--fixed-root-manifest", "roots.json",
+            "--outcome-corpus", "corpus", "--fixed-root-gate", "gate", "--output", "output",
+        )
+        assertEquals("decision-local-sibling-signal", SearchTeacherCli.parse(args).suite)
+        assertFailsWith<IllegalArgumentException> {
+            SearchTeacherCli.parse(args + arrayOf("--challenge-manifest", "panel.json"))
+        }
+    }
+
+    @Test
+    fun `stage one never interprets a partial or absent population as a signal pass`() {
+        val signal = decisionLocalSignal(listOf(
+            root("r1", listOf(candidate("a", 1.0, 1.0), candidate("b", 0.0, -1.0))),
+        ))
+        assertEquals(DecisionLocalConclusion.STAGE_ONE_SIGNAL_SUFFICIENT, decisionLocalStageOneConclusion(signal, 1))
+        assertEquals(DecisionLocalConclusion.STAGE_ONE_INCOMPLETE, decisionLocalStageOneConclusion(signal, 2))
+        assertEquals(DecisionLocalConclusion.STAGE_ONE_INCOMPLETE, decisionLocalStageOneConclusion(null, 2))
+        val flat = decisionLocalSignal(listOf(
+            root("r1", listOf(candidate("a", 1.0, 1.0), candidate("b", 0.0, 1.0))),
+        ))
+        assertEquals(DecisionLocalConclusion.STAGE_ONE_SIGNAL_INSUFFICIENT, decisionLocalStageOneConclusion(flat, 1))
+    }
+
     @Test
     fun `execution cli retains both repeated challenge manifests`() {
         val parsed = SearchTeacherCli.parse(arrayOf(

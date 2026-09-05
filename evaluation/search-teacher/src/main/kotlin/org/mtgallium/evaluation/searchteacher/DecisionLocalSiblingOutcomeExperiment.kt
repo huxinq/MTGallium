@@ -35,6 +35,7 @@ import org.mtgallium.research.run.researchSha256
 
 internal const val DECISION_LOCAL_ROOT_PROTOCOL = "decision-local-sibling-root-population-v1"
 internal const val DECISION_LOCAL_EXPERIMENT_PROTOCOL = "decision-local-sibling-terminal-outcome-v1"
+internal const val DECISION_LOCAL_SIGNAL_PROTOCOL = "decision-local-sibling-terminal-signal-v1"
 internal const val DECISION_LOCAL_SOURCE_PILOT_RUN =
     "research-run-v1-sha256:f79abc1d2dfcccedf65287fb661cf7b2b5b25ca6a9f223f2285c4652d0f48f9d"
 internal const val DECISION_LOCAL_SELECTION_RULE =
@@ -929,7 +930,18 @@ internal fun evaluateGate(metrics: List<DecisionLocalMethodMetrics>): DecisionLo
 }
 
 @Serializable
-internal enum class DecisionLocalConclusion { A, B, C, D, E }
+internal enum class DecisionLocalConclusion {
+    A, B, C, D, E, STAGE_ONE_SIGNAL_SUFFICIENT, STAGE_ONE_SIGNAL_INSUFFICIENT, STAGE_ONE_INCOMPLETE,
+}
+
+internal fun decisionLocalStageOneConclusion(
+    signal: DecisionLocalSignalSummary?,
+    assignedRoots: Int,
+): DecisionLocalConclusion = when {
+    signal == null || signal.roots != assignedRoots -> DecisionLocalConclusion.STAGE_ONE_INCOMPLETE
+    signal.sufficientToTrain -> DecisionLocalConclusion.STAGE_ONE_SIGNAL_SUFFICIENT
+    else -> DecisionLocalConclusion.STAGE_ONE_SIGNAL_INSUFFICIENT
+}
 
 @Serializable
 internal data class DecisionLocalExperimentReport(
@@ -958,7 +970,7 @@ internal data class DecisionLocalExperimentReport(
     val exclusionReasons: Map<String, Int>,
     val terminalContinuations: Int,
     val computeMillis: Double,
-    val signal: DecisionLocalSignalSummary,
+    val signal: DecisionLocalSignalSummary?,
     val model: DecisionLocalModelCheckpoint?,
     val testMetrics: List<DecisionLocalMethodMetrics>,
     val optimisticSelectionGate: DecisionLocalGateResult?,
@@ -967,6 +979,8 @@ internal data class DecisionLocalExperimentReport(
     val conclusionText: String,
     val limitations: List<String>,
     val nextOwnerDecision: String,
+    val sourceProvenance: ResearchRunProvenance? = null,
+    val researchRunBindings: ResearchRunBindings? = null,
 )
 
 internal class DecisionLocalExperimentRunner(
@@ -985,11 +999,13 @@ internal class DecisionLocalExperimentRunner(
         val manifest = loadDecisionLocalRootManifest(rootManifestPath)
         val historical = HistoricalOutcomeValueDiagnosticCheckpoint.load(corpusDirectory, gateDirectory)
         val materializer = DecisionLocalEvidenceMaterializer(pilotDirectory, registry, deckManifest, manifest, historical)
+        // Throughput verification must not materialize held-out terminal outcomes.
+        val developmentRoots = manifest.assignments.filter { it.split != DecisionLocalSplit.TEST }
         val assignments = listOfNotNull(
-            manifest.assignments.minByOrNull { it.root.candidateSignatures.size },
-            manifest.assignments.sortedBy { it.root.candidateSignatures.size }
-                .getOrNull(manifest.assignments.size / 2),
-            manifest.assignments.maxByOrNull { it.root.candidateSignatures.size },
+            developmentRoots.minByOrNull { it.root.candidateSignatures.size },
+            developmentRoots.sortedBy { it.root.candidateSignatures.size }
+                .getOrNull(developmentRoots.size / 2),
+            developmentRoots.maxByOrNull { it.root.candidateSignatures.size },
         ).distinctBy { it.root.id }
         val started = System.nanoTime()
         var candidates = 0
@@ -1038,6 +1054,7 @@ internal class DecisionLocalExperimentRunner(
         challengeManifestPaths: List<Path>,
         output: Path,
         progressPath: Path? = null,
+        signalOnly: Boolean = false,
     ): DecisionLocalExperimentReport {
         val started = System.nanoTime()
         val provenance = ResearchRunProvenance.capture(repositoryRoot)
@@ -1046,8 +1063,9 @@ internal class DecisionLocalExperimentRunner(
         val manifest = loadDecisionLocalRootManifest(rootManifestPath)
         val historical = HistoricalOutcomeValueDiagnosticCheckpoint.load(corpusDirectory, gateDirectory)
         require(manifest.argentumCommit == provenance.checkedOutArgentumCommit)
+        require(!signalOnly || challengeManifestPaths.isEmpty()) { "Stage one does not admit challenge panels" }
         val bindings = ResearchRunBindings(
-            protocol = DECISION_LOCAL_EXPERIMENT_PROTOCOL,
+            protocol = if (signalOnly) DECISION_LOCAL_SIGNAL_PROTOCOL else DECISION_LOCAL_EXPERIMENT_PROTOCOL,
             material = mapOf(
                 "treatment-source" to provenance.outerCommit,
                 "root-manifest" to manifest.manifestId,
@@ -1071,8 +1089,7 @@ internal class DecisionLocalExperimentRunner(
         val materializer = DecisionLocalEvidenceMaterializer(pilotDirectory, registry, deckManifest, manifest, historical)
         val admitted = mutableListOf<DecisionLocalRootEvidence>()
         val exclusions = mutableListOf<String>()
-        val totalPrimary = manifest.assignments.count { it.split != DecisionLocalSplit.TEST } +
-            manifest.assignments.count { it.split == DecisionLocalSplit.TEST }
+        val totalPrimary = manifest.assignments.count { !signalOnly || it.split != DecisionLocalSplit.TEST }
         var completed = 0
         fun progress(phase: String, detail: String) {
             val path = progressPath ?: return
@@ -1110,7 +1127,31 @@ internal class DecisionLocalExperimentRunner(
             loadOrRun(assignment, DECISION_LOCAL_PRIMARY_REPLICATES, 0)?.let(admitted::add)
         }
         val trainValidation = admitted.filter { it.split in setOf(DecisionLocalSplit.TRAIN, DecisionLocalSplit.VALIDATION) }
-        val signal = decisionLocalSignal(trainValidation)
+        val signal = trainValidation.takeIf { it.isNotEmpty() }?.let(::decisionLocalSignal)
+        if (signalOnly) {
+            val conclusion = decisionLocalStageOneConclusion(signal, totalPrimary)
+            val text = when (conclusion) {
+                DecisionLocalConclusion.STAGE_ONE_INCOMPLETE ->
+                    "Stage one incomplete: reconstruction or continuation failures prevent a population-level signal conclusion."
+                DecisionLocalConclusion.STAGE_ONE_SIGNAL_SUFFICIENT ->
+                    "Stage one passes the predeclared eight-replicate label-signal screen; training has not run."
+                else -> "Stage one does not pass the predeclared eight-replicate label-signal screen; training has not run."
+            }
+            val report = terminalReport(
+                bindings, provenance, manifest, admitted, exclusions, signal, null, emptyList(), null,
+                emptyList(), started, conclusion, text,
+                listOf(
+                    "Only the 34 TRAIN and six VALIDATION roots are assigned; all ten TEST roots remain unmaterialized.",
+                    "Eight matched terminal continuations per candidate are conditional on the frozen finite belief and declared continuation policies.",
+                    "The signal screen is descriptive: best/runner-up selection uses the same eight samples and is not a confirmatory confidence test.",
+                    "No optimizer update, model checkpoint, TEST evaluation, challenge evaluation, or gameplay treatment was performed.",
+                ),
+                "Return the terminal-outcome signal and measured cost to the owner before any later stage.",
+            ).copy(protocol = DECISION_LOCAL_SIGNAL_PROTOCOL, primaryRoots = totalPrimary)
+            finalize(output, report)
+            return report
+        }
+        requireNotNull(signal) { "No terminal root evidence was admitted" }
         if (!signal.sufficientToTrain) {
             val report = terminalReport(
                 bindings, provenance, manifest, admitted, exclusions, signal, null, emptyList(), null,
@@ -1219,7 +1260,7 @@ internal class DecisionLocalExperimentRunner(
         manifest: DecisionLocalRootManifest,
         admitted: List<DecisionLocalRootEvidence>,
         exclusions: List<String>,
-        signal: DecisionLocalSignalSummary,
+        signal: DecisionLocalSignalSummary?,
         model: DecisionLocalModelCheckpoint?,
         metrics: List<DecisionLocalMethodMetrics>,
         gate: DecisionLocalGateResult?,
@@ -1266,6 +1307,8 @@ internal class DecisionLocalExperimentRunner(
             conclusionText = conclusionText,
             limitations = limitations,
             nextOwnerDecision = next,
+            sourceProvenance = provenance,
+            researchRunBindings = bindings,
         )
     }
 
@@ -1279,8 +1322,8 @@ internal class DecisionLocalExperimentRunner(
             append("- Argentum: `${report.argentumSha}`\n")
             append("- Primary roots: ${report.admittedRoots}/${report.primaryRoots}; exclusions: ${report.excludedRoots}\n")
             append("- Terminal continuations: ${report.terminalContinuations}\n")
-            append("- Label spread: mean ${report.signal.meanSiblingSpread}, median ${report.signal.medianSiblingSpread}\n")
-            append("- Distinguishable best/runner-up roots: ${report.signal.distinguishableBestFromRunnerUpRoots}/${report.signal.roots}\n\n")
+            append("- Label spread: mean ${report.signal?.meanSiblingSpread}, median ${report.signal?.medianSiblingSpread}\n")
+            append("- Distinguishable best/runner-up roots: ${report.signal?.distinguishableBestFromRunnerUpRoots}/${report.signal?.roots}\n\n")
             if (report.testMetrics.isNotEmpty()) {
                 append("| Method | Pairwise | Independent regret | Worst regret | P90 optimism | Composite |\n")
                 append("|---|---:|---:|---:|---:|---:|\n")
@@ -1292,6 +1335,7 @@ internal class DecisionLocalExperimentRunner(
         }
         ResearchRunFiles.atomicWrite(output.resolve("report.md"), markdown)
         val artifacts = ResearchRunArtifacts(output, report.researchRunIdentity)
+        Files.createDirectories(output.resolve("roots"))
         Files.walk(output.resolve("roots")).use { paths ->
             paths.filter { Files.isRegularFile(it) }.sorted().forEach { artifacts.register(output.relativize(it).toString()) }
         }
