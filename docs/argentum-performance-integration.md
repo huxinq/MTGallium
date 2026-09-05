@@ -1,8 +1,8 @@
 # Local Argentum performance integration
 
-The gitlink currently pins local integration `80ba6e68b218d9ce5fadbc34295006ff0376adac`
+The gitlink currently pins local integration `f8874f795f54543e98b0e9602ca8eea73a986df6`
 on branch `codex/local-performance-integration` in the engine submodule.
-It merges these five reviewed contribution heads from base `12589ae4a22e`:
+It contains these five reviewed contributions from base `12589ae4a22e`:
 
 | Contribution | Head | Review |
 |---|---|---|
@@ -10,7 +10,7 @@ It merges these five reviewed contribution heads from base `12589ae4a22e`:
 | Projected characteristic collections | `3e47a0e32a83` | Upstream #2248 |
 | Component containers and combat cleanup | `10afcbe70e2e` | Upstream #2249 |
 | Ability lookup and activation prevention | `914c1563934c` | Upstream #2250 |
-| Reusable services for independent AI players | `b7bd529fbe9e` | Review fork #34 |
+| Reusable services for independent AI players | `350db12d24c3` | Review fork #34 |
 
 The first four groups reproduce the previously combined engine source
 `b24f2e1191c7`. Adding the factory changes only `AIPlayer.kt` and its focused
@@ -18,6 +18,10 @@ regression test relative to that source. MTGallium's heuristic annotator now
 uses one lazy factory throughout its world lineage and requests a fresh player
 for every action or decision response. Strategy memory and simulator responder
 state therefore remain local to each call.
+
+The callback regression at `350db12d24c3` strengthens the factory tests. The
+production source remains identical to the earlier integration `80ba6e68b218`;
+performance measurements made at that revision retain their original identity.
 
 The integration commit is local, and `.gitmodules` keeps the canonical upstream
 URL. The existing checkout contains the commit. To transfer this unmerged pin
