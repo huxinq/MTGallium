@@ -169,7 +169,8 @@ public final class SearchAdapterProfile {
             ? "mtgallium-search-adapter-profile-v1" : "mtgallium-search-ai-factory-comparison-v1", material);
         Files.writeString(output.resolve("bindings.json"), Json.Default.encodeToString(ResearchRunBindings.Companion.serializer(), bindings));
         Files.writeString(output.resolve("measurement-summary.txt"), "All calls returned for " + repetitions
-            + " measured repetitions of four fresh roots; one warmup per root. Only the finalized artifact manifest establishes completion.\n");
+            + " measured repetitions of four fresh roots; " + (bundle == null ? "one" : "two")
+            + " warmups per root. Only the finalized artifact manifest establishes completion.\n");
         var artifacts = new ResearchRunArtifacts(output, bindings.getIdentity());
         for (String name : List.of("provenance.json", "deck.json", "SearchAdapterProfile.java", "classpath.init.gradle",
                 "runtime-configuration.txt", "runtime.txt", "bindings.json", "results.jsonl", "profile.jfr", "measurement-summary.txt")) artifacts.register(name);
