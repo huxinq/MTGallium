@@ -53,8 +53,25 @@ public final class SearchAdapterProfile {
         return new Measured<>(value, new Cost(elapsed, cpuElapsed, allocated));
     }
 
+    private static void requireOrigin(Class<?> type, Path expected) throws Exception {
+        Path actual = Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI());
+        if (!Files.isSameFile(actual, expected)) throw new IllegalStateException("Unexpected runtime for " + type + ": " + actual);
+    }
+
     public static void main(String[] args) throws Exception {
-        if (args.length != 3) throw new IllegalArgumentException("repository-root output-relative-path measured-repetitions");
+        if (args.length != 3 && args.length != 5) throw new IllegalArgumentException(
+            "repository-root output-relative-path measured-repetitions [factory-bundle bundle-identity]");
+        Path bundle = args.length == 5 ? Path.of(args[3]).toAbsolutePath() : null;
+        if (bundle != null) {
+            ResearchRunArtifacts.Companion.loadAndVerify(bundle, args[4]);
+            FactoryComparisonBundle.verifyRuntimeFiles(bundle);
+            // Only these two modules are overlaid. The checkout provenance below still describes
+            // the pinned source; the separately bound bundle identifies the actual runtime.
+            requireOrigin(SearchAdapterProfile.class, bundle.resolve("harness.jar"));
+            requireOrigin(FactoryComparisonBundle.class, bundle.resolve("harness.jar"));
+            requireOrigin(com.wingedsheep.ai.engine.AIPlayer.class, bundle.resolve("ai.jar"));
+            requireOrigin(org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld.class, bundle.resolve("adapter.jar"));
+        }
         Path repository = Path.of(args[0]).toAbsolutePath();
         Path output = PrivateEvidencePaths.INSTANCE.resolve(repository, args[1]);
         int repetitions = Integer.parseInt(args[2]);
@@ -91,7 +108,7 @@ public final class SearchAdapterProfile {
             recording.enable("jdk.ExecutionSample").withPeriod(Duration.ofMillis(2));
             recording.enable("jdk.ObjectAllocationSample").with("throttle", "1000/s");
             recording.enable("mtgallium.AdapterProfileStage").withThreshold(Duration.ZERO);
-            for (int repetition = -1; repetition < repetitions; repetition++) {
+            for (int repetition = bundle == null ? -1 : -2; repetition < repetitions; repetition++) {
                 if (repetition == 0) recording.start();
                 for (var fixture : cases) {
                     var world = factory.create(fixture); // Fixture construction is outside measured stages.
@@ -142,7 +159,14 @@ public final class SearchAdapterProfile {
         }
         for (String caseId : CASES) material.put(caseId, ResearchRunKt.researchSha256File(output.resolve(caseId + "-behavior.json")));
         material.put("measured-repetitions", Integer.toString(repetitions));
-        var bindings = new ResearchRunBindings(1, "mtgallium-search-adapter-profile-v1", material);
+        if (bundle != null) {
+            ResearchRunArtifacts.Companion.loadAndVerify(bundle, args[4]);
+            FactoryComparisonBundle.verifyRuntimeFiles(bundle);
+            material.put("runtime-factory-bundle", args[4]);
+            Files.writeString(output.resolve("runtime-factory-bundle.txt"), bundle + "\n" + args[4] + "\n");
+        }
+        var bindings = new ResearchRunBindings(1, bundle == null
+            ? "mtgallium-search-adapter-profile-v1" : "mtgallium-search-ai-factory-comparison-v1", material);
         Files.writeString(output.resolve("bindings.json"), Json.Default.encodeToString(ResearchRunBindings.Companion.serializer(), bindings));
         Files.writeString(output.resolve("measurement-summary.txt"), "All calls returned for " + repetitions
             + " measured repetitions of four fresh roots; one warmup per root. Only the finalized artifact manifest establishes completion.\n");
@@ -150,6 +174,7 @@ public final class SearchAdapterProfile {
         for (String name : List.of("provenance.json", "deck.json", "SearchAdapterProfile.java", "classpath.init.gradle",
                 "runtime-configuration.txt", "runtime.txt", "bindings.json", "results.jsonl", "profile.jfr", "measurement-summary.txt")) artifacts.register(name);
         for (String caseId : CASES) artifacts.register(caseId + "-behavior.json");
+        if (bundle != null) artifacts.register("runtime-factory-bundle.txt");
         artifacts.finalize();
         var verified = ResearchRunArtifacts.Companion.loadAndVerify(output, bindings.getIdentity());
         System.out.println("Verified " + verified.getResearchRunIdentity() + " artifacts=" + verified.getArtifacts().size());

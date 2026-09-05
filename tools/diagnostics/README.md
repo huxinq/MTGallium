@@ -39,3 +39,30 @@ It retains source provenance, full policy identities, deck, search results,
 belief diagnostics, CPU/allocation/timing measurements, JFR, and harness source
 through the existing research-run artifact authority. All repeated outcomes
 remain diagnostic search results; no terminal-game population is implied.
+
+## AI setup prototype comparison
+
+`ai-player-factory-adapter.patch` is an unapplied prototype for an Argentum
+`AIPlayer.Factory` API. It holds a lazy factory per heuristic annotator and
+creates a fresh player for each selection. Production source and the engine
+pin remain unchanged. The factory API lives in a separate engine treatment.
+
+For this experiment, compile the original and patched `ArgentumSearchWorld.kt`
+with identical Kotlin flags and serialization plugin into separate adapter
+jars. Run separate JVMs with each adapter jar and its matching engine AI jar
+before the ordinary runtime classpath. Use `FactoryComparisonBundle.java` to
+seal each prepared external input directory with the existing research-run
+artifact authority. Its inputs include exact source revisions, effective
+adapter source, engine/adapter patches, build command, both overlay jars,
+diagnostic jar, and runtime classpath. It also records runtime file hashes.
+Commit the diagnostic sources before sealing or running the experiment.
+
+Pass the bundle directory and identity as the fourth and fifth arguments to
+`SearchAdapterProfile`. It verifies the bundle before and after execution and
+checks that the two overlaid classes load from its jars. The comparison uses two warmup repetitions per root. The resulting binding
+names the bundle identity. **Checkout provenance describes the unchanged pin;
+the bundle describes the runtime treatment.** Interpret both together. This
+is an explicitly overlaid diagnostic, not verification of a pinned production
+build. Runtime file inventories bind the remaining classpath inputs; preserve
+those inputs during the comparison. The binary/source association also retains
+the build command; binary hashes alone do not prove compilation provenance.

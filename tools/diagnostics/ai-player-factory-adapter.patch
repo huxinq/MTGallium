@@ -1,0 +1,29 @@
+--- a/agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt
++++ b/agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt
+@@ -1059,6 +1059,8 @@
+     private val knownDecks: Map<String, Map<String, Int>>,
+ ) {
+     private val materializer = KnownDeckWorldMaterializer(cardRegistry)
++    // Share engine services for this annotator; every selection still gets fresh AI memory.
++    private val playerFactory by lazy { AIPlayer.Factory(cardRegistry) }
+ 
+     fun annotate(
+         environment: GameEnvironment,
+@@ -1233,7 +1235,7 @@
+         expansion: UnifiedExpansionResult,
+     ): ArgentumEngineChoice = when {
+             state.pendingDecision?.playerId == actor -> ArgentumEngineChoice.Decision(
+-                AIPlayer.create(cardRegistry, actor, AiProfile.PRODUCTION)
++                playerFactory.create(actor, AiProfile.PRODUCTION)
+                     .respondToDecision(state, state.pendingDecision!!)
+             )
+             expansion.engineChoices.values.any { it is ArgentumEngineChoice.Action && it.value is KeepHand } -> {
+@@ -1254,7 +1256,7 @@
+                     .maxBy { candidate -> bottomScore(state, candidate.value as BottomCards) }
+             }
+             else -> ArgentumEngineChoice.Action(
+-                AIPlayer.create(cardRegistry, actor, AiProfile.PRODUCTION).chooseAction(state)
++                playerFactory.create(actor, AiProfile.PRODUCTION).chooseAction(state)
+             )
+         }
+ 
