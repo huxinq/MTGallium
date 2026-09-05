@@ -108,3 +108,28 @@ opportunity to investigate, not a prospective gate or a strength result;
 subtracting matching search time describes an optimistic counterfactual,
 not a measured speedup. The two bounded traces do not represent full-game or
 typical-workload frequencies.
+
+For a paired singleton-selection comparison, append `search` or `singleton`:
+
+```text
+<repository-root> <relative-evidence-directory> <base-seed> <maximum-accepted-decisions> <search|singleton>
+```
+
+These modes stop both traces after the same accepted-decision limit (1–256),
+including explicit passes and both seats' actions. They do not impose a search
+count limit. `search` retains the default policy; `singleton` enables
+`PolicySingletonSelectionConfig(enabled = true)` in the responsible policy.
+All in-tree decisions remain explicit and policy compression stays disabled.
+Pending responses and pregame choices remain searched. Singleton selections
+have no search values or visits and therefore produce no searched trajectory
+record; the accepted transition ledger and selection-kind counts retain them.
+
+The comparison also retains private before/after authoritative fingerprints,
+both players' information-state digests, accepted semantic choices, and forced
+transition events. Compare these traces before interpreting elapsed time, then
+compare retained multi-candidate search results and belief diagnostics. Use
+separate JVMs and alternate mode order for a timing comparison. The timings
+include diagnostic observation/evidence overhead and the arena's shadow
+comparator, which is omitted at unsearched roots. They are not a production
+full-game or strength result. The ordinary default remains disabled, preserving
+existing callers' search-label contract and historical behavior identities.

@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -37,6 +38,7 @@ class SearchTeacherPolicyTest {
             cacheSimulationTransitions = false,
             wallClockBudgetMillis = 500,
             minimumSimulations = 7,
+            singletonSelection = PolicySingletonSelectionConfig(enabled = true),
         )
 
         val parameters = config.policyParameters()
@@ -61,6 +63,7 @@ class SearchTeacherPolicyTest {
         assertEquals(config.cacheSimulationTransitions, parameters.cacheSimulationTransitions)
         assertEquals(config.wallClockBudgetMillis, parameters.wallClockBudgetMillis)
         assertEquals(config.minimumSimulations, parameters.minimumSimulations)
+        assertEquals(config.singletonSelection, parameters.singletonSelection)
         assertEquals(config.initialExpansionLimit, parameters.searchConfig().initialExpansionLimit)
         assertEquals(config.wideningThresholds, parameters.searchConfig().wideningThresholds)
         assertEquals(config.wideningLimits, parameters.searchConfig().wideningLimits)
@@ -109,10 +112,68 @@ class SearchTeacherPolicyTest {
     }
 
     @Test
-    fun `production configuration refuses profile-only singleton automation`() {
+    fun `production configuration refuses in-tree profile-only singleton compression`() {
         assertFailsWith<IllegalArgumentException> {
             SearchTeacherRuntimeConfig(policyCompression = PolicyCompressionConfig(enabled = true))
         }
+    }
+
+    @Test
+    fun `policy singleton selection retains the action without claiming a search or rules authority`() {
+        val pass = choice("Pass priority", SemanticOperationFamily.PASS_PRIORITY)
+        val expansion = PolicyExpansion(
+            candidates = listOf(pass),
+            isExhaustive = false,
+            estimatedCandidateCount = null,
+            proposalVersion = "profile-singleton-test-v1",
+            isProfileExhaustive = true,
+            omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA),
+        )
+        val selected = requireNotNull(SearchTeacherSingletonSelection.classify(expansion))
+        assertSame(pass, selected.choice)
+        assertEquals(SearchTeacherSelectionKind.POLICY_SINGLETON_ACTION, selected.kind)
+        assertNull(selected.search)
+        assertNull(SearchTeacherAutomaticSelection.classify(expansion))
+
+        val enabled = SearchTeacherRuntimeConfig(
+            singletonSelection = PolicySingletonSelectionConfig(enabled = true),
+        ).policyParameters()
+        assertEquals(false, enabled.searchConfig().compressPolicySingletonPasses)
+        assertEquals(false, enabled.searchReuse.enabled)
+        assertEquals(false, SearchTeacherRuntimeConfig().singletonSelection.enabled)
+    }
+
+    @Test
+    fun `singleton selection refuses bounded enumeration responses and pregame choices`() {
+        val pass = choice("Pass priority", SemanticOperationFamily.PASS_PRIORITY)
+        val exact = PolicyExpansion(listOf(pass), true, 1, "singleton-test-v1")
+        PolicyExpansionOmissionReason.entries.filterNot { it.intentionalProfileOmission }.forEach { omission ->
+            // Even an inconsistent profile-exhaustive claim cannot hide an explicit bounded omission.
+            for (profileExhaustive in listOf(false, true)) {
+                assertNull(SearchTeacherSingletonSelection.classify(exact.copy(
+                    isExhaustive = false, isProfileExhaustive = profileExhaustive,
+                    omissionReasons = setOf(omission),
+                )))
+            }
+        }
+        val response = SemanticChoice.create(
+            kind = SemanticChoiceKind.DECISION,
+            operationFamily = SemanticOperationFamily.DECISION_RESPONSE,
+            display = SemanticChoiceDisplay("Respond"),
+            canonicalPayload = buildJsonObject { put("response", JsonPrimitive("only")) },
+        )
+        assertNull(SearchTeacherSingletonSelection.classify(exact.copy(candidates = listOf(response))))
+        assertNull(SearchTeacherSingletonSelection.classify(exact.copy(
+            candidates = listOf(choice("Keep hand", SemanticOperationFamily.MULLIGAN)),
+        )))
+        assertNull(SearchTeacherSingletonSelection.classify(exact.copy(
+            candidates = listOf(pass, choice("Play land", SemanticOperationFamily.PLAY_LAND)),
+            estimatedCandidateCount = 2,
+        )))
+        val block = choice("Decline block", SemanticOperationFamily.DECLARE_BLOCKERS)
+        assertSame(block, SearchTeacherSingletonSelection.classify(
+            exact.copy(candidates = listOf(block)),
+        )?.choice)
     }
 
     @Test

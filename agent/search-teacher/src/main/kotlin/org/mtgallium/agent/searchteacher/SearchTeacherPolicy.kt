@@ -16,6 +16,7 @@ import org.mtgallium.agent.infoset.core.PolicyExpansion
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
+import org.mtgallium.agent.infoset.core.SemanticChoiceKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.agent.infoset.core.Weighted
 import org.mtgallium.agent.infoset.core.exactSingletonPassOrNull
@@ -36,6 +37,15 @@ internal fun learnedOutcomeValuePolicyStop(
 
 @Serializable
 data class PolicyCompressionConfig(
+    val schemaVersion: Int = 1,
+    val enabled: Boolean = false,
+) {
+    init { require(schemaVersion == 1) }
+}
+
+/** Select an explicit singleton action without producing search values or visit labels. */
+@Serializable
+data class PolicySingletonSelectionConfig(
     val schemaVersion: Int = 1,
     val enabled: Boolean = false,
 ) {
@@ -87,6 +97,7 @@ data class SearchTeacherPolicyParameters(
     val cacheSimulationTransitions: Boolean = true,
     val wallClockBudgetMillis: Long? = null,
     val minimumSimulations: Int = 1,
+    val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
 ) {
     init {
         require(particles > 0)
@@ -95,7 +106,7 @@ data class SearchTeacherPolicyParameters(
         require(explorationConstant >= 0.0 && explorationConstant.isFinite())
         require(profileId.isNotBlank())
         require(!policyCompression.enabled) {
-            "Profile-only singleton automation is disabled because it can remove genuine player decisions"
+            "In-tree policy singleton compression is disabled because it can remove genuine player decisions"
         }
     }
 
@@ -159,6 +170,8 @@ enum class SearchTeacherSelectionKind {
     /** Retained only so historical records remain decodable; current policy never emits it. */
     SHARED_PREGAME,
     SEARCHED,
+    /** Explicit action selected by the policy; no search values or visits were computed. */
+    POLICY_SINGLETON_ACTION,
 }
 
 data class SearchTeacherPolicySelection(
@@ -178,6 +191,26 @@ object SearchTeacherAutomaticSelection {
             )
         }
         return null
+    }
+}
+
+/** Root selection only: this never compresses a simulation or claims rules-forced authority. */
+internal object SearchTeacherSingletonSelection {
+    fun classify(expansion: PolicyExpansion): SearchTeacherPolicySelection? {
+        if (!expansion.isProfileExhaustive ||
+            expansion.omissionReasons.any { !it.intentionalProfileOmission }
+        ) return null
+        val choice = expansion.candidates.singleOrNull() ?: return null
+        // Responses and pregame decisions retain their existing searched evidence contract.
+        if (choice.kind != SemanticChoiceKind.ACTION ||
+            choice.operationFamily == SemanticOperationFamily.MULLIGAN ||
+            choice.operationFamily == SemanticOperationFamily.DECISION_RESPONSE
+        ) return null
+        return SearchTeacherPolicySelection(
+            choice = choice,
+            search = null,
+            kind = SearchTeacherSelectionKind.POLICY_SINGLETON_ACTION,
+        )
     }
 }
 
@@ -249,6 +282,9 @@ class SearchTeacherPolicySession(
         val expansion = world.expandChoices()
         check(expansion.candidates.isNotEmpty()) { "No semantic candidates are available" }
         SearchTeacherAutomaticSelection.classify(expansion)?.let { return it }
+        if (parameters.singletonSelection.enabled) {
+            SearchTeacherSingletonSelection.classify(expansion)?.let { return it }
+        }
         // Sequential particles are still advanced after every accepted action, but the expensive
         // all-particle digest audit is needed only when its result can affect an actual search.
         belief.synchronize(world, acceptedDecisionCount)
