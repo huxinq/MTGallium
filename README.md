@@ -32,11 +32,10 @@ just check
 MTGallium pins a reviewed Argentum commit rather than following a moving
 branch implicitly. `.gitmodules` retains the
 [canonical upstream URL](https://github.com/wingedsheep/argentum-engine).
-The current pin temporarily combines the reviewed performance contributions
-locally while their upstream PRs are pending. A fresh clone needs this local
-engine commit supplied in its submodule checkout; upstream alone cannot supply
-it yet. See [the integration record](docs/argentum-performance-integration.md)
-for the included heads and the later upstream realignment. `just architecture-check` and
+The current pin includes all five performance contributions merged upstream;
+fresh clones can initialize it directly from the canonical remote.
+See [the integration record](docs/argentum-performance-integration.md)
+for the upstream revision and evidence boundary. `just architecture-check` and
 `just search-teacher-check` are focused validation entry points.
 
 Canonical replays and private experiment evidence are intentionally not part of
