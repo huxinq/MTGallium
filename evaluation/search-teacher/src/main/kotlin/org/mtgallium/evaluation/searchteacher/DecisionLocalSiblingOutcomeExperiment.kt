@@ -382,6 +382,101 @@ private class CapturingLeafEvaluator : ConfiguredInformationStateEvaluator {
     }
 }
 
+internal data class DecisionLocalReconstructedRoot(
+    val worlds: List<ArgentumSearchWorld>,
+    val liveSearchSeed: Long,
+)
+
+/** Shared historical reconstruction authority for the original experiment and its precision follow-up. */
+internal fun reconstructDecisionLocalRoot(
+    pilotDirectory: Path,
+    registry: com.wingedsheep.engine.registry.CardRegistry,
+    deckManifest: DeckManifest,
+    pilot: LearnedLeafFixedRootPilotBinding,
+    root: LearnedLeafFixedRootSelection,
+    learnedEvaluator: ConfiguredInformationStateEvaluator? = null,
+): DecisionLocalReconstructedRoot {
+    val knownDecks = mapOf("p0" to deckManifest.mainDeck, "p1" to deckManifest.mainDeck)
+    val opponent = defaultMonoRedOpponentPolicy()
+    val replay = readVerifiedCanonicalSemanticReplay(
+        fixedRootReplayPath(pilotDirectory, root.replayRelativePath, root.replaySha256)
+    )
+    val actual = createSemanticReplayWorld(
+        registry, deckManifest, root.sourceGameId, root.schedule.replayGameSeed,
+        root.schedule.replayBaseSeed, 0,
+        org.mtgallium.agent.infoset.core.SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+    )
+    val sourceBinding = listOf(pilot.control, pilot.learned).single { it.id == root.sourcePolicyId }
+    val sourceParameters = sourceBinding.composition.parameters(
+        root.schedule.policySearchBaseSeed, sourceBinding.leaf,
+    )
+    require(sourceBinding.id != pilot.learned.id || learnedEvaluator != null)
+    val session = SearchTeacherPolicySession(
+        root = actual,
+        viewer = root.rootActor,
+        knownDecks = knownDecks,
+        parameters = sourceParameters,
+        opponentPolicy = opponent,
+        gameId = root.sourceGameId,
+        informationEvaluator = if (sourceBinding.id == pilot.learned.id) learnedEvaluator else null,
+    )
+    replayFixedRootPrefix(root.decisionIndex, replay, actual, session)
+    require(actual.actorToAct() == root.rootActor)
+    require(actual.informationState(root.rootActor).informationStateDigest == root.rootInformationStateDigest)
+    val candidates = actual.expandChoices().candidates
+    require(candidates.map { it.signature }.sorted() == root.candidateSignatures)
+    val belief = session.beliefBatch(actual)
+    val liveSearchSeed = ComponentSeeds.derive(
+        root.schedule.originalGameId, root.schedule.decisionIndex,
+        root.schedule.policySearchBaseSeed, "live-search",
+    )
+    val indices = InformationSetSearch.productionRootParticleIndices(
+        belief.particles.map { it.weight }, liveSearchSeed, 64,
+    )
+    require(indices == root.schedule.coordinates.map { it.rootParticleIndex })
+    return DecisionLocalReconstructedRoot(
+        belief.particles.map { it.value as ArgentumSearchWorld }, liveSearchSeed,
+    )
+}
+
+@Serializable
+internal data class DecisionLocalTerminalSample(
+    val replicate: Int,
+    val particleIndex: Int,
+    val futureSeed: Long,
+    val continuationSeed: Long,
+    val payoff: Double,
+    val policyDecisions: Int,
+    val elapsedMillis: Double,
+) { init { require(payoff in -1.0..1.0) } }
+
+/** The original seed domains and production terminal continuation are shared verbatim. */
+internal fun continueDecisionLocalCandidate(
+    reconstructed: DecisionLocalReconstructedRoot,
+    root: LearnedLeafFixedRootSelection,
+    split: DecisionLocalSplit,
+    signature: String,
+    replicate: Int,
+    search: InformationSetSearch,
+): DecisionLocalTerminalSample {
+    val coordinate = root.schedule.coordinates[replicate % root.schedule.coordinates.size]
+    val futureSeed = ComponentSeeds.derive(DECISION_LOCAL_CONTINUATION_SEED_RULE, root.id, split.name, replicate)
+    val continuationSeed = ComponentSeeds.derive(reconstructed.liveSearchSeed, split.name, replicate, "terminal-continuation")
+    val child = reconstructed.worlds[coordinate.rootParticleIndex].forkForHypotheticalSearch(futureSeed)
+    val choice = child.expandChoices().candidates.single { it.signature == signature }
+    require(child.stepWithReplayTrace(choice).result.accepted)
+    val started = System.nanoTime()
+    var decisions = 0
+    val payoff = child.terminalPayoff(root.rootActor) ?: search.continueFirstUnvisitedEdgeToTerminal(
+        child, root.rootActor, continuationSeed, coordinate.productionSimulationIndex,
+        childDepth = 1, maximumContinuationPolicyDecisions = DECISION_LOCAL_MAX_CONTINUATION_DECISIONS,
+    ).also { decisions = it.policyDecisions }.payoff
+    return DecisionLocalTerminalSample(
+        replicate, coordinate.rootParticleIndex, futureSeed, continuationSeed, payoff, decisions,
+        (System.nanoTime() - started) / 1_000_000.0,
+    )
+}
+
 internal class DecisionLocalEvidenceMaterializer(
     private val pilotDirectory: Path,
     private val registry: com.wingedsheep.engine.registry.CardRegistry,
@@ -420,41 +515,10 @@ internal class DecisionLocalEvidenceMaterializer(
         independentReplicates: Int,
     ): DecisionLocalRootEvidence {
         require(primaryReplicates >= DECISION_LOCAL_PRIMARY_REPLICATES)
-        val replay = readVerifiedCanonicalSemanticReplay(
-            fixedRootReplayPath(pilotDirectory, root.replayRelativePath, root.replaySha256)
+        val reconstructed = reconstructDecisionLocalRoot(
+            pilotDirectory, registry, deckManifest, manifest.pilot, root, failedGlobal,
         )
-        val actual = createSemanticReplayWorld(
-            registry, deckManifest, root.sourceGameId, root.schedule.replayGameSeed,
-            root.schedule.replayBaseSeed, 0,
-            org.mtgallium.agent.infoset.core.SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-        )
-        val sourceBinding = listOf(manifest.pilot.control, manifest.pilot.learned).single { it.id == root.sourcePolicyId }
-        val sourceParameters = sourceBinding.composition.parameters(
-            root.schedule.policySearchBaseSeed, sourceBinding.leaf,
-        )
-        val session = SearchTeacherPolicySession(
-            root = actual,
-            viewer = root.rootActor,
-            knownDecks = knownDecks,
-            parameters = sourceParameters,
-            opponentPolicy = opponent,
-            gameId = root.sourceGameId,
-            informationEvaluator = if (sourceBinding.id == manifest.pilot.learned.id) failedGlobal else null,
-        )
-        replayFixedRootPrefix(root.decisionIndex, replay, actual, session)
-        require(actual.actorToAct() == root.rootActor)
-        require(actual.informationState(root.rootActor).informationStateDigest == root.rootInformationStateDigest)
-        val candidates = actual.expandChoices().candidates
-        require(candidates.map { it.signature }.sorted() == root.candidateSignatures)
-        val belief = session.beliefBatch(actual)
-        val liveSearchSeed = ComponentSeeds.derive(
-            root.schedule.originalGameId, root.schedule.decisionIndex,
-            root.schedule.policySearchBaseSeed, "live-search",
-        )
-        val indices = InformationSetSearch.productionRootParticleIndices(
-            belief.particles.map { it.weight }, liveSearchSeed, DECISION_LOCAL_FEATURE_WORLDS,
-        )
-        require(indices == root.schedule.coordinates.map { it.rootParticleIndex })
+        val liveSearchSeed = reconstructed.liveSearchSeed
         val candidateEvidence = root.candidateSignatures.map { signature ->
             val featureAccumulator = linkedMapOf<String, Double>()
             var terminalOffset = 0.0
@@ -463,7 +527,7 @@ internal class DecisionLocalEvidenceMaterializer(
             var global = 0.0
             val featureDigests = mutableListOf<String>()
             root.schedule.coordinates.forEachIndexed { scheduleIndex, coordinate ->
-                val base = belief.particles[coordinate.rootParticleIndex].value as ArgentumSearchWorld
+                val base = reconstructed.worlds[coordinate.rootParticleIndex]
                 val child = base.fork() as ArgentumSearchWorld
                 val choice = child.expandChoices().candidates.single { it.signature == signature }
                 val step = child.stepWithReplayTrace(choice)
@@ -514,26 +578,10 @@ internal class DecisionLocalEvidenceMaterializer(
             var policyDecisions = 0
             var runtimeNanos = 0L
             repeat(primaryReplicates + independentReplicates) { replicate ->
-                val coordinate = root.schedule.coordinates[replicate % root.schedule.coordinates.size]
-                val base = belief.particles[coordinate.rootParticleIndex].value as ArgentumSearchWorld
-                val futureSeed = ComponentSeeds.derive(
-                    DECISION_LOCAL_CONTINUATION_SEED_RULE, root.id, split.name, replicate,
-                )
-                val child = base.forkForHypotheticalSearch(futureSeed)
-                val choice = child.expandChoices().candidates.single { it.signature == signature }
-                val step = child.stepWithReplayTrace(choice)
-                require(step.result.accepted)
-                val started = System.nanoTime()
-                val payoff = child.terminalPayoff(root.rootActor) ?: terminalSearch
-                    .continueFirstUnvisitedEdgeToTerminal(
-                        child, root.rootActor,
-                        ComponentSeeds.derive(liveSearchSeed, split.name, replicate, "terminal-continuation"),
-                        coordinate.productionSimulationIndex,
-                        childDepth = 1,
-                        maximumContinuationPolicyDecisions = DECISION_LOCAL_MAX_CONTINUATION_DECISIONS,
-                    ).also { continuation -> policyDecisions += continuation.policyDecisions }.payoff
-                runtimeNanos += System.nanoTime() - started
-                if (replicate < primaryReplicates) primary += payoff else independent += payoff
+                val sample = continueDecisionLocalCandidate(reconstructed, root, split, signature, replicate, terminalSearch)
+                policyDecisions += sample.policyDecisions
+                runtimeNanos += (sample.elapsedMillis * 1_000_000.0).toLong()
+                if (replicate < primaryReplicates) primary += sample.payoff else independent += sample.payoff
             }
             DecisionLocalCandidateEvidence(
                 signature = signature,

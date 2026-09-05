@@ -66,6 +66,22 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
     // constructing the full Argentum card registry during their fail-fast input-validation phase.
     val manifest by lazy { loadDeckManifest(options.deckManifest) }
     val registry by lazy(::buildRegistry)
+    if (options.suite in setOf("decision-local-precision-preflight", "decision-local-precision-followup")) {
+        val output = diagnosticOutput(requireNotNull(options.outputPath))
+        val runner = DecisionLocalPrecisionFollowup(root, registry, manifest)
+        if (options.suite == "decision-local-precision-preflight") {
+            runner.preflight(requireNotNull(options.precisionParent), requireNotNull(options.fixedRootManifest),
+                requireNotNull(options.fixedRootPilot), output)
+            println("Precision preflight verified the retained population and two old terminal outcomes; output=$output")
+        } else {
+            val progress = System.getenv("MTGALLIUM_PROGRESS_FILE")?.takeIf(String::isNotBlank)?.let(Path::of)
+            val report = runner.run(requireNotNull(options.precisionParent), requireNotNull(options.fixedRootManifest),
+                requireNotNull(options.fixedRootPilot), output, progress)
+            println("Precision follow-up ${report.researchRunIdentity}: ${report.conclusion}; output=$output")
+            check(report.failedRoots == 0 && report.completedTerminalContinuations == 2808) { "Inspect retained incomplete precision population" }
+        }
+        return
+    }
     if (options.suite == "decision-local-root-freeze") {
         val output = diagnosticOutput(requireNotNull(options.outputPath))
         val frozen = DecisionLocalRootFreezer(root, registry, manifest).freeze(
