@@ -1,0 +1,14 @@
+// Compile the ordinary source and expose its runtime classpath for the standalone diagnostic.
+gradle.projectsEvaluated {
+    def evaluation = gradle.rootProject.findProject(':evaluation:search-teacher')
+    if (evaluation == null) return
+    evaluation.tasks.register('searchAdapterProfileClasspath') {
+        dependsOn evaluation.tasks.named('classes')
+        dependsOn evaluation.sourceSets.main.runtimeClasspath
+        doLast {
+            def destination = System.getenv('MTGALLIUM_PROFILE_CLASSPATH')
+            if (!destination) throw new GradleException('MTGALLIUM_PROFILE_CLASSPATH is required')
+            new File(destination).text = evaluation.sourceSets.main.runtimeClasspath.asPath
+        }
+    }
+}
