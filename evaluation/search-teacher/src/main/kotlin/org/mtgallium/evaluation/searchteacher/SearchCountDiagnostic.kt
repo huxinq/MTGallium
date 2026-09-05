@@ -23,14 +23,20 @@ internal object SearchCountDiagnostic {
     // Use the owning research hash implementation for the ordinary, non-overlaid runtime inputs.
     private fun runtimeFiles(): Map<String, String> = buildMap {
         System.getProperty("java.class.path").split(File.pathSeparator).forEach { entry ->
-            val path = Path.of(entry).toRealPath()
-            if (Files.isDirectory(path)) {
+            val declared = Path.of(entry).toAbsolutePath().normalize()
+            if (!Files.exists(declared)) {
+                // Gradle includes output directories for source sets with no Java/resources.
+                // Retain their absence so creating one during the run still fails the guard.
+                put(declared.toString(), "ABSENT")
+            } else if (Files.isDirectory(declared)) {
+                val path = declared.toRealPath()
                 Files.walk(path).use { files ->
                     files.filter(Files::isRegularFile).sorted().forEach { file ->
                         put(file.toString(), researchSha256File(file))
                     }
                 }
             } else {
+                val path = declared.toRealPath()
                 put(path.toString(), researchSha256File(path))
             }
         }
