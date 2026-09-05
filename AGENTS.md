@@ -129,6 +129,22 @@ verification, orchestration, serialization, and avoidable reasoning. Use the
 least intensive model or agent effort unlikely to reduce decision-relevant
 quality; raise it for semantic ambiguity or genuine difficulty.
 
+When work encounters friction, briefly investigate its cause. Consider the
+prompt and assumptions, workflow instructions or fixtures, tools, code
+organization, implementation, and documentation, as well as the agent's own
+unnecessary caution, repeated checking, or over-analysis. Ground the diagnosis
+in what happened and distinguish a suspected cause from an established one.
+
+Raise actionable findings in ordinary progress updates or the handoff: what
+caused the friction, its practical cost, and the smallest useful remedy. Make
+small, local, reversible fixes within established authority autonomously,
+verify them proportionately, and report the result. If changing the agent's
+own behavior is sufficient, make that adjustment directly. For larger remedies
+or unresolved research choices, present the concrete issue and proposed next
+step while continuing independent work. Keep reflection proportionate to the
+friction; it should not become a mandatory audit at every step or a reason to
+add machinery without a demonstrated need.
+
 Owner research environments may provide durable execution for substantial
 compute. When available, use it after cheap preflight and inspect retained
 outputs after completion rather than rerunning expensive work. Durable
