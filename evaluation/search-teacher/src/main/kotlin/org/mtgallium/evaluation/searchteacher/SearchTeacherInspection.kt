@@ -28,6 +28,8 @@ import org.mtgallium.agent.infoset.core.SemanticChoice
 /** Builds one normalized, perspective-safe replay directly from runtime policy DTOs. */
 internal class PolicyInspectionRecorder(
     private val gameId: String,
+    /** Time of the game represented by this bundle, not necessarily the later derivation time. */
+    private val createdAtUtc: String = Instant.now().toString(),
     private val outerCommit: String,
     private val argentumCommit: String,
     private val deckManifestHash: String,
@@ -136,7 +138,7 @@ internal class PolicyInspectionRecorder(
         }
         return PolicyInspectionBundle(
             gameId = gameId,
-            createdAtUtc = Instant.now().toString(),
+            createdAtUtc = createdAtUtc,
             outerCommit = outerCommit,
             argentumCommit = argentumCommit,
             deckManifestHash = deckManifestHash,

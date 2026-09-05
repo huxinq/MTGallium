@@ -9,6 +9,110 @@ import kotlin.test.assertFailsWith
 
 class InformationSetSearchTest {
     @Test
+    fun `terminal continuation uses both fixed rollout seats and returns only actual payoff`() {
+        val rootPolicy = RecordingPolicy("root-terminal-policy")
+        val opponentPolicy = RecordingPolicy("opponent-terminal-policy")
+        val search = coreSearch(
+            InformationSetSearchConfig(
+                simulations = 1,
+                maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT,
+                    LeafEvaluator.ARGENTUM_BOARD_V1,
+                ),
+            ),
+            opponentPolicy = UniformOpponentPolicy,
+            rolloutPolicy = rootPolicy,
+            rolloutOpponentPolicy = opponentPolicy,
+        )
+
+        val continuation = search.continueFirstUnvisitedEdgeToTerminal(
+            childWorld = FakeWorld(terminalAtDepth = 3),
+            rootPlayer = "p0",
+            searchSeed = 17L,
+            simulationIndex = 2,
+        )
+
+        assertEquals(1.0, continuation.payoff)
+        assertEquals(3, continuation.policyDecisions)
+        assertEquals(2, continuation.rootPolicyDecisions.decisions)
+        assertEquals(1, continuation.opponentPolicyDecisions.decisions)
+        assertEquals(listOf<String?>("p0", "p0"), rootPolicy.actors)
+        assertEquals(listOf<String?>("p1"), opponentPolicy.actors)
+    }
+
+    @Test
+    fun `terminal continuation accepts payoff reached on the final permitted decision`() {
+        val search = coreSearch(
+            InformationSetSearchConfig(
+                simulations = 1,
+                maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+            ),
+            opponentPolicy = UniformOpponentPolicy,
+        )
+        val result = search.continueFirstUnvisitedEdgeToTerminal(
+            childWorld = FakeWorld(terminalAtDepth = 1), rootPlayer = "p0",
+            searchSeed = 18L, simulationIndex = 0, maximumContinuationPolicyDecisions = 1,
+        )
+        assertEquals(1.0, result.payoff)
+        assertEquals(1, result.policyDecisions)
+        assertEquals(1, result.rootPolicyDecisions.decisions)
+    }
+
+    @Test
+    fun `terminal continuation exhaustion is a software failure rather than a value`() {
+        val search = coreSearch(
+            InformationSetSearchConfig(
+                simulations = 1,
+                maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT,
+                    LeafEvaluator.ARGENTUM_BOARD_V1,
+                ),
+            ),
+            opponentPolicy = UniformOpponentPolicy,
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            search.continueFirstUnvisitedEdgeToTerminal(
+                childWorld = FakeWorld(), rootPlayer = "p0", searchSeed = 18L,
+                simulationIndex = 0, maximumContinuationPolicyDecisions = 2,
+            )
+        }
+
+        assertTrue(failure.message.orEmpty().contains("exhausted"))
+    }
+
+    @Test
+    fun `first unvisited edge seam retains the production terminal bypass`() {
+        val search = coreSearch(
+            InformationSetSearchConfig(
+                simulations = 1,
+                maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1),
+            ),
+            opponentPolicy = UniformOpponentPolicy,
+        )
+
+        val settlement = search.settleFirstUnvisitedEdge(
+            childWorld = FakeWorld(terminalAtDepth = 0), rootPlayer = "p0", searchSeed = 17L, simulationIndex = 0,
+        )
+
+        assertEquals(SearchSettlement(1.0, SearchSettlementOrigin.TERMINAL_PAYOFF), settlement)
+    }
+
+    @Test
+    fun `historical settlement counts retain no fabricated learned estimate`() {
+        val historical = PolicyJson.format.decodeFromString<SearchSettlementCounts>(
+            """{"terminalPayoffBackups":1,"heuristicSettlementBackups":2,"neutralUnresolvedSettlementBackups":3}"""
+        )
+
+        assertEquals(0, historical.learnedOutcomeEstimateBackups)
+        assertEquals(6, historical.successfulBackups)
+    }
+
+    @Test
     fun `serialized search winner uses the production visit value and signature ordering`() {
         val first = quiescenceChoice("first")
         val second = quiescenceChoice("second")
@@ -1042,6 +1146,8 @@ private fun testLeafEvaluationStrategy(
         settleAtRolloutHorizon = true,
         unresolvedLeafHandling = UnresolvedLeafHandling.BACK_UP_NEUTRAL,
     )
+    LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 ->
+        error("Core search fixtures do not construct Search Teacher checkpoint evaluators")
     LeafEvaluator.ARGENTUM_BOARD_V1 -> LeafEvaluationStrategy(
         evaluator.evaluatorId,
         LeafValueSource.SampledWorld(evaluator.evaluatorId),

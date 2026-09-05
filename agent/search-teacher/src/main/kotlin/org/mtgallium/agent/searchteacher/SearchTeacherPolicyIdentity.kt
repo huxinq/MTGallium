@@ -150,7 +150,7 @@ object SearchTeacherPolicyIdentity {
             "Policy action-space profile does not match the world's candidate generator"
         }
         val evaluator = SearchTeacherEvaluatorRegistry.strategy(
-            parameters.leaf.evaluator,
+            parameters.leaf,
             informationEvaluator,
         )
         return SearchTeacherBehaviorSpecification(
@@ -230,7 +230,7 @@ object SearchTeacherPolicyIdentity {
             invokedEvaluatorId = source.invokedEvaluatorId,
             invokedEvaluatorConfigurationId = source.invokedEvaluatorConfigurationId,
             valueSource = when (source) {
-                is LeafValueSource.Information -> "acting-player-information-v1"
+                is LeafValueSource.Information -> "root-player-policy-information-v1"
                 is LeafValueSource.SampledWorld -> "sampled-world-allowlist-v1"
             },
             supportsTraceReuse = supportsTraceReuse,

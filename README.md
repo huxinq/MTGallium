@@ -11,6 +11,10 @@ The production policy is a hand-authored information-set Search Teacher over a
 pinned Argentum engine; learned-policy work is exploratory rather than the
 production policy.
 
+The [experimental learned outcome-value subsystem](docs/learned-outcome-value.md)
+includes checkpoint inference, training and admission, and research diagnostics.
+Its private inputs and historical engine compatibility remain explicit.
+
 The system separates engine-private refereeing from policy-visible information,
 represented player knowledge, semantic action identity, hidden-world search,
 and evidence tooling. `agent/infoset-argentum` is the trusted boundary allowed

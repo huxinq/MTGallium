@@ -177,15 +177,15 @@ internal object ReplayReviewDecisionIntake {
         val header = records.firstOrNull() as? CanonicalReplayHeader
             ?: error("Canonical replay does not begin with a header")
         require(header.gameId == draft.source.gameId)
-        val runIdentity = header.extensionString("mtgallium.runIdentity")
-        val outerCommit = header.extensionString("mtgallium.outerCommit")
-        val argentumCommit = header.extensionString("mtgallium.argentumCommit")
+        val runIdentity = header.requireExtensionString("mtgallium.runIdentity")
+        val outerCommit = header.requireExtensionString("mtgallium.outerCommit")
+        val argentumCommit = header.requireExtensionString("mtgallium.argentumCommit")
         require(runIdentity == draft.source.runIdentity)
         require(outerCommit == draft.source.outerCommit && argentumCommit == draft.source.argentumCommit)
-        require(header.extensionString("mtgallium.deckHash") == manifest.deckHash())
-        require(header.extensionString("mtgallium.cardPoolHash") == manifest.cardPoolHash())
-        val gameSeed = header.extensionLong("mtgallium.gameSeed")
-        val baseSeed = header.extensionLong("mtgallium.baseSeed")
+        require(header.requireExtensionString("mtgallium.deckHash") == manifest.deckHash())
+        require(header.requireExtensionString("mtgallium.cardPoolHash") == manifest.cardPoolHash())
+        val gameSeed = header.requireExtensionLong("mtgallium.gameSeed")
+        val baseSeed = header.requireExtensionLong("mtgallium.baseSeed")
         val choices = records.filterIsInstance<CanonicalReplayTransition>().mapNotNull { transition ->
             val decision = (transition.extensions["mtgallium.decisionIndex"] as? JsonPrimitive)?.content?.toInt()
                 ?: return@mapNotNull null
@@ -244,6 +244,35 @@ internal fun reconstructReplayReviewWorld(
     startingPlayerIndex: Int,
     profile: SearchActionSpaceProfile,
     semanticPrefix: List<SemanticChoice>,
+): ArgentumSearchWorld = createSemanticReplayWorld(
+    registry = registry,
+    manifest = manifest,
+    gameId = gameId,
+    gameSeed = gameSeed,
+    searchBaseSeed = searchBaseSeed,
+    startingPlayerIndex = startingPlayerIndex,
+    profile = profile,
+).also { world ->
+    semanticPrefix.forEachIndexed { index, choice ->
+        val exact = world.expandChoices().candidates.singleOrNull { it.signature == choice.signature }
+            ?: error("Authenticated semantic prefix choice $index is no longer legal")
+        require(world.step(exact).accepted) { "Authenticated semantic prefix choice $index was rejected" }
+    }
+}
+
+/**
+ * One engine-backed authority for recreating a semantic replay world from its declared setup.
+ * Review intake, derived evidence, and other replay consumers must add policy meaning above this
+ * boundary rather than independently rebuilding the game/adapter lifecycle.
+ */
+internal fun createSemanticReplayWorld(
+    registry: CardRegistry,
+    manifest: DeckManifest,
+    gameId: String,
+    gameSeed: Long,
+    searchBaseSeed: Long,
+    startingPlayerIndex: Int,
+    profile: SearchActionSpaceProfile,
 ): ArgentumSearchWorld {
     val environment = GameEnvironment.create(registry).also { game ->
         game.reset(
@@ -264,18 +293,7 @@ internal fun reconstructReplayReviewWorld(
         gameId = gameId,
         seedBase = searchBaseSeed,
         effectiveSetupSeed = gameSeed,
-       expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
-       knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
-    ).also { world ->
-        semanticPrefix.forEachIndexed { index, choice ->
-            val exact = world.expandChoices().candidates.singleOrNull { it.signature == choice.signature }
-                ?: error("Authenticated semantic prefix choice $index is no longer legal")
-            require(world.step(exact).accepted) { "Authenticated semantic prefix choice $index was rejected" }
-        }
-    }
+        expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
+        knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck),
+    )
 }
-
-private fun CanonicalReplayHeader.extensionString(key: String): String =
-    (extensions[key] as? JsonPrimitive)?.content ?: error("Canonical replay header lacks $key")
-
-private fun CanonicalReplayHeader.extensionLong(key: String): Long = extensionString(key).toLong()

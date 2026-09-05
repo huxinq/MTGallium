@@ -11,7 +11,9 @@ import com.wingedsheep.sdk.model.EntityId
 import com.wingedsheep.sdk.scripting.effects.GainLifeEffect
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 class ArgentumStateFingerprintTest {
     private val sourceId = EntityId.of("source")
@@ -62,6 +64,31 @@ class ArgentumStateFingerprintTest {
 
         assertEquals(ArgentumStateFingerprint.of(left), ArgentumStateFingerprint.of(equivalent))
         assertNotEquals(ArgentumStateFingerprint.of(left), ArgentumStateFingerprint.of(brokenRouting))
+        assertTrue(ArgentumStateFingerprint.routingNormalizedEquals(left, equivalent))
+        assertEquals(null, ArgentumStateFingerprint.firstRoutingNormalizedDifference(left, equivalent))
+        assertFalse(ArgentumStateFingerprint.routingNormalizedEquals(left, brokenRouting))
+        assertEquals(
+            "/continuationStack/0/decisionId",
+            ArgentumStateFingerprint.firstRoutingNormalizedDifference(left, brokenRouting)?.path,
+        )
+        assertFalse(ArgentumStateFingerprint.routingNormalizedEquals(left, equivalent.copy(turnNumber = 1)))
+        assertEquals(
+            ArgentumStateDifference("/turnNumber", "0", "1"),
+            ArgentumStateFingerprint.firstRoutingNormalizedDifference(left, equivalent.copy(turnNumber = 1)),
+        )
+    }
+
+    @Test
+    fun `routing normalized equality ignores map insertion order`() {
+        val left = GameState(
+            playerSpellsCastThisTurn = linkedMapOf(sourceId to 1, controllerId to 2),
+        )
+        val right = GameState(
+            playerSpellsCastThisTurn = linkedMapOf(controllerId to 2, sourceId to 1),
+        )
+
+        assertEquals(left, right)
+        assertTrue(ArgentumStateFingerprint.routingNormalizedEquals(left, right))
     }
 
     private fun delayedTrigger(id: String, life: Int = 1) = DelayedTriggeredAbility(

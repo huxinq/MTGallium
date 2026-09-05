@@ -22,18 +22,32 @@ object ArgentumStateFingerprint {
     }
 
     fun of(state: GameState): String {
-        val semanticState = normalizeRoutingIds(json.encodeToJsonElement(state))
+        val semanticState = routingNormalizedState(state)
         return PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), semanticState))
     }
 
+    /** Exact full-state equality modulo only established ephemeral routing-nonce spellings. */
+    fun routingNormalizedEquals(left: GameState, right: GameState): Boolean =
+        routingNormalizedState(left) == routingNormalizedState(right)
+
+    /** First exact path that differs after applying the same routing normalization as [of]. */
+    fun firstRoutingNormalizedDifference(
+        expected: GameState,
+        actual: GameState,
+    ): ArgentumStateDifference? = firstDifference(
+        expected = routingNormalizedState(expected),
+        actual = routingNormalizedState(actual),
+        path = "",
+    )
+
     /** Privileged diagnostic hashes by serialized GameState root field; values never leave trusted evidence. */
     fun componentDigests(state: GameState): Map<String, String> {
-        val semanticState = normalizeRoutingIds(json.encodeToJsonElement(state)) as JsonObject
+        val semanticState = routingNormalizedState(state) as JsonObject
         return componentDigests(semanticState)
     }
 
     fun evidence(state: GameState): ArgentumAuthoritativeStateEvidence {
-        val semanticState = normalizeRoutingIds(json.encodeToJsonElement(state)) as JsonObject
+        val semanticState = routingNormalizedState(state) as JsonObject
         return ArgentumAuthoritativeStateEvidence(
             fingerprint = PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), semanticState)),
             componentDigests = componentDigests(semanticState),
@@ -53,6 +67,9 @@ object ArgentumStateFingerprint {
         semanticState.entries.sortedBy { it.key }.associate { (key, value) ->
             key to PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), value))
         }
+
+    private fun routingNormalizedState(state: GameState): JsonElement =
+        normalizeRoutingIds(json.encodeToJsonElement(state))
 
     /**
      * Decision ids and delayed-trigger ids are generated correlation tokens. A replay constructs
@@ -107,6 +124,48 @@ object ArgentumStateFingerprint {
         }
     }
 
+    private fun firstDifference(
+        expected: JsonElement,
+        actual: JsonElement,
+        path: String,
+    ): ArgentumStateDifference? {
+        if (expected == actual) return null
+        return when {
+            expected is JsonObject && actual is JsonObject -> {
+                (expected.keys + actual.keys).toSortedSet().firstNotNullOfOrNull { key ->
+                    val childPath = "$path/${jsonPointerSegment(key)}"
+                    val expectedChild = expected[key]
+                    val actualChild = actual[key]
+                    when {
+                        expectedChild == null || actualChild == null -> ArgentumStateDifference(
+                            path = childPath,
+                            expected = expectedChild?.toString(),
+                            actual = actualChild?.toString(),
+                        )
+                        else -> firstDifference(expectedChild, actualChild, childPath)
+                    }
+                }
+            }
+            expected is JsonArray && actual is JsonArray -> {
+                val commonSize = minOf(expected.size, actual.size)
+                (0 until commonSize).firstNotNullOfOrNull { index ->
+                    firstDifference(expected[index], actual[index], "$path/$index")
+                } ?: ArgentumStateDifference(
+                    path = "$path/$commonSize",
+                    expected = expected.getOrNull(commonSize)?.toString(),
+                    actual = actual.getOrNull(commonSize)?.toString(),
+                )
+            }
+            else -> ArgentumStateDifference(
+                path = path.ifEmpty { "/" },
+                expected = expected.toString(),
+                actual = actual.toString(),
+            )
+        }
+    }
+
+    private fun jsonPointerSegment(value: String): String = value.replace("~", "~0").replace("/", "~1")
+
     private fun normalizeLegacyDecisionRouting(
         element: JsonElement,
         insidePendingDecision: Boolean = false,
@@ -125,6 +184,12 @@ object ArgentumStateFingerprint {
         is JsonPrimitive -> element
     }
 }
+
+data class ArgentumStateDifference(
+    val path: String,
+    val expected: String?,
+    val actual: String?,
+)
 
 data class ArgentumAuthoritativeStateEvidence(
     val fingerprint: String,

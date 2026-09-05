@@ -20,7 +20,7 @@ import org.mtgallium.research.run.ResearchRunCheckpoints
 internal const val SEARCH_BUDGET_FRONTIER_EXTENSION_PROTOCOL = "search-budget-frontier-extension-v1"
 internal const val SEARCH_BUDGET_FRONTIER_EXTENSION_PAIRS = 100
 internal const val SEARCH_BUDGET_FRONTIER_EXTENSION_START = 50
-private const val SEARCH_BUDGET_FRONTIER_EXTENSION_CHECKPOINT_SCHEMA = "search-budget-frontier-extension-pair-v1"
+internal const val SEARCH_BUDGET_FRONTIER_EXTENSION_CHECKPOINT_SCHEMA = "search-budget-frontier-extension-pair-v1"
 private const val SEARCH_BUDGET_FRONTIER_ORIGINAL_DIRECTORY =
     "search-budget-frontier/713a9feaaf2b83209a85a4e6"
 
@@ -49,6 +49,37 @@ internal data class SearchBudgetFrontierExtensionPair(
     /** One p0-safe trajectory/sidecar per game; seat swapping balances policy coverage. */
     val plannerArtifacts: List<SearchBudgetFrontierPlannerArtifact>,
 )
+
+internal data class VerifiedSearchBudgetFrontierExtensionCheckpoint(
+    val pair: SearchBudgetFrontierExtensionPair,
+    val payloadSha256: String,
+)
+
+/**
+ * Fail-closed reader for the retained extension's pair authority. Ordinary resume may elect to
+ * treat a refusal as a cache miss; evidence derivations consume this strict form directly.
+ */
+internal fun readSearchBudgetFrontierExtensionCheckpoint(
+    path: Path,
+    expectedIdentity: String,
+    expectedPairIndex: Int? = null,
+    expectedSeed: Long? = null,
+): VerifiedSearchBudgetFrontierExtensionCheckpoint {
+    val envelope = ResearchRunCheckpoints.load(path)
+    require(envelope.researchRunIdentity == expectedIdentity) {
+        "Extension pair checkpoint belongs to ${envelope.researchRunIdentity}, not $expectedIdentity"
+    }
+    require(envelope.payloadSchema == SEARCH_BUDGET_FRONTIER_EXTENSION_CHECKPOINT_SCHEMA) {
+        "Unexpected extension pair checkpoint schema ${envelope.payloadSchema}"
+    }
+    val pair = evidenceJson.decodeFromString<SearchBudgetFrontierExtensionPair>(
+        envelope.payload().decodeToString(),
+    )
+    expectedPairIndex?.let { require(pair.pair.pairIndex == it) }
+    expectedSeed?.let { require(pair.pair.seed == it) }
+    require(pair.pair.games.size in 1..2)
+    return VerifiedSearchBudgetFrontierExtensionCheckpoint(pair, envelope.payloadSha256)
+}
 
 @Serializable
 internal data class SearchBudgetFrontierTrancheSummary(
@@ -292,9 +323,8 @@ internal class SearchBudgetFrontierExtensionRunner(
     }.getOrNull()
 
     private fun loadExtensionPair(path: Path, identity: String, pairIndex: Int, seed: Long): SearchBudgetFrontierExtensionPair? = runCatching {
-        ResearchRunCheckpoints.load(path).also { require(it.researchRunIdentity == identity && it.payloadSchema == SEARCH_BUDGET_FRONTIER_EXTENSION_CHECKPOINT_SCHEMA) }
-            .payload().decodeToString().let { evidenceJson.decodeFromString<SearchBudgetFrontierExtensionPair>(it) }
-    }.getOrNull()?.takeIf { it.pair.pairIndex == pairIndex && it.pair.seed == seed && it.pair.games.size in 1..2 }
+        readSearchBudgetFrontierExtensionCheckpoint(path, identity, pairIndex, seed).pair
+    }.getOrNull()
 
     private fun persistExtensionPair(path: Path, identity: String, pairIndex: Int, seed: Long, games: List<GameRunResult>, directory: Path) {
         val pair = extensionPair(pairIndex, seed, games, directory)

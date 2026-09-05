@@ -42,6 +42,127 @@ class InformationSetSearch(
         continuityEpoch = null
     }
 
+    /**
+     * Settles the child just selected through an unvisited production edge.
+     *
+     * This is the authoritative narrow seam for fixed-root diagnostics: it uses precisely the
+     * configured leaf route, terminal bypass, clipping, quiescence, forced-pass handling, and
+     * rollout seed derivation that [search] uses at `edge.visits == 0`. It does not create a tree,
+     * allocate visits, or expose a complete world outside its caller's existing trusted boundary.
+     */
+    fun settleFirstUnvisitedEdge(
+        childWorld: SearchWorld,
+        rootPlayer: String,
+        searchSeed: Long,
+        simulationIndex: Int,
+        childDepth: Int = 1,
+    ): SearchSettlement {
+        require(childDepth > 0)
+        return leafValue(
+            world = childWorld,
+            rootPlayer = rootPlayer,
+            tree = linkedMapOf(),
+            searchSeed = searchSeed,
+            simulationIndex = simulationIndex,
+            depth = childDepth,
+            onDepth = {},
+            onWiden = {},
+            rolloutAudit = RolloutPolicyAudit(),
+            quiescenceAudit = QuiescenceAudit(),
+            workAudit = SearchWorkAudit(),
+        )
+    }
+
+    /**
+     * Continues an already-applied first edge to an actual engine terminal state with the exact
+     * production root/opponent rollout-policy pair and seed derivation. This diagnostic seam never
+     * invokes a leaf evaluator or converts exhaustion, missing choices, rejection, or policy
+     * replacement into a payoff.
+     */
+    fun continueFirstUnvisitedEdgeToTerminal(
+        childWorld: SearchWorld,
+        rootPlayer: String,
+        searchSeed: Long,
+        simulationIndex: Int,
+        childDepth: Int = 1,
+        maximumContinuationPolicyDecisions: Int = 4096,
+    ): TerminalPolicyContinuation {
+        require(childDepth > 0)
+        require(maximumContinuationPolicyDecisions > 0)
+        check(!config.compressPolicySingletonPasses) {
+            "Terminal evidence requires the production uncompressed rollout-policy decision path"
+        }
+        val world = childWorld.fork()
+        val rootAudit = OpponentPolicyDecisionCounter()
+        val opponentAudit = OpponentPolicyDecisionCounter()
+        var depth = childDepth
+        repeat(maximumContinuationPolicyDecisions) {
+            world.terminalPayoff(rootPlayer)?.let { payoff ->
+                return TerminalPolicyContinuation(
+                    payoff,
+                    depth - childDepth,
+                    rootAudit.summary(),
+                    opponentAudit.summary(),
+                )
+            }
+            val expansion = initialExpansion(world)
+            check(expansion.candidates.isNotEmpty()) {
+                "Terminal continuation reached a nonterminal world without candidates"
+            }
+            val actor = checkNotNull(world.actorToAct()) {
+                "Terminal continuation reached a nonterminal world without an actor"
+            }
+            val singleton = expansion.exactSingletonPassOrNull().takeIf {
+                config.compressPolicySingletonPasses
+            }
+            val selected = singleton ?: run {
+                val candidates = if (world is PolicyAnnotatedSearchWorld) {
+                    initialPolicyAnnotatedExpansion(world).candidates
+                } else {
+                    expansion.candidates
+                }
+                val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
+                val decision = policy.select(
+                    opponentInformation = world.informationState(actor),
+                    candidates = candidates,
+                    policySeed = ComponentSeeds.derive(
+                        searchSeed,
+                        simulationIndex,
+                        depth,
+                        policy.id,
+                        "rollout",
+                    ),
+                    sampleSeed = ComponentSeeds.derive(
+                        searchSeed,
+                        simulationIndex,
+                        depth,
+                        "rollout-sample",
+                    ),
+                )
+                check(decision.diagnostic.replacement?.invalidatesEvidence != true) {
+                    "Terminal continuation policy replacement invalidates evidence"
+                }
+                if (actor == rootPlayer) rootAudit.record(decision.diagnostic)
+                else opponentAudit.record(decision.diagnostic)
+                decision.choice
+            }
+            val result = world.step(selected)
+            check(result.accepted) {
+                result.diagnostic ?: "Terminal continuation rejected ${selected.signature}"
+            }
+            depth++
+        }
+        world.terminalPayoff(rootPlayer)?.let { payoff ->
+            return TerminalPolicyContinuation(
+                payoff,
+                depth - childDepth,
+                rootAudit.summary(),
+                opponentAudit.summary(),
+            )
+        }
+        error("Terminal continuation exhausted $maximumContinuationPolicyDecisions policy decisions")
+    }
+
     fun search(
         rootPlayer: String,
         belief: BeliefBatch<Weighted<SearchWorld>>,
@@ -614,18 +735,19 @@ class InformationSetSearch(
             return SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF)
         }
         val started = System.nanoTime()
-        val value = when (val source = leafEvaluationStrategy.source) {
+        val (rawValue, origin) = when (val source = leafEvaluationStrategy.source) {
             is LeafValueSource.Information -> source.evaluator.evaluate(
                 world.informationState(rootPlayer),
                 rootPlayer,
-            )
+            ) to source.evaluator.settlementOrigin
             is LeafValueSource.SampledWorld -> world.sampledWorldLeafValue(
                 rootPlayer,
                 source.invokedEvaluatorId,
-            )
-        }.coerceIn(-1.0, 1.0)
+            ) to SearchSettlementOrigin.HEURISTIC_SETTLEMENT
+        }
+        val value = rawValue.coerceIn(-1.0, 1.0)
         workAudit.recordEvaluator(value, System.nanoTime() - started)
-        return SearchSettlement(value, SearchSettlementOrigin.HEURISTIC_SETTLEMENT)
+        return SearchSettlement(value, origin)
     }
 
     private fun isVolatile(information: PolicyInformationState): Boolean {

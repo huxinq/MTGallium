@@ -262,6 +262,9 @@ class ProbabilityDistribution<T> private constructor(
 
 interface InformationStateEvaluator {
     val id: String
+    /** Semantic origin of this evaluator's nonterminal leaf values. */
+    val settlementOrigin: SearchSettlementOrigin
+        get() = SearchSettlementOrigin.HEURISTIC_SETTLEMENT
     fun evaluate(information: PolicyInformationState, rootPlayer: String): Double
 }
 

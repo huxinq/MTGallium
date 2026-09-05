@@ -490,6 +490,8 @@ internal class EvaluatorComparisonRunner(
         LeafEvaluator.MTGALLIUM_TACTICAL_V3 -> MonoRedTacticalEvaluator(
             MonoRedTacticalEvaluatorSettings(outputTemperature = 2.0 * scale)
         )
+        LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 ->
+            error("Checkpoint-backed learned value is outside the hand-authored evaluator comparison")
         LeafEvaluator.ARGENTUM_BOARD_V1 -> error("Argentum scaling is outside this comparison")
     }
 

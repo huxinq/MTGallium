@@ -21,7 +21,14 @@ internal val evidenceJson = Json {
     classDiscriminator = "type"
 }
 
-internal fun loadDeckManifest(): DeckManifest = SearchTeacherDeckManifest.frozenMonoRed()
+internal fun loadDeckManifest(path: Path? = null): DeckManifest = if (path == null) {
+    SearchTeacherDeckManifest.frozenMonoRed()
+} else {
+    require(Files.isRegularFile(path) && !Files.isSymbolicLink(path)) {
+        "Private deck manifest must be an ordinary file: $path"
+    }
+    evidenceJson.decodeFromString<DeckManifest>(Files.readString(path))
+}
 
 internal fun loadSearchGrid(): SearchGridManifest = loadResource("/profiles/search-grid-v3.json")
 

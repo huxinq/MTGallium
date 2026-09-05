@@ -30,6 +30,19 @@ internal object SearchTeacherSuites {
         "search-budget-frontier-pilot",
         "search-budget-frontier-extension-preflight",
         "search-budget-frontier-extension",
+        "outcome-state-corpus-preflight",
+        "outcome-state-corpus",
+        "learned-outcome-value-gate",
+        "learned-outcome-value-global-signal",
+        "learned-outcome-value-retained-parity-audit",
+        "learned-leaf-pilot",
+        "learned-leaf-pilot-smoke",
+        "learned-leaf-fixed-root-bind",
+        "learned-leaf-fixed-root-preflight",
+        "learned-leaf-fixed-root-diagnostic",
+        "decision-local-root-freeze",
+        "decision-local-throughput-preflight",
+        "decision-local-sibling-outcome",
         "baseline-factorial-tournament",
         "baseline-factorial-smoke",
         "tree-reuse-validation",
@@ -87,11 +100,24 @@ internal data class SearchTeacherCli(
     val pairs: Int = 1,
     val opponent: ArenaPolicyKind = ArenaPolicyKind.HEURISTIC,
     val profilePath: Path? = null,
+    /** Explicit private input; the public source tree intentionally contains no frozen deck. */
+    val deckManifest: Path? = null,
     val caseLimit: Int = 48,
     val threads: Int = 1,
     val games: Int = 1,
     val heldOutPairs: Int = 500,
     val corpusManifest: Path? = null,
+    val outcomeCorpus: Path? = null,
+    val learnedGate: Path? = null,
+    val learnedSmoke: Path? = null,
+    /** Explicit private evidence paths for the fixed-root diagnostic; no source resource exists. */
+    val fixedRootPilot: Path? = null,
+    /** Exact Director-frozen result-blind selection stub, used only by the one-shot binder. */
+    val fixedRootStub: Path? = null,
+    val fixedRootManifest: Path? = null,
+    val challengeManifests: List<Path> = emptyList(),
+    /** Historical completed gate containing retained training, validation, and test artifacts. */
+    val fixedRootGate: Path? = null,
     val reviewItems: Int = 100,
     val surprisingCases: Int = 20,
     val resume: Boolean = true,
@@ -125,11 +151,24 @@ internal data class SearchTeacherCli(
                         opponent = ArenaPolicyKind.valueOf(args.value(++index, option).uppercase())
                     )
                     "--profile" -> parsed.copy(profilePath = args.path(++index, option))
+                    "--deck-manifest" -> parsed.copy(deckManifest = args.path(++index, option))
                     "--case-limit" -> parsed.copy(caseLimit = args.value(++index, option).toInt())
                     "--threads" -> parsed.copy(threads = args.value(++index, option).toInt())
                     "--games" -> parsed.copy(games = args.value(++index, option).toInt())
                     "--heldout-pairs" -> parsed.copy(heldOutPairs = args.value(++index, option).toInt())
                     "--corpus-manifest" -> parsed.copy(corpusManifest = args.path(++index, option))
+                    "--outcome-corpus" -> parsed.copy(outcomeCorpus = args.path(++index, option))
+                    "--learned-gate" -> parsed.copy(learnedGate = args.path(++index, option))
+                    "--learned-smoke" -> parsed.copy(learnedSmoke = args.path(++index, option))
+                    "--fixed-root-pilot" -> parsed.copy(fixedRootPilot = args.path(++index, option))
+                    "--fixed-root-stub" -> parsed.copy(fixedRootStub = args.path(++index, option))
+                    "--fixed-root-manifest" -> parsed.copy(fixedRootManifest = args.path(++index, option))
+                    "--challenge-manifest" -> parsed.copy(
+                        // Path implements Iterable<Path>; wrap it so `plus` appends one path rather
+                        // than exploding every absolute-path component into a separate input.
+                        challengeManifests = parsed.challengeManifests + listOf(args.path(++index, option))
+                    )
+                    "--fixed-root-gate" -> parsed.copy(fixedRootGate = args.path(++index, option))
                     "--review-items" -> parsed.copy(reviewItems = args.value(++index, option).toInt())
                     "--surprising-cases" -> parsed.copy(surprisingCases = args.value(++index, option).toInt())
                     "--no-resume" -> parsed.copy(resume = false)
@@ -174,6 +213,49 @@ internal data class SearchTeacherCli(
             require(maxPolicyDecisions > 0)
             require(rootLimit in 1..32)
             require(repetitions > 0)
+            require(suite != "learned-leaf-pilot" || learnedSmoke != null) {
+                "The learned-leaf pilot requires a completed matching smoke directory via --learned-smoke"
+            }
+            require(suite != "learned-outcome-value-global-signal" || learnedGate != null) {
+                "The global-signal diagnostic requires a completed learned outcome-value gate via --learned-gate"
+            }
+            if (suite in setOf(
+                    "learned-leaf-fixed-root-bind",
+                    "learned-leaf-fixed-root-preflight",
+                    "learned-leaf-fixed-root-diagnostic",
+                )) {
+                require(fixedRootPilot != null && fixedRootManifest != null && outcomeCorpus != null &&
+                    fixedRootGate != null) {
+                    "Fixed-root diagnostic requires --fixed-root-pilot, --fixed-root-manifest, " +
+                        "--outcome-corpus, and --fixed-root-gate"
+                }
+            }
+            require(suite != "learned-leaf-fixed-root-bind" || fixedRootStub != null) {
+                "Fixed-root binding requires the exact frozen selection via --fixed-root-stub"
+            }
+            require(suite != "learned-leaf-fixed-root-diagnostic" || outputPath != null) {
+                "The executed fixed-root diagnostic requires --output"
+            }
+            if (suite in setOf(
+                    "decision-local-root-freeze",
+                    "decision-local-throughput-preflight",
+                    "decision-local-sibling-outcome",
+                )) {
+                require(deckManifest != null && fixedRootPilot != null && outcomeCorpus != null &&
+                    fixedRootGate != null && outputPath != null) {
+                    "Decision-local suites require --deck-manifest, --fixed-root-pilot, --outcome-corpus, " +
+                        "--fixed-root-gate, and --output"
+                }
+            }
+            if (suite in setOf("decision-local-throughput-preflight", "decision-local-sibling-outcome")) {
+                require(fixedRootManifest != null) {
+                    "Decision-local execution requires the frozen --fixed-root-manifest"
+                }
+            }
+            require(suite != "decision-local-sibling-outcome" || challengeManifests.size == 2) {
+                "Decision-local execution requires exactly two secondary --challenge-manifest inputs; " +
+                    "received ${challengeManifests.size}"
+            }
         }
 
         private fun Array<String>.value(index: Int, option: String): String =

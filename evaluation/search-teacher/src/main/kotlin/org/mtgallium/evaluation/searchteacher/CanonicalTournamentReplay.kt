@@ -4,6 +4,7 @@ import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayHeader
 import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayJson
 import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayRecord
 import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayRecorder
+import org.mtgallium.evaluation.searchteacher.replay.ReconstructedCanonicalReplay
 import org.mtgallium.evaluation.searchteacher.replay.CanonicalReplayReconstructor
 import org.mtgallium.evaluation.searchteacher.replay.ReplayCompletionStatus
 import org.mtgallium.evaluation.searchteacher.replay.ReplayIncompleteReason
@@ -178,8 +179,7 @@ internal class CanonicalTournamentReplayWriter private constructor(
 
 internal object CanonicalTournamentReplayVerifier {
     fun verify(path: Path): ReplayVerificationResult = runCatching {
-        val records = readCanonicalReplay(path)
-        val replay = CanonicalReplayReconstructor.reconstruct(records)
+        val replay = reconstructCanonicalTournamentReplay(path)
         ReplayVerificationResult(
             verified = true,
             decisions = replay.transitions.count { "mtgallium.semanticChoice" in it.extensions },
@@ -198,12 +198,23 @@ internal object CanonicalTournamentReplayVerifier {
     }
 }
 
+/** Decode, authenticate, and losslessly reconstruct one complete canonical replay. */
+internal fun reconstructCanonicalTournamentReplay(path: Path): ReconstructedCanonicalReplay =
+    CanonicalReplayReconstructor.reconstruct(readCanonicalReplay(path))
+
 internal fun readCanonicalReplay(path: Path): List<CanonicalReplayRecord> =
     GZIPInputStream(Files.newInputStream(path)).bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
         lines.filter(String::isNotBlank).map {
             CanonicalReplayJson.decodeFromString(CanonicalReplayRecord.serializer(), it)
         }.toList()
     }
+
+internal fun CanonicalReplayHeader.requireExtensionString(key: String): String =
+    (extensions[key] as? JsonPrimitive)?.content
+        ?: error("Canonical replay header lacks $key")
+
+internal fun CanonicalReplayHeader.requireExtensionLong(key: String): Long =
+    requireExtensionString(key).toLong()
 
 internal fun canonicalTournamentReplayExtensions(
     gameId: String,

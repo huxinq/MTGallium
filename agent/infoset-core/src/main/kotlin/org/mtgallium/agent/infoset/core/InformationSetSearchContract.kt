@@ -9,6 +9,7 @@ enum class LeafStateSource { CURRENT_INFORMATION_STATE, CURRENT_SAMPLED_WORLD, B
 enum class LeafEvaluator(val evaluatorId: String) {
     MTGALLIUM_VISIBLE_V2("mono-red-visible-board-v2"),
     MTGALLIUM_TACTICAL_V3("mono-red-tactical-value-v3"),
+    MTGALLIUM_LEARNED_OUTCOME_V1("mono-red-learned-outcome-value-v1"),
     ARGENTUM_BOARD_V1("argentum-board-v1"),
     ;
 }
@@ -86,6 +87,8 @@ enum class SearchSettlementOrigin {
     TERMINAL_PAYOFF,
     /** Search settled a bounded continuation with the configured leaf heuristic. */
     HEURISTIC_SETTLEMENT,
+    /** Search settled a nonterminal information state with a learned outcome estimate. */
+    LEARNED_OUTCOME_ESTIMATE,
     /** Search explicitly backed up neutral because a bounded continuation remained unresolved. */
     NEUTRAL_UNRESOLVED_SETTLEMENT,
 }
@@ -98,25 +101,46 @@ data class SearchSettlement(
     init { require(backedValue.isFinite()) { "Search settlement must be finite" } }
 }
 
+/** Actual terminal continuation reached only by the production rollout-policy pair. */
+data class TerminalPolicyContinuation(
+    val payoff: Double,
+    val policyDecisions: Int,
+    val rootPolicyDecisions: OpponentPolicyDecisionSummary,
+    val opponentPolicyDecisions: OpponentPolicyDecisionSummary,
+) {
+    init {
+        require(payoff.isFinite() && payoff in -1.0..1.0)
+        require(policyDecisions >= 0)
+        require(rootPolicyDecisions.decisions + opponentPolicyDecisions.decisions == policyDecisions)
+        require(rootPolicyDecisions.evidenceInvalidatingReplacements == 0)
+        require(opponentPolicyDecisions.evidenceInvalidatingReplacements == 0)
+    }
+}
+
 /** Exact partition of successful backups for one candidate edge. */
 @Serializable
 data class SearchSettlementCounts(
     val terminalPayoffBackups: Int = 0,
     val heuristicSettlementBackups: Int = 0,
+    /** Absent in historical evidence, which therefore remains a zero-count unknown for this origin. */
+    val learnedOutcomeEstimateBackups: Int = 0,
     val neutralUnresolvedSettlementBackups: Int = 0,
 ) {
     init {
         require(terminalPayoffBackups >= 0)
         require(heuristicSettlementBackups >= 0)
+        require(learnedOutcomeEstimateBackups >= 0)
         require(neutralUnresolvedSettlementBackups >= 0)
     }
 
     val successfulBackups: Int
-        get() = terminalPayoffBackups + heuristicSettlementBackups + neutralUnresolvedSettlementBackups
+        get() = terminalPayoffBackups + heuristicSettlementBackups +
+            learnedOutcomeEstimateBackups + neutralUnresolvedSettlementBackups
 
     fun plus(other: SearchSettlementCounts): SearchSettlementCounts = SearchSettlementCounts(
         terminalPayoffBackups + other.terminalPayoffBackups,
         heuristicSettlementBackups + other.heuristicSettlementBackups,
+        learnedOutcomeEstimateBackups + other.learnedOutcomeEstimateBackups,
         neutralUnresolvedSettlementBackups + other.neutralUnresolvedSettlementBackups,
     )
 
@@ -124,6 +148,8 @@ data class SearchSettlementCounts(
         fun one(origin: SearchSettlementOrigin): SearchSettlementCounts = when (origin) {
             SearchSettlementOrigin.TERMINAL_PAYOFF -> SearchSettlementCounts(terminalPayoffBackups = 1)
             SearchSettlementOrigin.HEURISTIC_SETTLEMENT -> SearchSettlementCounts(heuristicSettlementBackups = 1)
+            SearchSettlementOrigin.LEARNED_OUTCOME_ESTIMATE ->
+                SearchSettlementCounts(learnedOutcomeEstimateBackups = 1)
             SearchSettlementOrigin.NEUTRAL_UNRESOLVED_SETTLEMENT ->
                 SearchSettlementCounts(neutralUnresolvedSettlementBackups = 1)
         }

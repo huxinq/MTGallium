@@ -2,6 +2,7 @@ package org.mtgallium.evaluation.searchteacher
 
 import org.mtgallium.agent.searchteacher.SearchTeacherSearchFactory
 import org.mtgallium.agent.searchteacher.SearchTeacherIntegrationSpecification
+import org.mtgallium.agent.searchteacher.LearnedOutcomeValuePolicyStopException
 import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
 
 import com.wingedsheep.engine.core.GameConfig
@@ -261,6 +262,18 @@ internal fun beliefSupportStopMetadata(
         refusedPolicyDecisionIndex = refusedDecisionIndex,
     )
 }
+
+/** Record a policy-session refusal as typed evidence, never a game value or a fallback. */
+internal fun learnedOutcomeValueStopMetadata(
+    failure: LearnedOutcomeValuePolicyStopException,
+    currentDecisionIndex: Int,
+): EvidenceStopMetadata = EvidenceStopMetadata(
+    triggerCodes = listOf("LEARNED_VALUE:${failure.failureKind.name}"),
+    affectedViewers = emptyList(),
+    firstDetectedBeforeDecision = currentDecisionIndex,
+    detectionPoint = EvidenceStopDetectionPoint.BEFORE_POLICY_CHOICE,
+    refusedPolicyDecisionIndex = currentDecisionIndex,
+)
 
 /** Internal test seam; production uses [DefaultRepresentationBoundaryDetector]. */
 internal fun interface RepresentationBoundaryDetector {
@@ -1280,6 +1293,7 @@ internal class SearchTeacherArena(
             val informationFailure = error as? UnsupportedInformationStateException
             val rejectedTransition = error as? RejectedSearchTransitionException
             val beliefSupportFailure = error as? ArgentumBeliefSupportException
+            val learnedValueStopFailure = error as? LearnedOutcomeValuePolicyStopException
             val disposition = explicitStop?.disposition ?: when {
                 informationFailure != null -> GameRunDisposition.STOPPED_REPRESENTATION
                 else -> GameRunDisposition.STOPPED_SOFTWARE
@@ -1304,6 +1318,10 @@ internal class SearchTeacherArena(
                     failure = beliefSupportFailure,
                     currentDecisionIndex = decisions,
                     triggeringDecisionIndex = activePolicyTransitionDecisionIndex,
+                )
+                learnedValueStopFailure != null -> learnedOutcomeValueStopMetadata(
+                    learnedValueStopFailure,
+                    decisions,
                 )
                 else -> EvidenceStopMetadata(
                     triggerCodes = listOf("SOFTWARE:${error::class.simpleName ?: "UNKNOWN"}"),
@@ -1341,8 +1359,11 @@ internal class SearchTeacherArena(
             val exceptionText = when (disposition) {
                 GameRunDisposition.STOPPED_REPRESENTATION ->
                     "UNSUPPORTED_INFORMATION_STATE:${evidenceStop.triggerCodes.joinToString(",")}"
-                GameRunDisposition.STOPPED_SOFTWARE ->
-                    "SOFTWARE_TRANSITION_FAILURE:${evidenceStop.triggerCodes.joinToString(",")}"
+                GameRunDisposition.STOPPED_SOFTWARE -> when (val policyStop = learnedValueStopFailure) {
+                    null -> "SOFTWARE_TRANSITION_FAILURE:" + evidenceStop.triggerCodes.joinToString(",")
+                    else -> "LEARNED_OUTCOME_VALUE_FAILURE:${policyStop.failureKind}:" +
+                        "${policyStop.cause?.javaClass?.simpleName ?: "NO_CAUSE"}"
+                }
                 else -> "${error::class.qualifiedName}: ${error.message}"
             }
             val replayArtifact = replayWriter?.let { writer ->

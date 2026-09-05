@@ -16,10 +16,17 @@ import org.mtgallium.agent.infoset.core.UnresolvedLeafHandling
 class SearchTeacherCompositionTest {
     @Test
     fun `persisted evaluator identities resolve through the production registry`() {
-        LeafEvaluator.entries.forEach { evaluator ->
+        LeafEvaluator.entries.filterNot { it == LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 }.forEach { evaluator ->
+            val source = if (evaluator == LeafEvaluator.ARGENTUM_BOARD_V1) {
+                LeafStateSource.CURRENT_SAMPLED_WORLD
+            } else {
+                LeafStateSource.CURRENT_INFORMATION_STATE
+            }
             assertEquals(
                 evaluator.evaluatorId,
-                SearchTeacherEvaluatorRegistry.strategy(evaluator).source.invokedEvaluatorId,
+                SearchTeacherEvaluatorRegistry.strategy(
+                    LeafEvaluationConfig(source, evaluator)
+                ).source.invokedEvaluatorId,
                 "Registry identity drifted for $evaluator",
             )
         }
@@ -27,9 +34,15 @@ class SearchTeacherCompositionTest {
 
     @Test
     fun `registry owns evaluator routing and safety behavior`() {
-        val visible = SearchTeacherEvaluatorRegistry.strategy(LeafEvaluator.MTGALLIUM_VISIBLE_V2)
-        val tactical = SearchTeacherEvaluatorRegistry.strategy(LeafEvaluator.MTGALLIUM_TACTICAL_V3)
-        val sampled = SearchTeacherEvaluatorRegistry.strategy(LeafEvaluator.ARGENTUM_BOARD_V1)
+        val visible = SearchTeacherEvaluatorRegistry.strategy(
+            LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE, LeafEvaluator.MTGALLIUM_VISIBLE_V2)
+        )
+        val tactical = SearchTeacherEvaluatorRegistry.strategy(
+            LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE, LeafEvaluator.MTGALLIUM_TACTICAL_V3)
+        )
+        val sampled = SearchTeacherEvaluatorRegistry.strategy(
+            LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)
+        )
 
         assertIs<LeafValueSource.Information>(visible.source)
         assertTrue(visible.supportsTraceReuse)
@@ -49,7 +62,10 @@ class SearchTeacherCompositionTest {
     fun `registry and factory reject incompatible evaluator wiring`() {
         assertFailsWith<IllegalArgumentException> {
             SearchTeacherEvaluatorRegistry.strategy(
-                LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                LeafEvaluationConfig(
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
+                    LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                ),
                 MonoRedInformationEvaluator,
             )
         }

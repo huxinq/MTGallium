@@ -22,7 +22,7 @@ object SearchTeacherSearchFactory {
         rolloutPolicy = rolloutPolicy,
         rolloutOpponentPolicy = rolloutOpponentPolicy,
         leafEvaluationStrategy = SearchTeacherEvaluatorRegistry.strategy(
-            config.leaf.evaluator,
+            config.leaf,
             informationEvaluator,
         ),
         reuseConfig = reuseConfig,
@@ -41,7 +41,7 @@ object SearchTeacherSearchFactory {
         rolloutPolicy = rolloutPolicy,
         rolloutOpponentPolicy = rolloutOpponentPolicy,
         leafEvaluationStrategy = SearchTeacherEvaluatorRegistry.strategy(
-            config.leaf.evaluator,
+            config.leaf,
             informationEvaluator,
         ),
         reuseConfig = reuseConfig,

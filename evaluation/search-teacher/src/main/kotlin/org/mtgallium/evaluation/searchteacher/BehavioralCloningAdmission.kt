@@ -54,7 +54,7 @@ internal class BehavioralCloningAdmissionScope private constructor(
             deck: DeckManifest,
             profile: FrozenSearchProfile,
         ): BehavioralCloningAdmissionScope {
-            val evaluator = SearchTeacherEvaluatorRegistry.strategy(profile.leaf.evaluator)
+            val evaluator = SearchTeacherEvaluatorRegistry.strategy(profile.leaf)
             return BehavioralCloningAdmissionScope(
                 expectedOuterRevision = profile.outerCommit,
                 expectedArgentumRevision = profile.argentumCommit,

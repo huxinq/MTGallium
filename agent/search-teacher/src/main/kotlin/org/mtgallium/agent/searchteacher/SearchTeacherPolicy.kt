@@ -23,6 +23,17 @@ import kotlinx.serialization.Serializable
 
 const val SEARCH_TEACHER_UNPROFILED_RUNTIME_ID: String = "unprofiled-search-teacher-o02-v1"
 
+/** A learned inference refusal that must stop policy execution rather than become a move/value. */
+class LearnedOutcomeValuePolicyStopException(
+    val learnedFailure: LearnedOutcomeValueException,
+) : IllegalStateException("LEARNED_VALUE:${learnedFailure.failure.kind.name}", learnedFailure) {
+    val failureKind: LearnedOutcomeValueFailureKind = learnedFailure.failure.kind
+}
+
+internal fun learnedOutcomeValuePolicyStop(
+    failure: LearnedOutcomeValueException,
+): LearnedOutcomeValuePolicyStopException = LearnedOutcomeValuePolicyStopException(failure)
+
 @Serializable
 data class PolicyCompressionConfig(
     val schemaVersion: Int = 1,
@@ -241,12 +252,16 @@ class SearchTeacherPolicySession(
         // Sequential particles are still advanced after every accepted action, but the expensive
         // all-particle digest audit is needed only when its result can affect an actual search.
         belief.synchronize(world, acceptedDecisionCount)
-        val result = search.search(
-            rootPlayer = actor,
-            belief = belief.batch(),
-            searchSeed = searchSeed,
-            beliefContinuityEpoch = belief.continuityEpoch,
-        )
+        val result = try {
+            search.search(
+                rootPlayer = actor,
+                belief = belief.batch(),
+                searchSeed = searchSeed,
+                beliefContinuityEpoch = belief.continuityEpoch,
+            )
+        } catch (failure: LearnedOutcomeValueException) {
+            throw learnedOutcomeValuePolicyStop(failure)
+        }
         return SearchTeacherPolicySelection(
             choice = result.chosen,
             search = result,

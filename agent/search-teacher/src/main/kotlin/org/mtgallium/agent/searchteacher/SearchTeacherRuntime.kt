@@ -11,6 +11,7 @@ import org.mtgallium.agent.infoset.core.BeliefArchitecture
 import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.InformationSetSearchResult
+import org.mtgallium.agent.infoset.core.InformationStateEvaluator
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.LeafStateSource
@@ -202,6 +203,7 @@ class SearchTeacherRuntimeSession(
     private val gameId: String,
     private val config: SearchTeacherRuntimeConfig = SearchTeacherRuntimeConfig(),
     private val opponentModel: OpponentPolicy = defaultMonoRedOpponentPolicy(),
+    private val informationEvaluator: InformationStateEvaluator? = null,
 ) {
     private val parameters = config.policyParameters()
     private val policy = SearchTeacherPolicySession(
@@ -211,6 +213,7 @@ class SearchTeacherRuntimeSession(
         parameters = parameters,
         opponentPolicy = opponentModel,
         gameId = gameId,
+        informationEvaluator = informationEvaluator,
     )
     private var decisionIndex = 0
 
