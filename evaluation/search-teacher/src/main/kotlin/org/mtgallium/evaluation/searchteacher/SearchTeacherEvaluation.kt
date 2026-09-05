@@ -1214,6 +1214,15 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         check(report.valid) { "Outcome qualification run did not materialize every assigned pair: ${report.failureReasons}" }
         return
     }
+    if (options.suite == "search-teacher-calibration") {
+        val plan = evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(
+            Files.readString(requireNotNull(options.profilePath)))
+        val output = requireNotNull(options.outputPath)
+        val report = SearchTeacherCalibrationRunner(root, registry, manifest).run(plan, output, options.threads)
+        println("Search Teacher calibration ${plan.phase}: valid=${report.valid}; report=${output.resolve("report.md")}")
+        check(report.valid) { "Calibration includes invalid pairs; inspect the retained report" }
+        return
+    }
     if (options.suite in setOf("search-budget-frontier-preflight", "search-budget-frontier-pilot")) {
         val preflight = options.suite == "search-budget-frontier-preflight"
         require(options.pairs == if (preflight) 1 else SEARCH_BUDGET_FRONTIER_REQUIRED_PAIRS) {
