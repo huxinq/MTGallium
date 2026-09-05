@@ -40,12 +40,18 @@ belief diagnostics, CPU/allocation/timing measurements, JFR, and harness source
 through the existing research-run artifact authority. All repeated outcomes
 remain diagnostic search results; no terminal-game population is implied.
 
-## AI setup prototype comparison
+## Historical AI setup prototype comparison
 
-`ai-player-factory-adapter.patch` is an unapplied prototype for an Argentum
-`AIPlayer.Factory` API. It holds a lazy factory per heuristic annotator and
-creates a fresh player for each selection. Production source and the engine
-pin remain unchanged. The factory API lives in a separate engine treatment.
+The adapter now uses `AIPlayer.Factory` from the integrated engine pin: a lazy
+factory per heuristic annotator creates a fresh player for each selection.
+Ordinary profiling of that implementation uses the three-argument invocation
+above, with no runtime overlays.
+
+The earlier isolated comparison was generated from MTGallium `ce376f8ef6c6`.
+Its `ai-player-factory-adapter.patch` remains available at that historical
+revision. The following instructions describe that experiment, where the
+production adapter and pin had not yet adopted the factory. Check out its
+recorded source to reproduce it; do not apply the old patch to today's adapter.
 
 For this experiment, compile the original and patched `ArgentumSearchWorld.kt`
 with identical Kotlin flags and serialization plugin into separate adapter
@@ -59,7 +65,8 @@ Commit the diagnostic sources before sealing or running the experiment.
 
 Pass the bundle directory and identity as the fourth and fifth arguments to
 `SearchAdapterProfile`. It verifies the bundle before and after execution and
-checks that the two overlaid classes load from its jars. The comparison uses two warmup repetitions per root. The resulting binding
+checks that the overlaid classes and harness load from its jars. The comparison
+uses two warmup repetitions per root. The resulting binding
 names the bundle identity. **Checkout provenance describes the unchanged pin;
 the bundle describes the runtime treatment.** Interpret both together. This
 is an explicitly overlaid diagnostic, not verification of a pinned production
