@@ -376,6 +376,8 @@ internal class SearchTeacherArena(
             val specification = policy.effectiveParameters(baseSeed).behaviorSpecification(
                 knownDecks = knownDecks,
                 opponentPolicy = opponentModel,
+                rootRolloutPolicy = policy.effectiveRootRolloutPolicy(),
+                opponentRolloutPolicy = policy.effectiveOpponentRolloutPolicy(),
                 informationEvaluator = policy.informationEvaluator,
                 integration = SearchTeacherIntegrationSpecification(
                     hostMode = "evaluation-arena-v1",
@@ -581,6 +583,8 @@ internal class SearchTeacherArena(
                 parameters = parameters,
                 opponentPolicy = opponentModel,
                 gameId = gameId,
+                rolloutPolicy = policy.effectiveRootRolloutPolicy(),
+                rolloutOpponentPolicy = policy.effectiveOpponentRolloutPolicy(),
                 informationEvaluator = policy.informationEvaluator,
                 integration = SearchTeacherIntegrationSpecification(
                     hostMode = "evaluation-arena-v1",

@@ -12,11 +12,13 @@ import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
+import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.searchteacher.PolicyCompressionConfig
 import org.mtgallium.agent.searchteacher.SearchReuseConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherLeafConfigurations
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicyParameters
+import org.mtgallium.agent.searchteacher.SearchTeacherSearchFactory
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.evaluation.searchteacher.evidence.RunProvenance
 import org.mtgallium.research.run.ResearchRunBindings
@@ -43,6 +45,9 @@ internal data class ArenaPolicySpec(
      * implementation object, is retained by the arena-owned behavior specification.
      */
     val informationEvaluator: ConfiguredInformationStateEvaluator? = null,
+    /** Experimental continuation policies; null retains the production composition. */
+    val rootRolloutPolicy: OpponentPolicy? = null,
+    val opponentRolloutPolicy: OpponentPolicy? = null,
 ) {
     init {
         require(id.isNotBlank())
@@ -51,7 +56,17 @@ internal data class ArenaPolicySpec(
         require(informationEvaluator == null ||
             (kind == ArenaPolicyKind.SEARCH && searchPlanner == SearchPlannerKind.SHARED_TREE)
         ) { "An information-state evaluator is valid only for a shared-tree Search policy" }
+        require((rootRolloutPolicy == null && opponentRolloutPolicy == null) ||
+            (kind == ArenaPolicyKind.SEARCH && searchPlanner == SearchPlannerKind.SHARED_TREE &&
+                (parameters?.leaf ?: profile?.leaf)?.stateSource == LeafStateSource.BOUNDED_ROLLOUT)
+        ) { "Custom rollout policies require bounded-rollout shared-tree search" }
     }
+
+    fun effectiveRootRolloutPolicy(): OpponentPolicy =
+        rootRolloutPolicy ?: SearchTeacherSearchFactory.rootRolloutPolicy()
+
+    fun effectiveOpponentRolloutPolicy(): OpponentPolicy =
+        opponentRolloutPolicy ?: SearchTeacherSearchFactory.opponentRolloutPolicy()
 
     fun effectiveParameters(arenaBaseSeed: Long): SearchTeacherPolicyParameters =
         (parameters ?: requireNotNull(profile).policyParameters(
