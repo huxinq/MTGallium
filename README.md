@@ -29,10 +29,13 @@ git submodule update --init --recursive
 just check
 ```
 
-The exact Argentum gitlink comes from the
-[upstream Argentum repository](https://github.com/wingedsheep/argentum-engine)
-identified in `.gitmodules`. MTGallium pins a reviewed commit rather than
-following a moving branch implicitly. `just architecture-check` and
+MTGallium pins a reviewed Argentum commit rather than following a moving
+branch implicitly. `.gitmodules` retains the
+[canonical upstream URL](https://github.com/wingedsheep/argentum-engine).
+The current pin includes all five performance contributions merged upstream;
+fresh clones can initialize it directly from the canonical remote.
+See [the integration record](docs/argentum-performance-integration.md)
+for the upstream revision and evidence boundary. `just architecture-check` and
 `just search-teacher-check` are focused validation entry points.
 
 Canonical replays and private experiment evidence are intentionally not part of

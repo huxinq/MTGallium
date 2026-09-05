@@ -74,6 +74,7 @@ data class SearchTeacherRuntimeConfig(
     val cacheSimulationTransitions: Boolean = true,
     val wallClockBudgetMillis: Long? = null,
     val minimumSimulations: Int = 1,
+    val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
 ) {
     init {
         require(particles in setOf(8, 16, 32, 64))
@@ -81,7 +82,7 @@ data class SearchTeacherRuntimeConfig(
         require(maxPolicyDecisions > 0)
         require(explorationConstant >= 0.0 && explorationConstant.isFinite())
         require(!policyCompression.enabled) {
-            "Profile-only singleton automation is disabled because it can remove genuine player decisions"
+            "In-tree policy singleton compression is disabled because it can remove genuine player decisions"
         }
     }
 
@@ -108,6 +109,7 @@ data class SearchTeacherRuntimeConfig(
         cacheSimulationTransitions = cacheSimulationTransitions,
         wallClockBudgetMillis = wallClockBudgetMillis,
         minimumSimulations = minimumSimulations,
+        singletonSelection = singletonSelection,
     )
 }
 

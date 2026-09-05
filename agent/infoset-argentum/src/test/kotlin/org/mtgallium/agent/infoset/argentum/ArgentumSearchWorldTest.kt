@@ -536,10 +536,14 @@ class ArgentumSearchWorldTest {
     fun `determinized heuristic tag is information-safe and unique`() {
         val cardRegistry = registry()
         val originalEnv = environment(cardRegistry)
+        val before = originalEnv.state
         val opponent = originalEnv.playerIds[1]
         val hidden = originalEnv.state.getHand(opponent) + originalEnv.state.getLibrary(opponent)
         val first = hidden.first()
-        val last = hidden.last()
+        val last = hidden.last { id ->
+            before.getEntity(id)!!.require<CardComponent>().name !=
+                before.getEntity(first)!!.require<CardComponent>().name
+        }
         val permuted = originalEnv.state
             .updateEntity(first) { container ->
                 container.with(originalEnv.state.getEntity(last)!!.require<CardComponent>())
@@ -551,14 +555,14 @@ class ArgentumSearchWorldTest {
             it.restore(permuted, originalEnv.playerIds, originalEnv.stepCount)
         }
         val knownDecks = mapOf("p0" to deck, "p1" to deck)
-        fun tagged(env: GameEnvironment): List<String> {
-            val world = ArgentumSearchWorld.create(
-                env,
-                gameId = "tag-game",
-                seedBase = 44L,
-                effectiveSetupSeed = 811L,
-                knownDecks = knownDecks,
-            )
+        fun world(env: GameEnvironment) = ArgentumSearchWorld.create(
+            env,
+            gameId = "tag-game",
+            seedBase = 44L,
+            effectiveSetupSeed = 811L,
+            knownDecks = knownDecks,
+        )
+        fun tagged(world: ArgentumSearchWorld): List<String> {
             val diagnosis = world.determinizedHeuristicChoiceDiagnosis()
             assertEquals(null, diagnosis.unavailableReason)
             assertTrue(diagnosis.choice != null)
@@ -567,11 +571,24 @@ class ArgentumSearchWorldTest {
             }.map { it.signature }
         }
 
-        val left = tagged(originalEnv)
-        val right = tagged(permutedEnv)
+        val root = world(originalEnv)
+        val left = tagged(root)
+        val right = tagged(world(permutedEnv))
 
         assertEquals(1, left.size)
         assertEquals(left, right)
+        // These uncached hypothetical worlds retain the root's annotator and factory. Alternate
+        // hidden assignments so earlier annotations cannot supply decision memory to later ones.
+        repeat(3) { index ->
+            val sampled = root.withSampledState(
+                if (index % 2 == 0) permuted else before,
+                futureChanceStreamIdentity = 100L + index,
+            )
+            assertEquals(root.informationState("p0"), sampled.informationState("p0"))
+            assertEquals(left, tagged(sampled))
+        }
+        assertEquals(before, originalEnv.state)
+        assertEquals(before.rng, originalEnv.state.rng)
     }
 
     @Test

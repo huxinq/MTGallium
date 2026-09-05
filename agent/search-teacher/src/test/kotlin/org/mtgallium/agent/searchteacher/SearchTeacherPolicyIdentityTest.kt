@@ -4,8 +4,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
@@ -61,11 +63,37 @@ class SearchTeacherPolicyIdentityTest {
             "reuse fraction" to base.copy(
                 searchReuse = base.searchReuse.copy(maximumReuseFraction = 0.5)
             ),
+            "singleton selection" to base.copy(
+                singletonSelection = PolicySingletonSelectionConfig(enabled = true)
+            ),
         )
 
         mutations.forEach { (description, changed) ->
             assertNotEquals(expected, identity(parameters = changed), description)
         }
+    }
+
+    @Test
+    fun `absent singleton setting retains historical behavior bytes and identity`() {
+        val specification = SearchTeacherPolicyIdentity.specification(
+            parameters = SearchTeacherRuntimeConfig().policyParameters(),
+            knownDecks = decks(),
+            opponentPolicy = UniformOpponentPolicy,
+        )
+        val encoded = PolicyJson.format.encodeToJsonElement(specification) as JsonObject
+        assertFalse("singletonSelection" in encoded)
+        val decoded = PolicyJson.format.decodeFromJsonElement<SearchTeacherBehaviorSpecification>(encoded)
+        assertFalse(decoded.singletonSelection.enabled)
+        assertEquals(encoded, PolicyJson.format.encodeToJsonElement(decoded))
+        assertEquals(
+            "$SEARCH_TEACHER_BEHAVIOR_IDENTITY_PREFIX:${PolicyJson.digest(encoded)}",
+            SearchTeacherPolicyIdentity.identity(decoded),
+        )
+        val enabled = specification.copy(singletonSelection = PolicySingletonSelectionConfig(enabled = true))
+        val enabledJson = PolicyJson.format.encodeToJsonElement(enabled) as JsonObject
+        assertTrue("singletonSelection" in enabledJson)
+        assertNotEquals(SearchTeacherPolicyIdentity.identity(specification), SearchTeacherPolicyIdentity.identity(enabled))
+        assertEquals(enabled, PolicyJson.format.decodeFromJsonElement<SearchTeacherBehaviorSpecification>(enabledJson))
     }
 
     @Test

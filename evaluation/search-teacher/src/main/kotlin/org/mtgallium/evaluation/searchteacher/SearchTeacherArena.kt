@@ -348,7 +348,10 @@ internal class SearchTeacherArena(
     private val opponentModel: OpponentPolicy = defaultMonoRedOpponentPolicy(),
     private val searchPlanner: SearchPlannerKind = SearchPlannerKind.SHARED_TREE,
     private val representationBoundaryDetector: RepresentationBoundaryDetector = DefaultRepresentationBoundaryDetector,
+    private val gameDecisionLimit: Int = MAX_GAME_DECISIONS,
 ) {
+    init { require(gameDecisionLimit in 1..MAX_GAME_DECISIONS) }
+
     private val knownDecks = mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck)
     internal val runIdentity: String = evidenceBinding(
         legacyPolicy(ArenaPolicyKind.SEARCH),
@@ -377,7 +380,7 @@ internal class SearchTeacherArena(
                 integration = SearchTeacherIntegrationSpecification(
                     hostMode = "evaluation-arena-v1",
                     searchPlanner = policy.searchPlanner.name,
-                    maximumGameDecisions = MAX_GAME_DECISIONS,
+                    maximumGameDecisions = gameDecisionLimit,
                     maximumSearchDecisions = maxSearchDecisions,
                     additionalBindings = mapOf(
                         "arenaPolicyId" to policy.id,
@@ -417,7 +420,7 @@ internal class SearchTeacherArena(
             policyId = policy.id,
             policyKind = policy.kind,
             actionSpaceProfile = actionSpaceProfile,
-            maximumGameDecisions = MAX_GAME_DECISIONS,
+            maximumGameDecisions = gameDecisionLimit,
             maximumSearchDecisions = maxSearchDecisions,
             directPolicy = direct.behaviorSpecification,
             deckManifestSha256 = manifest.deckHash(),
@@ -582,7 +585,7 @@ internal class SearchTeacherArena(
                 integration = SearchTeacherIntegrationSpecification(
                     hostMode = "evaluation-arena-v1",
                     searchPlanner = policy.searchPlanner.name,
-                    maximumGameDecisions = MAX_GAME_DECISIONS,
+                    maximumGameDecisions = gameDecisionLimit,
                     maximumSearchDecisions = maxSearchDecisions,
                     additionalBindings = mapOf(
                         "arenaPolicyId" to policy.id,
@@ -696,7 +699,10 @@ internal class SearchTeacherArena(
         var privilegedInspectionRecorder: PrivilegedInspectionRecorder? = null
         var replayWriter: CanonicalTournamentReplayWriter? = null
         val inspectionLimits = evidence?.inspectionExecutionCommitment?.executionLimits
-        val maximumGameDecisions = inspectionLimits?.maximumPolicyDecisions ?: MAX_GAME_DECISIONS
+        require(inspectionLimits == null || gameDecisionLimit == MAX_GAME_DECISIONS) {
+            "Inspection execution limits and an arena decision limit must not compete"
+        }
+        val maximumGameDecisions = inspectionLimits?.maximumPolicyDecisions ?: gameDecisionLimit
         val wholeGameDeadlineNanos = inspectionLimits?.let {
             gameStartedAtNanos + it.wholeGameWallClockMillis * 1_000_000L
         }

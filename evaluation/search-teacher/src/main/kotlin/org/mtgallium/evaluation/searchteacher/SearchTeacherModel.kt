@@ -19,6 +19,7 @@ import org.mtgallium.agent.infoset.core.TRAJECTORY_SCHEMA_CURRENT
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicyParameters
 import org.mtgallium.agent.searchteacher.PolicyCompressionConfig
+import org.mtgallium.agent.searchteacher.PolicySingletonSelectionConfig
 import org.mtgallium.agent.searchteacher.SearchReuseConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherLeafConfigurations
 import org.mtgallium.agent.searchteacher.SearchTeacherSelectionKind
@@ -87,6 +88,7 @@ internal fun FrozenSearchProfile.policyParameters(
     beliefArchitecture: BeliefArchitecture,
     policyCompression: PolicyCompressionConfig = PolicyCompressionConfig(),
     searchReuse: SearchReuseConfig = SearchReuseConfig(),
+    singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
 ): SearchTeacherPolicyParameters = SearchTeacherPolicyParameters(
     particles = particles,
     simulations = simulations,
@@ -100,6 +102,7 @@ internal fun FrozenSearchProfile.policyParameters(
     profileId = id,
     policyCompression = policyCompression,
     searchReuse = searchReuse,
+    singletonSelection = singletonSelection,
 )
 
 @Serializable

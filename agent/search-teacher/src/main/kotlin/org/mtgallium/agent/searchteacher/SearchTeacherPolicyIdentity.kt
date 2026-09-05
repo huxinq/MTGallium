@@ -1,6 +1,8 @@
 package org.mtgallium.agent.searchteacher
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.encodeToJsonElement
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
@@ -123,6 +125,10 @@ data class SearchTeacherBehaviorSpecification(
     val knownDecks: List<KnownDeckSpecification>,
     val inputSchemas: SearchTeacherInputSchemaSpecification,
     val integration: SearchTeacherIntegrationSpecification,
+    // An absent field retains the previous behavior and its canonical identity on re-encoding.
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
 ) {
     init {
         require(schemaVersion == SEARCH_TEACHER_BEHAVIOR_SCHEMA_V1)
@@ -176,6 +182,7 @@ object SearchTeacherPolicyIdentity {
             knownDecks = normalizeKnownDecks(knownDecks),
             inputSchemas = SearchTeacherInputSchemaSpecification(),
             integration = integration,
+            singletonSelection = parameters.singletonSelection,
         )
     }
 
