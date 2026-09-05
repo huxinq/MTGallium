@@ -11,6 +11,20 @@ import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
 @org.junit.jupiter.api.Tag("public-source")
 class DecisionLocalRootCoverageTest {
     @Test
+    fun `arena fallback needs no private pilot fixture and retains control configuration`() {
+        val control = LearnedLeafPilotRoster.parameters().first
+        val profile = coverageArenaProfile("synthetic-source")
+        assertEquals(control.particles, profile.particles)
+        assertEquals(control.simulations, profile.simulations)
+        assertEquals(control.leaf, profile.leaf)
+        assertEquals(control.actionSpaceProfile, profile.actionSpaceProfile)
+        assertEquals(control.maxPolicyDecisions, profile.maxPolicyDecisions)
+        assertEquals(control.explorationConstant, profile.explorationConstant)
+        assertEquals("synthetic-source", profile.outerCommit)
+        assertEquals(ROOT_COVERAGE_ENGINE, profile.argentumCommit)
+    }
+
+    @Test
     fun `coverage assigns independent whole lineages before outcomes and excludes old indices`() {
         val assignments = coverageAssignments()
         assertEquals((50 until 300).toList(), assignments.map { it.pairIndex })

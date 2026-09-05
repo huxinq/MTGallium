@@ -39,6 +39,17 @@ internal fun fitExpandedCoverageModel(old: List<DecisionLocalRootEvidence>, fres
     return fitLearnabilityModel(old + fresh)
 }
 
+/** Constructor fallback only: both playing seats supply their own fully bound historical parameters. */
+internal fun coverageArenaProfile(sourceCommit: String): FrozenSearchProfile {
+    val control = LearnedLeafPilotRoster.parameters().first
+    return FrozenSearchProfile(id = "fast-arena-v1", generatedAtUtc = "UNFROZEN-DIAGNOSTIC",
+        outerCommit = sourceCommit, argentumCommit = ROOT_COVERAGE_ENGINE, host = "UNMEASURED",
+        particles = control.particles, simulations = control.simulations, leaf = control.leaf,
+        actionSpaceProfile = control.actionSpaceProfile, maxPolicyDecisions = control.maxPolicyDecisions,
+        explorationConstant = control.explorationConstant, measuredP95Millis = 0.0, tacticalScore = 0.0,
+        standardError = 0.0, calibrationReportHash = "UNFROZEN-DIAGNOSTIC-EXPLICIT-POLICIES")
+}
+
 @Serializable
 internal data class CoveragePlan(
     val protocol: String = ROOT_COVERAGE_PROTOCOL,
@@ -109,6 +120,7 @@ internal class DecisionLocalRootCoverage(private val repositoryRoot: Path, priva
         val source = ResearchRunProvenance.capture(repositoryRoot)
         source.requireReady()
         require(!source.outerDirty && !source.engineDirty && source.checkedOutEngineCommit == ROOT_COVERAGE_ENGINE)
+        val arena = SearchTeacherArena(registry, deck, coverageArenaProfile(source.outerCommit), ROOT_COVERAGE_BASE_SEED)
         fun verify(directory: Path, identity: String): String {
             ResearchRunArtifacts.loadAndVerify(directory, identity)
             return researchSha256File(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))
@@ -155,7 +167,6 @@ internal class DecisionLocalRootCoverage(private val repositoryRoot: Path, priva
         val learned = ArenaPolicySpec(LEARNED_LEAF_PILOT_TREATMENT_ID, ArenaPolicyKind.SEARCH, parameters = learnedParameters,
             informationEvaluator = historical.diagnosticEvaluator())
         require(listOf(control, learned).map(::describeTournamentPolicy) == oldPilot.policies)
-        val arena = SearchTeacherArena(registry, deck, SearchTeacherArena.smokeProfile(), ROOT_COVERAGE_BASE_SEED)
         val policyEvidence = listOf(control, learned).associate { it.id to arena.evidenceBinding(it, null, source.sourceProvenance).identity }
         val assignments = coverageAssignments()
         val bindings = ResearchRunBindings(protocol = ROOT_COVERAGE_PROTOCOL, material = mapOf(
