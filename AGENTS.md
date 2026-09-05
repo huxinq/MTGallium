@@ -7,12 +7,17 @@ before changing a semantic boundary.
 
 ## Semantic authority
 
-Research meaning outranks generic cleanup. Stop for owner review when two
-reasonable choices would materially change an experiment, representation,
-result, persistent artifact, or subsystem meaning. Narrow or disposable
-implementation is acceptable when its limits are explicit and cannot
-invalidate the objective. Do not add generalized lifecycle machinery merely
-for completeness.
+Research meaning outranks generic cleanup. Stop for owner review when an
+unresolved choice between reasonable alternatives would materially change an
+experiment, representation, result, persistent artifact, compatibility
+boundary, or subsystem meaning. Apply established owner decisions without
+requesting the same approval again. Routine implementation within the
+established objective and research-critical invariants can proceed without
+additional approval; touching a semantic boundary alone is not a reason to
+stop. If a decision is needed, state the alternatives and their consequences
+and continue independent work. Narrow or disposable implementation is
+acceptable when its limits are explicit and cannot invalidate the objective.
+Do not add generalized lifecycle machinery merely for completeness.
 
 ## Research-critical invariants
 
@@ -96,6 +101,11 @@ CI pass. Passing tests are technical evidence, not a research conclusion.
 - Use a branch or worktree for actual concurrency or risk, not automatically.
 - Generalize only when a capability is recurring and material; prefer
   subtraction when machinery no longer earns its complexity.
+- For work spanning tasks, reuse a small private handoff record outside the
+  checkout. Refresh it at meaningful handoffs with the objective, established
+  decisions, source revision and relevant uncommitted work, last useful
+  validation, and next action or unresolved decision. Recheck facts affected
+  by intervening changes; a handoff record is context, not evidence authority.
 
 Write commit messages for future readers. The subject should describe the
 resulting source state or established result, not implementation activity:

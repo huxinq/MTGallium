@@ -1,10 +1,9 @@
 # Contributing to MTGallium
 
 The current public source is authoritative for new first-party source changes.
-Research semantics outrank generic cleanup: changes to policy-visible
-information, exact knowledge, semantic action identity/rebinding, evidence
-admission, transition semantics, or the Argentum pin require explicit owner
-review.
+Follow the [semantic authority rule in AGENTS.md](AGENTS.md#semantic-authority)
+for when to seek owner review, and preserve its research-critical invariants
+and working defaults, including the restriction on changing the Argentum pin.
 
 Use focused tests while developing and run `just check` before proposing a
 change where the public dependency gate permits it. Passing tests alone do not
