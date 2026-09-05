@@ -107,7 +107,7 @@ internal data class CoverageFailure(val researchRunIdentity: String, val phase: 
     val generatedAtUtc: String = Instant.now().toString(),
     val conclusion: String = "ROOT_COVERAGE_INCOMPLETE_NO_PROMOTION")
 
-private data class PreparedCoverage(val plan: CoveragePlan, val historical: HistoricalOutcomeValueDiagnosticCheckpoint,
+internal data class PreparedCoverage(val plan: CoveragePlan, val historical: HistoricalOutcomeValueDiagnosticCheckpoint,
     val oldPilot: LearnedLeafPilotReport, val oldManifest: DecisionLocalRootManifest,
     val oldTrain: List<DecisionLocalRootEvidence>, val originalModel: DecisionLocalModelCheckpoint,
     val arena: SearchTeacherArena, val control: ArenaPolicySpec, val learned: ArenaPolicySpec)
@@ -115,11 +115,12 @@ private data class PreparedCoverage(val plan: CoveragePlan, val historical: Hist
 /** A separately bound diagnostic using a frozen historical opponent, never a new promotion capability. */
 internal class DecisionLocalRootCoverage(private val repositoryRoot: Path, private val registry: CardRegistry,
     private val deck: DeckManifest) {
-    private fun prepare(parent: Path, pilotDirectory: Path, corpus: Path, gate: Path, workers: Int): PreparedCoverage {
+    internal fun prepare(parent: Path, pilotDirectory: Path, corpus: Path, gate: Path, workers: Int,
+        executionEngine: String = ROOT_COVERAGE_ENGINE): PreparedCoverage {
         require(workers > 0)
         val source = ResearchRunProvenance.capture(repositoryRoot)
         source.requireReady()
-        require(!source.outerDirty && !source.engineDirty && source.checkedOutEngineCommit == ROOT_COVERAGE_ENGINE)
+        require(!source.outerDirty && !source.engineDirty && source.checkedOutEngineCommit == executionEngine)
         val arena = SearchTeacherArena(registry, deck, coverageArenaProfile(source.outerCommit), ROOT_COVERAGE_BASE_SEED)
         fun verify(directory: Path, identity: String): String {
             ResearchRunArtifacts.loadAndVerify(directory, identity)
@@ -171,7 +172,7 @@ internal class DecisionLocalRootCoverage(private val repositoryRoot: Path, priva
         val assignments = coverageAssignments()
         val bindings = ResearchRunBindings(protocol = ROOT_COVERAGE_PROTOCOL, material = mapOf(
             "source" to source.outerCommit, "source-provenance" to researchSha256(evidenceJson.encodeToString(source)),
-            "argentum" to ROOT_COVERAGE_ENGINE, "deck" to deck.deckHash(), "card-pool" to deck.cardPoolHash(),
+            "argentum" to source.checkedOutEngineCommit, "deck" to deck.deckHash(), "card-pool" to deck.cardPoolHash(),
             "parent-learnability" to ROOT_COVERAGE_PARENT, "parent-manifest" to learnHash,
             "historical-pilot" to oldPilot.runIdentity, "historical-pilot-manifest" to pilotHash,
             "opponent-checkpoint" to historical.checkpointPayloadSha256,

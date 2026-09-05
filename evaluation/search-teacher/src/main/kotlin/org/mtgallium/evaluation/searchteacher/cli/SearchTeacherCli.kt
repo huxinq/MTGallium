@@ -44,6 +44,7 @@ internal object SearchTeacherSuites {
         "decision-local-learnability-pilot",
         "decision-local-root-coverage-preflight",
         "decision-local-root-coverage",
+        "decision-local-performance-check",
         "decision-local-precision-followup",
         "decision-local-root-freeze",
         "decision-local-throughput-preflight",
@@ -248,7 +249,7 @@ internal data class SearchTeacherCli(
             require(suite != "learned-leaf-fixed-root-diagnostic" || outputPath != null) {
                 "The executed fixed-root diagnostic requires --output"
             }
-            if (suite in setOf("decision-local-root-coverage", "decision-local-root-coverage-preflight")) {
+            if (suite in setOf("decision-local-root-coverage", "decision-local-root-coverage-preflight", "decision-local-performance-check")) {
                 require(coverageParent != null && fixedRootPilot != null && outcomeCorpus != null && fixedRootGate != null && deckManifest != null && outputPath != null) {
                     "Root coverage requires --coverage-parent, --fixed-root-pilot, --outcome-corpus, --fixed-root-gate, --deck-manifest, and --output"
                 }

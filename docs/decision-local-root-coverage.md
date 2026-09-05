@@ -68,3 +68,24 @@ root games, training continuations, and evaluation continuations.
 Focused synthetic verification is `publicSourceTest --tests '*DecisionLocalRootCoverageTest'`
 in the Search Teacher evaluation module, with the existing reconstruction,
 precision, and learnability tests covering reused paths.
+
+## Historical performance comparison
+
+`decision-local-performance-check` accepts the same private inputs and a fresh
+output. This diagnostic permits a different clean, committed engine so a narrow
+performance backport can be compared with the historical baseline. It does not
+relax the ordinary coverage runner's historical-engine guard.
+
+One warmup and three measured repetitions each materialize historical TRAIN
+roots 2, 25, and 43 with all 64 feature coordinates and eight terminal samples
+per candidate, then run eight search decisions of historical pair 8, leg b.
+Preparation and artifact writes are excluded from timing. The deliberately
+stopped search is never counted as a terminal game. No fresh expansion outcomes
+or TEST roots are consumed.
+
+Every repeated root and game result must match after removing only measured
+clock fields. A cross-engine comparison must separately verify both manifests
+and compare these same retained fields, including choices, features, values,
+terminal labels, and work counts. Engine/source identities remain distinct.
+These fixed-work timings do not establish full-game or four-worker throughput;
+single-JVM repetitions also share warmup and host conditions.

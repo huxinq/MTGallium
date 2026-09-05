@@ -74,6 +74,13 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
     // constructing the full Argentum card registry during their fail-fast input-validation phase.
     val manifest by lazy { loadDeckManifest(options.deckManifest) }
     val registry by lazy(::buildRegistry)
+
+    if (options.suite == "decision-local-performance-check") {
+        DecisionLocalPerformanceCheck(root, registry, manifest).run(requireNotNull(options.coverageParent),
+            requireNotNull(options.fixedRootPilot), requireNotNull(options.outcomeCorpus), requireNotNull(options.fixedRootGate),
+            diagnosticOutput(requireNotNull(options.outputPath)))
+        return
+    }
     if (options.suite in setOf("decision-local-root-coverage", "decision-local-root-coverage-preflight")) {
         val output = diagnosticOutput(requireNotNull(options.outputPath))
         val runner = DecisionLocalRootCoverage(root, registry, manifest)

@@ -5,11 +5,38 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlin.test.assertNotEquals
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
 
 @org.junit.jupiter.api.Tag("public-source")
 class DecisionLocalRootCoverageTest {
+    @Test
+    fun `performance parity ignores clocks but preserves labels and search values`() {
+        val r = root(2)
+        assertEquals(coveragePerformanceRootParity(r), coveragePerformanceRootParity(r.copy(
+            candidates = r.candidates.map { it.copy(continuationRuntimeMillis = 999.0) })))
+        assertNotEquals(coveragePerformanceRootParity(r), coveragePerformanceRootParity(r.copy(
+            candidates = r.candidates.map { it.copy(primaryTerminalPayoffs = List(32) { 0.0 }) })))
+        val parameters = LearnedLeafPilotRoster.parameters().first
+        val detail = ArenaSearchDecisionDiagnostic(0, 1, "BEGINNING", "UPKEEP", 5.0,
+            org.mtgallium.agent.infoset.core.InformationSetSearchDiagnostics(
+                64, 8, 1, 1, 1, 0, 0, "opponent", parameters.leaf, evaluatorNanos = 10), rootValue = 0.5)
+        val game = GameRunResult(gameId = "parity", seed = 1, p0Policy = ArenaPolicyKind.SEARCH,
+            p1Policy = ArenaPolicyKind.SEARCH, winner = null, terminal = false, disposition = GameRunDisposition.STOPPED_LIMIT,
+            decisions = 1, searchSeat = null, searchScore = null, illegalResponses = 0, fallbacks = 0, stepLimit = true,
+            elapsedMillis = 10.0, searchLatenciesMillis = listOf(5.0), seatDiagnostics = mapOf(
+                "p0" to ArenaSeatDiagnostics("control", searchDecisions = 1, searchLatenciesMillis = listOf(5.0), searchDecisionsDetail = listOf(detail))))
+        val changedClock = game.copy(elapsedMillis = 99.0, searchLatenciesMillis = listOf(88.0),
+            seatDiagnostics = mapOf("p0" to game.seatDiagnostics.getValue("p0").copy(searchLatenciesMillis = listOf(88.0),
+                searchDecisionsDetail = listOf(detail.copy(latencyMillis = 88.0, searchDiagnostics = detail.searchDiagnostics.copy(evaluatorNanos = 99))))))
+        assertEquals(coveragePerformanceGameParity(game), coveragePerformanceGameParity(changedClock))
+        assertNotEquals(coveragePerformanceGameParity(game), coveragePerformanceGameParity(game.copy(
+            seatDiagnostics = mapOf("p0" to game.seatDiagnostics.getValue("p0").copy(
+                searchDecisionsDetail = listOf(detail.copy(rootValue = -0.5)))))))
+        assertEquals(listOf(2, 25, 43), coveragePerformanceIndices)
+    }
+
     @Test
     fun `arena fallback needs no private pilot fixture and retains control configuration`() {
         val control = LearnedLeafPilotRoster.parameters().first
