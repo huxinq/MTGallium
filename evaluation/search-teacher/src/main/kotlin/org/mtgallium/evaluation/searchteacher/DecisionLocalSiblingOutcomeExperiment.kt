@@ -50,7 +50,7 @@ internal const val DECISION_LOCAL_MODEL_OBJECTIVE =
     "equal-root-equal-sibling-root-centered-terminal-outcome-ridge-v1"
 internal const val DECISION_LOCAL_SOLVER = "jacobi-pcg-sparse-root-centered-normal-equation-v1"
 internal const val DECISION_LOCAL_ROOT_CHECKPOINT_SCHEMA = "decision-local-root-evidence-v1"
-private const val DECISION_LOCAL_RIDGE = 0.01
+internal const val DECISION_LOCAL_DEFAULT_RIDGE = 0.01
 private const val DECISION_LOCAL_TOLERANCE = 1e-7
 private const val DECISION_LOCAL_MAX_CONTINUATION_DECISIONS = 4096
 private const val DECISION_LOCAL_FEATURE_WORLDS = 64
@@ -674,7 +674,13 @@ private data class CenteredDecisionRow(
     val weight: Double,
 )
 
-internal fun fitDecisionLocalModel(roots: List<DecisionLocalRootEvidence>): DecisionLocalModelCheckpoint {
+/** Keep the historical default; diagnostic penalties are recorded in the model's content identity. */
+@JvmOverloads
+internal fun fitDecisionLocalModel(
+    roots: List<DecisionLocalRootEvidence>,
+    ridge: Double = DECISION_LOCAL_DEFAULT_RIDGE,
+): DecisionLocalModelCheckpoint {
+    require(ridge.isFinite() && ridge > 0.0) { "Ridge penalty must be finite and positive" }
     require(roots.isNotEmpty() && roots.all { it.split == DecisionLocalSplit.TRAIN })
     val featureKeys = TreeSet(utf8BytewiseStringComparator).apply {
         roots.flatMap { it.candidates }.forEach { addAll(it.featureMeans.keys) }
@@ -709,7 +715,7 @@ internal fun fitDecisionLocalModel(roots: List<DecisionLocalRootEvidence>): Deci
         }
     }
     val rhs = DoubleArray(featureKeys.size)
-    val diagonal = DoubleArray(featureKeys.size) { DECISION_LOCAL_RIDGE }
+    val diagonal = DoubleArray(featureKeys.size) { ridge }
     rows.indices.forEach { rowIndex ->
         val row = rows[rowIndex]
         sparse[rowIndex].forEach { (index, value) ->
@@ -718,7 +724,7 @@ internal fun fitDecisionLocalModel(roots: List<DecisionLocalRootEvidence>): Deci
         }
     }
     fun multiply(vector: DoubleArray): DoubleArray {
-        val result = DoubleArray(vector.size) { DECISION_LOCAL_RIDGE * vector[it] }
+        val result = DoubleArray(vector.size) { ridge * vector[it] }
         rows.indices.forEach { rowIndex ->
             val dot = sparse[rowIndex].sumOf { (index, value) -> vector[index] * value }
             sparse[rowIndex].forEach { (index, value) -> result[index] += rows[rowIndex].weight * value * dot }
@@ -770,7 +776,7 @@ internal fun fitDecisionLocalModel(roots: List<DecisionLocalRootEvidence>): Deci
         modelId = "CONTENT_ID_OMITTED",
         featureSchema = LEARNED_OUTCOME_VALUE_FEATURE_SCHEMA_V1,
         objective = DECISION_LOCAL_MODEL_OBJECTIVE,
-        regularization = DECISION_LOCAL_RIDGE,
+        regularization = ridge,
         solver = DECISION_LOCAL_SOLVER,
         tolerance = DECISION_LOCAL_TOLERANCE,
         iterationLimit = cap,
@@ -1133,7 +1139,7 @@ internal class DecisionLocalExperimentRunner(
                 "root-continuation" to SearchTeacherSearchFactory.rootRolloutPolicy().behaviorSpecification.toString(),
                 "opponent-continuation" to SearchTeacherSearchFactory.opponentRolloutPolicy().behaviorSpecification.toString(),
                 "features" to LEARNED_OUTCOME_VALUE_FEATURE_SCHEMA_V1,
-                "model" to "$DECISION_LOCAL_MODEL_OBJECTIVE:$DECISION_LOCAL_SOLVER:ridge=$DECISION_LOCAL_RIDGE:tol=$DECISION_LOCAL_TOLERANCE",
+                "model" to "$DECISION_LOCAL_MODEL_OBJECTIVE:$DECISION_LOCAL_SOLVER:ridge=$DECISION_LOCAL_DEFAULT_RIDGE:tol=$DECISION_LOCAL_TOLERANCE",
                 "split" to DECISION_LOCAL_SPLIT_RULE,
                 "continuation-seeds" to DECISION_LOCAL_CONTINUATION_SEED_RULE,
                 "feature-schedule" to DECISION_LOCAL_FEATURE_SCHEDULE,

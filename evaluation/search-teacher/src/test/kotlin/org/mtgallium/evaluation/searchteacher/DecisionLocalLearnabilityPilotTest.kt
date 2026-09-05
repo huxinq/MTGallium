@@ -95,6 +95,10 @@ class DecisionLocalLearnabilityPilotTest {
         assertTrue("validation-only" !in fitted.weights)
         val changedTrain = train.copy(candidates = train.candidates.map { it.copy(primaryTerminalPayoffs = it.primaryTerminalPayoffs.map { p -> -p }) })
         assertTrue(fitted.modelId != fitLearnabilityModel(listOf(changedTrain, validation)).modelId)
+        val diagnostic = fitLearnabilityModel(listOf(train, validation), ridge = 1.0)
+        assertEquals(1.0, diagnostic.regularization)
+        assertEquals(fitDecisionLocalModel(listOf(train), ridge = 1.0), diagnostic)
+        assertEquals(diagnostic, fitLearnabilityModel(listOf(train, changedValidation), ridge = 1.0))
     }
 
     @Test

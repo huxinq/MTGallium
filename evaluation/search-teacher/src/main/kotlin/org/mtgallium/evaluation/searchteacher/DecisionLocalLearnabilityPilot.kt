@@ -47,12 +47,16 @@ internal data class LearnabilityCandidatePrediction(
     val signature: String, val observedMean32: Double, val modelScore: Double, val cheapHeuristicScore: Double,
 )
 
-internal fun fitLearnabilityModel(roots: List<DecisionLocalRootEvidence>): DecisionLocalModelCheckpoint {
+@JvmOverloads
+internal fun fitLearnabilityModel(
+    roots: List<DecisionLocalRootEvidence>,
+    ridge: Double = DECISION_LOCAL_DEFAULT_RIDGE,
+): DecisionLocalModelCheckpoint {
     require(roots.map { it.rootId }.distinct().size == roots.size)
     require(roots.all { it.split in setOf(DecisionLocalSplit.TRAIN, DecisionLocalSplit.VALIDATION) })
     require(roots.all { r -> r.primaryReplicates == 32 && r.independentReplicates == 0 &&
         r.candidates.all { it.primaryTerminalPayoffs.size == 32 && it.independentTerminalPayoffs.isEmpty() } })
-    return fitDecisionLocalModel(roots.filter { it.split == DecisionLocalSplit.TRAIN })
+    return fitDecisionLocalModel(roots.filter { it.split == DecisionLocalSplit.TRAIN }, ridge)
 }
 
 @Serializable

@@ -75,6 +75,34 @@ class DecisionLocalSiblingOutcomeExperimentTest {
     }
 
     @Test
+    fun `diagnostic ridge preserves the default and solves the averaged loss at its recorded penalty`() {
+        val roots = listOf(root("r1", listOf(candidate("a", 1.0, 1.0), candidate("b", 0.0, -1.0))))
+        val historical = fitDecisionLocalModel(roots)
+        assertEquals(historical, fitDecisionLocalModel(roots, ridge = 0.01))
+        val stronger = fitDecisionLocalModel(roots, ridge = 1.0)
+        assertEquals(1.0, stronger.regularization)
+        assertTrue(historical.modelId != stronger.modelId)
+        // Centered x is +/-0.5, y is +/-1, with total root weight one:
+        // w = E[x*y] / (E[x*x] + ridge) = 0.5 / (0.25 + ridge).
+        assertEquals(0.4, stronger.score(roots.single().candidates[0]) -
+            stronger.score(roots.single().candidates[1]), 1e-7)
+        assertTrue(stronger.maximumKktResidual <= stronger.tolerance)
+        assertEquals(stronger, evidenceJson.decodeFromString<DecisionLocalModelCheckpoint>(
+            evidenceJson.encodeToString(stronger)))
+        val tied = roots.map { root -> root.copy(candidates = root.candidates.map {
+            it.copy(primaryTerminalPayoffs = List(8) { 0.0 })
+        }) }
+        val zeroDefault = fitDecisionLocalModel(tied)
+        val zeroStronger = fitDecisionLocalModel(tied, ridge = 1.0)
+        assertEquals(zeroDefault.copy(modelId = "CONTENT_ID_OMITTED", regularization = 1.0),
+            zeroStronger.copy(modelId = "CONTENT_ID_OMITTED"))
+        assertTrue(zeroDefault.modelId != zeroStronger.modelId)
+        for (invalid in listOf(0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY)) {
+            assertFailsWith<IllegalArgumentException> { fitDecisionLocalModel(roots, ridge = invalid) }
+        }
+    }
+
+    @Test
     fun `label signal gate recognizes matched deterministic sibling separation`() {
         val signal = decisionLocalSignal(listOf(
             root("r1", listOf(candidate("a", 1.0, 1.0), candidate("b", 0.0, -1.0))),
