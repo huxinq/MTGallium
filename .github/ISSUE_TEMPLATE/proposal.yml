@@ -4,12 +4,12 @@ body:
   - type: textarea
     attributes:
       label: Scope and question
-      description: State the narrow question, non-goals, and affected semantic boundary.
+      description: State the problem, desired behavior, and any semantic choice that needs resolving.
     validations:
       required: true
   - type: textarea
     attributes:
       label: Verification
-      description: State the focused checks and what they would not establish.
+      description: State the checks that would distinguish success and any material limits.
     validations:
       required: true

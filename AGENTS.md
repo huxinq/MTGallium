@@ -3,7 +3,8 @@
 This public repository is the authority for new first-party MTGallium source.
 Do not use the pre-publication private repository for new development; it
 remains historical provenance. Read [`docs/architecture.md`](docs/architecture.md)
-before changing a semantic boundary.
+before changing a semantic boundary. Read other source and documentation as
+the task requires; reuse relevant context already established in this task.
 
 ## Semantic authority
 
@@ -84,7 +85,11 @@ satisfy a test or tool.
 ## Public and private verification
 
 Use focused tests first; `just check` is the normal self-contained public
-technical lane. Public CI exercises explicitly classified public capabilities;
+technical lane for source changes. For prose and agent configuration changes,
+check the affected syntax, links, and instruction consistency; run executable
+checks when behavior changes. After the relevant checks pass, repeat or broaden
+them only for a new change, failure, or unresolved concern.
+Public CI exercises explicitly classified public capabilities;
 tests whose meaning intrinsically needs private historical evidence remain
 separate. Generic invariants should prefer synthetic or public-safe fixtures.
 
@@ -93,6 +98,17 @@ historical evidence, or reintroduce private resources into the checkout to make
 CI pass. Passing tests are technical evidence, not a research conclusion.
 
 ## Working defaults
+
+- Complete the requested work through implementation, relevant verification,
+  and repair of failures caused by the change. An initial patch is not completion.
+  Use reasonable assumptions for routine reversible choices. Ask only when the
+  missing answer changes the outcome materially, and continue independent work.
+- Existing owner authorization carries forward. Skills and templates guide the
+  work; they do not add approval gates or override explicit task instructions.
+  If a local instruction blocks authorized work, identify its file and wording.
+- Reuse successful verification when its source, configuration, and inputs still
+  apply. Report unrelated failures and continue unaffected work without modifying
+  others' changes or claiming that a blocked check passed.
 
 - Commit treatment source before substantial compute so evidence has an
   unambiguous source identity.
@@ -129,21 +145,21 @@ verification, orchestration, serialization, and avoidable reasoning. Use the
 least intensive model or agent effort unlikely to reduce decision-relevant
 quality; raise it for semantic ambiguity or genuine difficulty.
 
-When work encounters friction, briefly investigate its cause. Consider the
-prompt and assumptions, workflow instructions or fixtures, tools, code
-organization, implementation, and documentation, as well as the agent's own
-unnecessary caution, repeated checking, or over-analysis. Ground the diagnosis
-in what happened and distinguish a suspected cause from an established one.
+Delegate a bounded question when independent work can run alongside useful
+local work or independent review materially improves confidence. Give each agent
+its objective, relevant paths, ownership, and expected evidence. Reuse an existing
+agent for related questions; avoid duplicate exploration and serial handoffs
+whose answer is already established. Retain cheaper specialist models for
+bounded tracing and review; use Astra for difficult synthesis or ambiguity.
 
-Raise actionable findings in ordinary progress updates or the handoff: what
-caused the friction, its practical cost, and the smallest useful remedy. Make
-small, local, reversible fixes within established authority autonomously,
-verify them proportionately, and report the result. If changing the agent's
-own behavior is sufficient, make that adjustment directly. For larger remedies
-or unresolved research choices, present the concrete issue and proposed next
-step while continuing independent work. Keep reflection proportionate to the
-friction; it should not become a mandatory audit at every step or a reason to
-add machinery without a demonstrated need.
+When work encounters friction, briefly investigate its cause in the instructions,
+tools, code, or the agent's own approach. Distinguish demonstrated causes from
+suspicions. Make small reversible fixes within the objective and verify
+proportionately; report larger remedies or unresolved decisions while continuing
+independent work. Keep reflection proportionate to the friction.
+
+Lead updates and final reports with the outcome, its evidence, and material limits.
+Use concise prose, concrete examples, and lists only when they improve clarity.
 
 Owner research environments may provide durable execution for substantial
 compute. When available, use it after cheap preflight and inspect retained

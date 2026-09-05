@@ -6,8 +6,10 @@ for when to seek owner review, and preserve its research-critical invariants
 and working defaults, including the restriction on changing the Argentum pin.
 
 Use focused tests while developing and run `just check` before proposing a
-change where the public dependency gate permits it. Passing tests alone do not
-establish a research conclusion.
+source change where the public dependency gate permits it. For prose or agent
+configuration changes, validate the affected syntax, links, and instruction
+consistency; exercise changed scripts. Report checks that could not run and why.
+Passing tests alone do not establish a research conclusion.
 
 Never attach real private replay, referee-state, hidden-information, seed, or
 private evidence material to a public issue or pull request. Use independently
