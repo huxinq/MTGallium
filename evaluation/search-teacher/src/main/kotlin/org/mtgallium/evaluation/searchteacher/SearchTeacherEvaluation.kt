@@ -60,6 +60,14 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         return
     }
 
+    if (options.suite == "decision-local-learnability-pilot") {
+        val output = diagnosticOutput(requireNotNull(options.outputPath))
+        val report = DecisionLocalLearnabilityPilot(root).run(requireNotNull(options.precisionParent),
+            requireNotNull(options.precisionRun), output)
+        println("Learnability ${report.researchRunIdentity}: ${report.conclusion}; output=$output")
+        return
+    }
+
     val provenance = RunProvenance.capture(root)
     provenance.requireReady()
     // Corpus-only neural suites return before either authority is needed. Keeping these lazy avoids

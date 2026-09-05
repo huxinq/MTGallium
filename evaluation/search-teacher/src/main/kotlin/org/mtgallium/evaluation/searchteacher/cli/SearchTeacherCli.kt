@@ -41,6 +41,7 @@ internal object SearchTeacherSuites {
         "learned-leaf-fixed-root-preflight",
         "learned-leaf-fixed-root-diagnostic",
         "decision-local-precision-preflight",
+        "decision-local-learnability-pilot",
         "decision-local-precision-followup",
         "decision-local-root-freeze",
         "decision-local-throughput-preflight",
@@ -119,6 +120,7 @@ internal data class SearchTeacherCli(
     val fixedRootStub: Path? = null,
     val fixedRootManifest: Path? = null,
     val precisionParent: Path? = null,
+    val precisionRun: Path? = null,
     val challengeManifests: List<Path> = emptyList(),
     /** Historical completed gate containing retained training, validation, and test artifacts. */
     val fixedRootGate: Path? = null,
@@ -156,6 +158,7 @@ internal data class SearchTeacherCli(
                     )
                     "--profile" -> parsed.copy(profilePath = args.path(++index, option))
                     "--precision-parent" -> parsed.copy(precisionParent = args.path(++index, option))
+                    "--precision-run" -> parsed.copy(precisionRun = args.path(++index, option))
                     "--deck-manifest" -> parsed.copy(deckManifest = args.path(++index, option))
                     "--case-limit" -> parsed.copy(caseLimit = args.value(++index, option).toInt())
                     "--threads" -> parsed.copy(threads = args.value(++index, option).toInt())
@@ -240,6 +243,12 @@ internal data class SearchTeacherCli(
             }
             require(suite != "learned-leaf-fixed-root-diagnostic" || outputPath != null) {
                 "The executed fixed-root diagnostic requires --output"
+            }
+            if (suite == "decision-local-learnability-pilot") {
+                require(precisionParent != null && precisionRun != null && outputPath != null) {
+                    "Learnability requires --precision-parent, --precision-run, and --output"
+                }
+                require(challengeManifests.isEmpty()) { "Learnability does not admit challenge panels" }
             }
             if (suite in setOf("decision-local-precision-preflight", "decision-local-precision-followup")) {
                 require(deckManifest != null && fixedRootPilot != null && fixedRootManifest != null && precisionParent != null && outputPath != null) {
