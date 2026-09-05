@@ -25,10 +25,10 @@ git submodule update --init --recursive
 just check
 ```
 
-The exact Argentum gitlink is supplied by the
-[maintained MTGallium compatibility fork](https://github.com/huxinq/argentum-engine)
-identified in `.gitmodules`. It is not upstream `main`; do not replace the pin
-with another revision. `just architecture-check` and
+The exact Argentum gitlink comes from the
+[upstream Argentum repository](https://github.com/wingedsheep/argentum-engine)
+identified in `.gitmodules`. MTGallium pins a reviewed commit rather than
+following a moving branch implicitly. `just architecture-check` and
 `just search-teacher-check` are focused validation entry points.
 
 Canonical replays and private experiment evidence are intentionally not part of
