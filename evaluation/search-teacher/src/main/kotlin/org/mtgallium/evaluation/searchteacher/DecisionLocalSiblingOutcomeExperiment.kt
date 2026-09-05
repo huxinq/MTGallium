@@ -981,6 +981,7 @@ internal data class DecisionLocalExperimentReport(
     val nextOwnerDecision: String,
     val sourceProvenance: ResearchRunProvenance? = null,
     val researchRunBindings: ResearchRunBindings? = null,
+    val excludedRootFailures: List<String> = emptyList(),
 )
 
 internal class DecisionLocalExperimentRunner(
@@ -1064,6 +1065,7 @@ internal class DecisionLocalExperimentRunner(
         val historical = HistoricalOutcomeValueDiagnosticCheckpoint.load(corpusDirectory, gateDirectory)
         require(manifest.argentumCommit == provenance.checkedOutArgentumCommit)
         require(!signalOnly || challengeManifestPaths.isEmpty()) { "Stage one does not admit challenge panels" }
+        require(!signalOnly || !Files.exists(output)) { "Stage one requires a fresh output directory" }
         val bindings = ResearchRunBindings(
             protocol = if (signalOnly) DECISION_LOCAL_SIGNAL_PROTOCOL else DECISION_LOCAL_EXPERIMENT_PROTOCOL,
             material = mapOf(
@@ -1309,6 +1311,7 @@ internal class DecisionLocalExperimentRunner(
             nextOwnerDecision = next,
             sourceProvenance = provenance,
             researchRunBindings = bindings,
+            excludedRootFailures = exclusions.toList(),
         )
     }
 
