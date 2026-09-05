@@ -73,3 +73,38 @@ is an explicitly overlaid diagnostic, not verification of a pinned production
 build. Runtime file inventories bind the remaining classpath inputs; preserve
 those inputs during the comparison. The binary/source association also retains
 the build command; binary hashes alone do not prove compilation provenance.
+
+## Search count shadow diagnostic
+
+The ordinary evaluation runtime includes
+`org.mtgallium.evaluation.searchteacher.SearchCountDiagnostic`. Build its
+classpath with the command above, then launch that main class with:
+
+```text
+<repository-root> <relative-evidence-directory> <base-seed> <maximum-search-decisions>
+```
+
+It records two synthetic mono-red traces using the normal arena lifecycle:
+Search Teacher controls p0 at the base seed and p1 at the next seed, with the
+determinized Argentum heuristic controlling the other seat. The current runtime
+uses 8 particles, 64 simulations and a 32-decision horizon. Each trace stops at
+the requested search count (1–64), a game end, or an existing typed failure.
+There is no warmup game. All outputs remain private, and the existing
+`ResearchRunArtifacts` manifest binds source, behavior, protocol, runtime-file
+hashes, complete game records and available trajectories.
+
+The arena already records its shadow heuristic beside each searched choice.
+Join trajectory decisions to `seatDiagnostics.searchDecisionsDetail` by
+decision index for action agreement and search latency; retain comparator
+fallback counts from the game record. Count existing automatic forced passes
+separately from searched singletons, and use the expansion's exhaustiveness
+and omissions when describing a singleton.
+
+Search latency covers policy selection after root expansion, including belief
+synchronization. Game elapsed time also includes setup, the opponent,
+the shadow comparator, evidence writes, transitions and belief updates.
+The comparator's own cost is not isolated. Agreement is a retrospective
+opportunity to investigate, not a prospective gate or a strength result;
+subtracting matching search time describes an optimistic counterfactual,
+not a measured speedup. The two bounded traces do not represent full-game or
+typical-workload frequencies.
