@@ -166,7 +166,7 @@ internal class DecisionLocalRootFreezer(
             policySearchBaseSeed = 20260825L,
         )
         val drafts = pilot.pairs.sortedBy { it.pairIndex }.map { pair ->
-            selectRootDraft(pilotDirectory, pair, control.id, stubPilot)
+            selectRootDraft(pilotDirectory, pair, control.id)
         }
         val stub = LearnedLeafFixedRootSelectionStub(
             stubSchemaVersion = 1,
@@ -236,11 +236,10 @@ internal class DecisionLocalRootFreezer(
         return manifest
     }
 
-    private fun selectRootDraft(
+    internal fun selectRootDraft(
         pilotDirectory: Path,
         pair: LearnedLeafPilotPair,
         controlPolicyId: String,
-        stubPilot: LearnedLeafFixedRootStubPilot,
     ): LearnedLeafFixedRootStubRoot {
         val targetSeat = if (pair.pairIndex % 2 == 0) "p0" else "p1"
         val game = pair.games.single { game ->
@@ -288,7 +287,7 @@ internal class DecisionLocalRootFreezer(
         return LearnedLeafFixedRootStubRoot(
             id = "primary-pair-${pair.pairIndex}-${targetSeat}-decision-${selected.decisionIndex}",
             pairIndex = pair.pairIndex,
-            leg = if (pair.games.indexOf(game) == 0) "a" else "b",
+            leg = if (targetSeat == "p0") "a" else "b",
             sourceGameId = game.gameId,
             decisionIndex = selected.decisionIndex,
             rootActor = targetSeat,
@@ -481,14 +480,19 @@ internal class DecisionLocalEvidenceMaterializer(
     private val pilotDirectory: Path,
     private val registry: com.wingedsheep.engine.registry.CardRegistry,
     private val deckManifest: DeckManifest,
-    private val manifest: DecisionLocalRootManifest,
+    private val pilot: LearnedLeafFixedRootPilotBinding,
     private val historical: HistoricalOutcomeValueDiagnosticCheckpoint,
+    private val sampleObserver: (DecisionLocalTerminalSample) -> Unit = {},
 ) {
+    constructor(pilotDirectory: Path, registry: com.wingedsheep.engine.registry.CardRegistry,
+        deckManifest: DeckManifest, manifest: DecisionLocalRootManifest,
+        historical: HistoricalOutcomeValueDiagnosticCheckpoint) :
+        this(pilotDirectory, registry, deckManifest, manifest.pilot, historical)
     private val knownDecks = mapOf("p0" to deckManifest.mainDeck, "p1" to deckManifest.mainDeck)
     private val opponent = defaultMonoRedOpponentPolicy()
     private val failedGlobal = historical.diagnosticEvaluator()
-    private val controlParameters = manifest.pilot.control.composition.parameters(
-        manifest.pilot.control.composition.let { 20260825L }, manifest.pilot.control.leaf,
+    private val controlParameters = pilot.control.composition.parameters(
+        20260825L, pilot.control.leaf,
     )
     private val terminalSearch = SearchTeacherSearchFactory.create(controlParameters.searchConfig(), opponent)
     private val featureParameters = controlParameters.copy(
@@ -516,7 +520,7 @@ internal class DecisionLocalEvidenceMaterializer(
     ): DecisionLocalRootEvidence {
         require(primaryReplicates >= DECISION_LOCAL_PRIMARY_REPLICATES)
         val reconstructed = reconstructDecisionLocalRoot(
-            pilotDirectory, registry, deckManifest, manifest.pilot, root, failedGlobal,
+            pilotDirectory, registry, deckManifest, pilot, root, failedGlobal,
         )
         val liveSearchSeed = reconstructed.liveSearchSeed
         val candidateEvidence = root.candidateSignatures.map { signature ->
@@ -579,6 +583,7 @@ internal class DecisionLocalEvidenceMaterializer(
             var runtimeNanos = 0L
             repeat(primaryReplicates + independentReplicates) { replicate ->
                 val sample = continueDecisionLocalCandidate(reconstructed, root, split, signature, replicate, terminalSearch)
+                sampleObserver(sample)
                 policyDecisions += sample.policyDecisions
                 runtimeNanos += (sample.elapsedMillis * 1_000_000.0).toLong()
                 if (replicate < primaryReplicates) primary += sample.payoff else independent += sample.payoff

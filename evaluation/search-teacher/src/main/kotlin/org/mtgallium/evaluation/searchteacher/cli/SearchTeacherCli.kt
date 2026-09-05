@@ -42,6 +42,8 @@ internal object SearchTeacherSuites {
         "learned-leaf-fixed-root-diagnostic",
         "decision-local-precision-preflight",
         "decision-local-learnability-pilot",
+        "decision-local-root-coverage-preflight",
+        "decision-local-root-coverage",
         "decision-local-precision-followup",
         "decision-local-root-freeze",
         "decision-local-throughput-preflight",
@@ -121,6 +123,7 @@ internal data class SearchTeacherCli(
     val fixedRootManifest: Path? = null,
     val precisionParent: Path? = null,
     val precisionRun: Path? = null,
+    val coverageParent: Path? = null,
     val challengeManifests: List<Path> = emptyList(),
     /** Historical completed gate containing retained training, validation, and test artifacts. */
     val fixedRootGate: Path? = null,
@@ -159,6 +162,7 @@ internal data class SearchTeacherCli(
                     "--profile" -> parsed.copy(profilePath = args.path(++index, option))
                     "--precision-parent" -> parsed.copy(precisionParent = args.path(++index, option))
                     "--precision-run" -> parsed.copy(precisionRun = args.path(++index, option))
+                    "--coverage-parent" -> parsed.copy(coverageParent = args.path(++index, option))
                     "--deck-manifest" -> parsed.copy(deckManifest = args.path(++index, option))
                     "--case-limit" -> parsed.copy(caseLimit = args.value(++index, option).toInt())
                     "--threads" -> parsed.copy(threads = args.value(++index, option).toInt())
@@ -243,6 +247,12 @@ internal data class SearchTeacherCli(
             }
             require(suite != "learned-leaf-fixed-root-diagnostic" || outputPath != null) {
                 "The executed fixed-root diagnostic requires --output"
+            }
+            if (suite in setOf("decision-local-root-coverage", "decision-local-root-coverage-preflight")) {
+                require(coverageParent != null && fixedRootPilot != null && outcomeCorpus != null && fixedRootGate != null && deckManifest != null && outputPath != null) {
+                    "Root coverage requires --coverage-parent, --fixed-root-pilot, --outcome-corpus, --fixed-root-gate, --deck-manifest, and --output"
+                }
+                require(challengeManifests.isEmpty()) { "Root coverage does not admit challenge panels" }
             }
             if (suite == "decision-local-learnability-pilot") {
                 require(precisionParent != null && precisionRun != null && outputPath != null) {

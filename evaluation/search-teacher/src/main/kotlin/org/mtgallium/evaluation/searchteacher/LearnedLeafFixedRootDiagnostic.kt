@@ -1245,6 +1245,14 @@ internal fun representedKnowledgeCategory(information: PolicyInformationState): 
  * One-shot authority that completes only reconstruction-owned fields in the Director-frozen
  * result-blind stub. It authenticates inputs and reconstructs beliefs, but has no settlement API.
  */
+internal data class FixedRootReplayContext(
+    val runIdentity: String,
+    val sourceCommit: String,
+    val argentumCommit: String,
+    val replayBaseSeed: Long,
+    val policySearchBaseSeed: Long,
+)
+
 internal class LearnedLeafFixedRootProductionBinder(
     private val pilotDirectory: Path,
     private val registry: com.wingedsheep.engine.registry.CardRegistry,
@@ -1314,16 +1322,30 @@ internal class LearnedLeafFixedRootProductionBinder(
         val game = fixedRootSourceGame(
             pilot, root.pairIndex, root.sourceGameId, root.leg, root.rootActor, root.sourcePolicyId,
         )
+        return bindRecordedRoot(FixedRootReplayContext(stub.pilot.runIdentity,
+            stub.pilot.mtgalliumSourceCommit, stub.pilot.argentumCommit,
+            stub.pilot.replayBaseSeed, stub.pilot.policySearchBaseSeed), pilotBinding, root, game)
+    }
+
+    /** Shared reconstruction, with historical admission remaining in bindRoot and its caller. */
+    internal fun bindRecordedRoot(
+        context: FixedRootReplayContext,
+        pilotBinding: LearnedLeafFixedRootPilotBinding,
+        root: LearnedLeafFixedRootStubRoot,
+        game: GameRunResult,
+    ): LearnedLeafFixedRootSelection {
+        require(game.gameId == root.sourceGameId)
+        require((if (root.rootActor == "p0") game.p0PolicyId else game.p1PolicyId) == root.sourcePolicyId)
         require(game.seed == root.replayGameSeed && game.replayVerified && game.replaySha256 == root.replaySha256)
         val replay = readVerifiedCanonicalSemanticReplay(
             fixedRootReplayPath(pilotDirectory, root.replayRelativePath, root.replaySha256),
         )
         require(replay.header.gameId == root.sourceGameId)
-        require(replay.header.requireExtensionString("mtgallium.runIdentity") == stub.pilot.runIdentity)
-        require(replay.header.requireExtensionString("mtgallium.outerCommit") == stub.pilot.mtgalliumSourceCommit)
-        require(replay.header.requireExtensionString("mtgallium.argentumCommit") == stub.pilot.argentumCommit)
+        require(replay.header.requireExtensionString("mtgallium.runIdentity") == context.runIdentity)
+        require(replay.header.requireExtensionString("mtgallium.outerCommit") == context.sourceCommit)
+        require(replay.header.requireExtensionString("mtgallium.argentumCommit") == context.argentumCommit)
         require(replay.header.requireExtensionLong("mtgallium.gameSeed") == root.replayGameSeed)
-        require(replay.header.requireExtensionLong("mtgallium.baseSeed") == stub.pilot.replayBaseSeed)
+        require(replay.header.requireExtensionLong("mtgallium.baseSeed") == context.replayBaseSeed)
         require(root.decisionIndex in replay.decisions.indices)
         val prefix = replay.decisions.take(root.decisionIndex).map(CanonicalSemanticDecision::choice)
         require(PolicyJson.sha256(prefix.joinToString("\u001f") { it.signature }) == root.semanticPrefixDigest)
@@ -1334,7 +1356,7 @@ internal class LearnedLeafFixedRootProductionBinder(
             manifest = deckManifest,
             gameId = root.sourceGameId,
             gameSeed = root.replayGameSeed,
-            searchBaseSeed = stub.pilot.replayBaseSeed,
+            searchBaseSeed = context.replayBaseSeed,
             startingPlayerIndex = 0,
             profile = org.mtgallium.agent.infoset.core.SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
         )
@@ -1342,7 +1364,7 @@ internal class LearnedLeafFixedRootProductionBinder(
         require(fixedRootRetainedCandidateSignatures(
             game, root.decisionIndex, root.rootActor, sourceBinding,
         ) == root.candidateSignatures)
-        val parameters = sourceBinding.composition.parameters(stub.pilot.policySearchBaseSeed, sourceBinding.leaf)
+        val parameters = sourceBinding.composition.parameters(context.policySearchBaseSeed, sourceBinding.leaf)
         val session = SearchTeacherPolicySession(
             root = actual,
             viewer = root.rootActor,
@@ -1365,7 +1387,7 @@ internal class LearnedLeafFixedRootProductionBinder(
         val belief = session.beliefBatch(actual)
         require(belief.particles.size == sourceBinding.composition.particles)
         val liveSearchSeed = ComponentSeeds.derive(
-            root.sourceGameId, root.decisionIndex, stub.pilot.policySearchBaseSeed, "live-search",
+            root.sourceGameId, root.decisionIndex, context.policySearchBaseSeed, "live-search",
         )
         val indices = InformationSetSearch.productionRootParticleIndices(
             belief.particles.map { it.weight }, liveSearchSeed, sourceBinding.composition.simulations,
@@ -1376,15 +1398,15 @@ internal class LearnedLeafFixedRootProductionBinder(
         val schedule = LearnedLeafFixedRootSchedule(
             originalGameId = root.sourceGameId,
             replayGameSeed = root.replayGameSeed,
-            replayBaseSeed = stub.pilot.replayBaseSeed,
-            policySearchBaseSeed = stub.pilot.policySearchBaseSeed,
+            replayBaseSeed = context.replayBaseSeed,
+            policySearchBaseSeed = context.policySearchBaseSeed,
             decisionIndex = root.decisionIndex,
             beliefLifecycleVersion = "sequential-b-v1",
             beliefDerivationVersion = "production-root-particle-indices-v1",
             coordinates = coordinates,
             scheduleDigest = learnedLeafFixedRootScheduleDigest(
-                root.sourceGameId, root.replayGameSeed, stub.pilot.replayBaseSeed,
-                stub.pilot.policySearchBaseSeed, root.decisionIndex, "sequential-b-v1",
+                root.sourceGameId, root.replayGameSeed, context.replayBaseSeed,
+                context.policySearchBaseSeed, root.decisionIndex, "sequential-b-v1",
                 "production-root-particle-indices-v1", coordinates,
             ),
         )

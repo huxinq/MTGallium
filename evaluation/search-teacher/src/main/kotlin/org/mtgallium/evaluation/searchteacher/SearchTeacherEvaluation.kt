@@ -74,6 +74,21 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
     // constructing the full Argentum card registry during their fail-fast input-validation phase.
     val manifest by lazy { loadDeckManifest(options.deckManifest) }
     val registry by lazy(::buildRegistry)
+    if (options.suite in setOf("decision-local-root-coverage", "decision-local-root-coverage-preflight")) {
+        val output = diagnosticOutput(requireNotNull(options.outputPath))
+        val runner = DecisionLocalRootCoverage(root, registry, manifest)
+        if (options.suite == "decision-local-root-coverage-preflight") {
+            runner.preflight(requireNotNull(options.coverageParent), requireNotNull(options.fixedRootPilot),
+                requireNotNull(options.outcomeCorpus), requireNotNull(options.fixedRootGate), options.threads, output)
+            println("Root coverage preflight passed; output=$output")
+        } else {
+            val report = runner.run(requireNotNull(options.coverageParent), requireNotNull(options.fixedRootPilot),
+                requireNotNull(options.outcomeCorpus), requireNotNull(options.fixedRootGate), options.threads, output,
+                System.getenv("MTGALLIUM_PROGRESS_FILE")?.takeIf(String::isNotBlank)?.let(Path::of))
+            println("Root coverage ${report.researchRunIdentity}: ${report.conclusion}; output=$output")
+        }
+        return
+    }
     if (options.suite in setOf("decision-local-precision-preflight", "decision-local-precision-followup")) {
         val output = diagnosticOutput(requireNotNull(options.outputPath))
         val runner = DecisionLocalPrecisionFollowup(root, registry, manifest)

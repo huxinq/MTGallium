@@ -675,7 +675,7 @@ internal class LearnedLeafPilotSmokeRunner(
         )
 }
 
-private fun requirePilotEvaluatorDiagnostic(
+internal fun requirePilotEvaluatorDiagnostic(
     detail: ArenaSearchDecisionDiagnostic,
     parameters: SearchTeacherPolicyParameters,
     policy: ArenaPolicySpec,
