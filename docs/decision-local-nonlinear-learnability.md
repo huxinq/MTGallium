@@ -10,7 +10,7 @@ weight per root and per sibling. Two new capabilities provide a bounded model
 comparison:
 
 - `fitDecisionLocalPhaseModel` retains every original feature and adds
-  its interaction with the pre-choice game phase and opening-turn status.
+  its interaction with the pre-choice game phase and first-turn status.
   Fitting the existing ridge model to this projection tests whether shared
   coefficients interfere across those contexts. Feature duplication also
   changes effective regularization, so this is not an isolated causal test
@@ -18,16 +18,20 @@ comparison:
   its root-aware scorer applies the projection automatically after loading.
 - `fitDecisionLocalNonlinearModel` fits a single tanh hidden layer with a
   linear output. It consumes the uncentered original feature means plus a
-  phase/opening context indicator. Only predictions and targets are centered
+  phase/first-turn context indicator. Only predictions and targets are centered
   within each root. Thus it can learn interactions between shared context
   and candidate differences that would disappear if inputs were centered
   before the nonlinear transformation.
 
 The source-selected action family is excluded from both model inputs. It
 describes the action that the historical control chose; it is not a general
-pre-choice decision type. Phase and `turnNumber == 0` come from the recorded
-root observation. They are deliberately coarse and do not distinguish every
-opening or response decision.
+pre-choice decision type. Phase and `turnNumber <= 1` come from the recorded
+root observation. The latter includes engines whose opening choices start at
+turn one. It also includes ordinary first-turn choices: these fields are
+deliberately coarse and do not distinguish every opening or response decision.
+Both context-dependent artifact schemas are version 2. They reject version 1
+artifacts, whose turn-zero context keys had different meaning, rather than
+silently scoring old weights with the new transform.
 
 ## Target and representation
 

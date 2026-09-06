@@ -8,6 +8,14 @@ import kotlin.test.assertTrue
 @org.junit.jupiter.api.Tag("public-source")
 class DecisionLocalNonlinearModelTest {
     @Test
+    fun `first-turn context includes engines whose opening choices start at turn one`() {
+        val root = root(1, 1.0)
+        assertEquals("BEGINNING/first-turn-or-pregame", decisionLocalContext(root.copy(phase = "BEGINNING", turnNumber = 1)))
+        assertEquals("BEGINNING/first-turn-or-pregame", decisionLocalContext(root.copy(phase = "BEGINNING", turnNumber = 0)))
+        assertEquals("BEGINNING/later-turn", decisionLocalContext(root.copy(phase = "BEGINNING", turnNumber = 2)))
+    }
+
+    @Test
     fun `nonlinear scorer learns context interaction erased by centering inputs`() {
         val roots = listOf(root(1, 1.0), root(2, -1.0), root(3, 1.0), root(4, -1.0))
         val baseline = fitLearnabilityModel(roots)
@@ -18,6 +26,11 @@ class DecisionLocalNonlinearModelTest {
         val restored = evidenceJson.decodeFromString(DecisionLocalNonlinearModel.serializer(),
             evidenceJson.encodeToString(DecisionLocalNonlinearModel.serializer(), model))
         assertEquals(model.modelId, restored.modelId)
+        assertFailsWith<IllegalArgumentException> {
+            evidenceJson.decodeFromString(DecisionLocalNonlinearModel.serializer(),
+                evidenceJson.encodeToString(DecisionLocalNonlinearModel.serializer(), model)
+                    .replace("decision-local-phase-tanh-v2", "decision-local-phase-tanh-v1"))
+        }
         roots.forEach { assertEquals(model.scores(it), restored.scores(it)) }
         assertEquals(model, fitDecisionLocalNonlinearModel(roots.reversed(), config()))
     }
@@ -36,6 +49,11 @@ class DecisionLocalNonlinearModelTest {
         val restored = evidenceJson.decodeFromString(DecisionLocalPhaseModel.serializer(),
             evidenceJson.encodeToString(DecisionLocalPhaseModel.serializer(), model))
         assertEquals(model.modelId, restored.modelId)
+        assertFailsWith<IllegalArgumentException> {
+            evidenceJson.decodeFromString(DecisionLocalPhaseModel.serializer(),
+                evidenceJson.encodeToString(DecisionLocalPhaseModel.serializer(), model)
+                    .replace("decision-local-phase-linear-v2", "decision-local-phase-linear-v1"))
+        }
         roots.forEach {
             assertEquals(1.0, accuracy(it, restored.scores(it)))
             assertEquals(model.scores(it), restored.scores(it))

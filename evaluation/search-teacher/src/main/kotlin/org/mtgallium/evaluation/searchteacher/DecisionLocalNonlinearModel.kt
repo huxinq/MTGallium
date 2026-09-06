@@ -8,12 +8,12 @@ import kotlin.math.tanh
 import kotlinx.serialization.Serializable
 import org.mtgallium.research.run.researchSha256
 
-private const val NONLINEAR_SCHEMA = "decision-local-phase-tanh-v1"
+private const val NONLINEAR_SCHEMA = "decision-local-phase-tanh-v2"
 private const val CONTEXT_PREFIX = "root-context/"
 
 /** These are pre-choice public state fields. The source-selected action family is not an input. */
 internal fun decisionLocalContext(root: DecisionLocalRootEvidence): String =
-    "${root.phase}/${if (root.turnNumber == 0) "opening" else "in-game"}"
+    "${root.phase}/${if (root.turnNumber <= 1) "first-turn-or-pregame" else "later-turn"}"
 
 /** Offline projection only: source vectors/schedules are unchanged and identify their parent input. */
 internal fun conditionDecisionLocalFeatures(root: DecisionLocalRootEvidence): DecisionLocalRootEvidence {
@@ -30,11 +30,11 @@ internal fun conditionDecisionLocalFeatures(root: DecisionLocalRootEvidence): De
 /** The projection belongs to the model artifact and scorer, not an optional caller convention. */
 @Serializable
 internal data class DecisionLocalPhaseModel(
-    val schema: String = "decision-local-phase-linear-v1",
+    val schema: String = "decision-local-phase-linear-v2",
     val projectedRidge: DecisionLocalModelCheckpoint,
 ) {
-    init { require(schema == "decision-local-phase-linear-v1") }
-    val modelId: String get() = "decision-local-phase-linear-v1-sha256:" +
+    init { require(schema == "decision-local-phase-linear-v2") }
+    val modelId: String get() = "decision-local-phase-linear-v2-sha256:" +
         researchSha256(evidenceJson.encodeToString(serializer(), this))
     fun scores(root: DecisionLocalRootEvidence): List<Double> =
         conditionDecisionLocalFeatures(root).candidates.map(projectedRidge::score)
@@ -90,7 +90,7 @@ internal data class DecisionLocalNonlinearModel(
         require(initialObjective.isFinite() && finalObjective.isFinite())
     }
 
-    val modelId: String get() = "decision-local-phase-tanh-v1-sha256:" +
+    val modelId: String get() = "decision-local-phase-tanh-v2-sha256:" +
         researchSha256(evidenceJson.encodeToString(serializer(), this))
 
     fun scores(root: DecisionLocalRootEvidence): List<Double> {
