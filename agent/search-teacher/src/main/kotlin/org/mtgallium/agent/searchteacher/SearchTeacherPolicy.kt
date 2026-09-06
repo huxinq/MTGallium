@@ -300,7 +300,7 @@ class SearchTeacherPolicySession(
         // all-particle digest audit is needed only when its result can affect an actual search.
         belief.synchronize(world, acceptedDecisionCount)
         val guidance = rootSelectionPolicy?.let { policy ->
-            require(expansion.isExhaustive) { "Root guidance requires an exhaustive admitted menu" }
+            require(expansion.isProfileExhaustive) { "Root guidance requires a profile-exhaustive admitted menu" }
             val information = world.informationState(actor)
             RootSelectionGuidance(policy.configurationId,
                 information.informationStateDigest, policy.scores(information, expansion.candidates))

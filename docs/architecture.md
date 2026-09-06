@@ -68,7 +68,7 @@ integration/argentum-search-teacher ──→ adapter + Search Teacher
 ```
 
 Experimental root guidance scores only actual acting-player information and an
-exhaustive admitted menu. Frozen preferences order unvisited edges and add a
+exhaustive admitted menu within the declared action profile. Frozen preferences order unvisited edges and add a
 unit-weight, visit-decaying UCT bonus; they never become backed values or
 initial visits. Policy identity and diagnostics retain the guidance identity;
 zero scores preserve the existing search. The first version refuses tree reuse

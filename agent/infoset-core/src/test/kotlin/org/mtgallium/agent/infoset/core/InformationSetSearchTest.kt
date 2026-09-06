@@ -10,6 +10,21 @@ import kotlin.test.assertFailsWith
 class InformationSetSearchTest {
 
     @Test
+    fun `root guidance accepts complete declared profiles despite intentional legal action omissions`() {
+        val world = ProfilePrunedWorld(FakeWorld())
+        val expansion = world.expandChoices()
+        assertTrue(!expansion.isExhaustive && expansion.isProfileExhaustive)
+        val guidance = RootSelectionGuidance("profile", world.informationState("p0").informationStateDigest,
+            expansion.candidates.associate { it.signature to if (it.display.label == "B") 1.0 else -1.0 })
+        val search = coreSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        val result = search.search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
+        assertEquals("B", result.chosen.display.label)
+        assertEquals(-.2, result.rootValue)
+        assertEquals(1, result.candidates.sumOf { it.visits })
+    }
+
+    @Test
     fun `zero root guidance preserves every search result except declared guidance and timing`() {
         val world = FakeWorld()
         val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
@@ -1554,3 +1569,11 @@ private fun fakeChoiceSignature(label: String): String = SemanticChoice.computeS
     SemanticOperationFamily.OTHER,
     buildJsonObject { put("choice", JsonPrimitive(label)) },
 )
+
+/** Intentional profile omission is distinct from an incompletely enumerated admitted menu. */
+private class ProfilePrunedWorld(private val world: SearchWorld) : SearchWorld by world {
+    override fun fork(): SearchWorld = ProfilePrunedWorld(world.fork())
+    override fun expandChoices(): PolicyExpansion = world.expandChoices().copy(
+        isExhaustive = false, isProfileExhaustive = true,
+        omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA))
+}

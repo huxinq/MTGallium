@@ -230,8 +230,8 @@ class InformationSetSearch(
                 "Root guidance belongs to another information state"
             }
             val expansion = initialExpansion(representative)
-            require(expansion.isExhaustive && expansion.candidates.map { choice -> choice.signature }.toSet() == it.scores.keys) {
-                "Root guidance requires the exact exhaustive initial admitted menu"
+            require(expansion.isProfileExhaustive && expansion.candidates.map { choice -> choice.signature }.toSet() == it.scores.keys) {
+                "Root guidance requires the exact profile-exhaustive initial admitted menu"
             }
         }
         val selectionGuidance = guidance?.takeIf { it.scores.values.any { score -> score != 0.0 } }

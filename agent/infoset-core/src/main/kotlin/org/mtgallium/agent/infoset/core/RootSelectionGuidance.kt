@@ -13,7 +13,7 @@ interface RootSelectionPolicy {
 /**
  * Selection only: highest score orders unvisited edges, then score / (1 + visits) augments UCT.
  * Scores do not initialize visits, enter backups, or alter the final visit-based winner rule.
- * The first version requires an exhaustive initial menu and disables reuse and compression.
+ * The first version requires a profile-exhaustive initial menu and disables reuse and compression.
  */
 @Serializable
 data class RootSelectionGuidance(
