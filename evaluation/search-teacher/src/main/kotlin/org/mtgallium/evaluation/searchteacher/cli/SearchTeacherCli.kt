@@ -8,6 +8,8 @@ internal data class SearchTeacherSuite(val id: String)
 internal object SearchTeacherSuites {
     private val definitions = setOf(
         "smoke",
+        "research-preflight",
+        "research-preflight-verify",
         "arena",
         "arena-shard",
         "arena-merge",
@@ -216,6 +218,9 @@ internal data class SearchTeacherCli(
 
         private fun SearchTeacherCli.validate() {
             SearchTeacherSuites.require(suite)
+            if (suite in setOf("research-preflight", "research-preflight-verify")) {
+                require(profilePath != null && outputPath != null) { "$suite requires --profile and --output" }
+            }
             if (suite in setOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen")) {
                 require(profilePath != null && outputPath != null && deckManifest != null) {
                     "$suite requires an explicit JSON plan via --profile, --output, and --deck-manifest"

@@ -182,6 +182,76 @@ internal data class DecisionLocalLearnabilityReport(
     val conclusion: String = "DEVELOPMENT_LEARNABILITY_COMPLETE_NO_PROMOTION",
 )
 
+internal data class DecisionLocalLearnabilityInputs(
+    val oldReport: DecisionLocalExperimentReport,
+    val precision: DecisionLocalPrecisionReport,
+    val precisionPlan: DecisionLocalPrecisionPlan,
+    val oldHashes: Map<String, String>,
+    val freshHashes: Map<String, String>,
+    val combined: List<DecisionLocalRootEvidence>,
+)
+
+/** Verifies the historical retained population without fitting or changing its protocol. */
+internal fun loadDecisionLocalLearnabilityInputs(parentDirectory: Path, precisionDirectory: Path): DecisionLocalLearnabilityInputs {
+    val oldArtifacts = ResearchRunArtifacts.loadAndVerify(parentDirectory, DECISION_LOCAL_PRECISION_PARENT)
+    val freshArtifacts = ResearchRunArtifacts.loadAndVerify(precisionDirectory, DECISION_LOCAL_LEARNABILITY_PRECISION)
+    fun registered(directory: Path, paths: Set<String>, name: String): String {
+        require(name in paths) { "Required artifact is not registered: $name" }
+        return Files.readString(ResearchRunFiles.resolveBelow(directory, name))
+    }
+    val oldPaths = oldArtifacts.artifacts.map { it.relativePath }.toSet()
+    val freshPaths = freshArtifacts.artifacts.map { it.relativePath }.toSet()
+    val oldReport = evidenceJson.decodeFromString<DecisionLocalExperimentReport>(registered(parentDirectory, oldPaths, "report.json"))
+    val precision = evidenceJson.decodeFromString<DecisionLocalPrecisionReport>(registered(precisionDirectory, freshPaths, "report.json"))
+    val precisionPlan = evidenceJson.decodeFromString<DecisionLocalPrecisionPlan>(registered(precisionDirectory, freshPaths, "plan.json"))
+    require(precisionPlan == precision.plan && precisionPlan.protocol == DECISION_LOCAL_PRECISION_PROTOCOL)
+    require(precision.researchRunIdentity == DECISION_LOCAL_LEARNABILITY_PRECISION && precisionPlan.bindings.identity == precision.researchRunIdentity)
+    require(precisionPlan.parentIdentity == DECISION_LOCAL_PRECISION_PARENT && oldReport.researchRunIdentity == precisionPlan.parentIdentity)
+    require(precisionPlan.bindings.material.getValue("parent-manifest") == researchSha256File(parentDirectory.resolve(ResearchRunArtifacts.MANIFEST_FILE)))
+    require(precision.completedRoots == 40 && precision.failedRoots == 0 && precision.failures.isEmpty())
+    require(precision.completedTerminalContinuations == 2808 && precision.uncompletedAssignedContinuations == 0)
+    require(oldReport.admittedRoots == 40 && oldReport.excludedRoots == 0 && oldReport.terminalContinuations == 936)
+    require(oldReport.model == null && oldReport.testMetrics.isEmpty() && oldReport.challengeMetrics.isEmpty())
+    require(oldReport.featureSchema == LEARNED_OUTCOME_VALUE_FEATURE_SCHEMA_V1)
+    val manifest = precisionPlan.rootManifest
+    require(oldReport.rootManifestId == manifest.manifestId && oldReport.argentumSha == manifest.argentumCommit)
+    require(oldReport.historicalRootSourceMtgalliumSha == manifest.historicalRootSourceCommit)
+    val assignments = manifest.assignments.filter { it.split != DecisionLocalSplit.TEST }.sortedBy { it.root.pairIndex }
+    val expectedOldPaths = assignments.map { "roots/${it.split.name.lowercase()}-${it.root.id}.json" }.toSet()
+    val expectedFreshPaths = assignments.map { "roots/${it.root.id}.json" }.toSet()
+    require(oldPaths.filter { it.startsWith("roots/") }.toSet() == expectedOldPaths)
+    require(freshPaths.filter { it.startsWith("roots/") }.toSet() == expectedFreshPaths)
+    val oldHashes = linkedMapOf<String, String>()
+    val freshHashes = linkedMapOf<String, String>()
+    val combined = assignments.map { assignment ->
+        val r = assignment.root
+        val (oldEnvelope, freshEnvelope) = loadLearnabilityRootCheckpoints(parentDirectory, precisionDirectory, r.id, assignment.split, r.pairIndex)
+        val old = evidenceJson.decodeFromString<DecisionLocalRootEvidence>(oldEnvelope.payload().decodeToString())
+        val fresh = evidenceJson.decodeFromString<PrecisionRootSamples>(freshEnvelope.payload().decodeToString())
+        require(old.rootId == r.id && old.split == assignment.split && old.pairIndex == r.pairIndex && old.rootActor == r.rootActor)
+        require(old.candidateFamilyDigest == r.candidateFamilyDigest && old.productionScheduleDigest == r.schedule.scheduleDigest)
+        require(old.candidates.map { it.signature } == r.candidateSignatures)
+        require(fresh.originalCheckpointPayloadSha256 == oldEnvelope.payloadSha256 && precisionPlan.originalPayloadHashes.getValue(r.id) == oldEnvelope.payloadSha256)
+        val liveSeed = ComponentSeeds.derive(r.schedule.originalGameId, r.schedule.decisionIndex, r.schedule.policySearchBaseSeed, "live-search")
+        fresh.candidates.forEach { candidate -> candidate.samples.forEach { s ->
+            require(s.replicate in decisionLocalPrecisionReplicates)
+            require(s.particleIndex == r.schedule.coordinates[s.replicate].rootParticleIndex)
+            require(s.futureSeed == ComponentSeeds.derive(DECISION_LOCAL_CONTINUATION_SEED_RULE, r.id, assignment.split.name, s.replicate))
+            require(s.continuationSeed == ComponentSeeds.derive(liveSeed, assignment.split.name, s.replicate, "terminal-continuation"))
+        } }
+        val frozen = precisionPlan.frozenComparisons.single { it.rootId == r.id }
+        require(analyzePrecisionRoot(old, fresh, frozen) == precision.roots.single { it.rootId == r.id })
+        oldHashes[r.id] = oldEnvelope.payloadSha256
+        freshHashes[r.id] = freshEnvelope.payloadSha256
+        combineLearnabilityRoot(old, fresh)
+    }
+    require(combined.size == 40 && combined.sumOf { it.candidates.size } == 117)
+    val train = combined.filter { it.split == DecisionLocalSplit.TRAIN }
+    val validation = combined.filter { it.split == DecisionLocalSplit.VALIDATION }
+    require(train.size == 34 && validation.size == 6)
+    return DecisionLocalLearnabilityInputs(oldReport, precision, precisionPlan, oldHashes, freshHashes, combined)
+}
+
 /** Offline consumer. No registry, deck loader, historical reconstruction, or continuation call path. */
 internal class DecisionLocalLearnabilityPilot(private val repositoryRoot: Path) {
     fun run(parentDirectory: Path, precisionDirectory: Path, output: Path): DecisionLocalLearnabilityReport {
@@ -190,62 +260,9 @@ internal class DecisionLocalLearnabilityPilot(private val repositoryRoot: Path) 
         val provenance = ResearchRunProvenance.capture(repositoryRoot)
         provenance.requireReady()
         require(!provenance.outerDirty && !provenance.engineDirty) { "Commit the analysis treatment before fitting" }
-        val oldArtifacts = ResearchRunArtifacts.loadAndVerify(parentDirectory, DECISION_LOCAL_PRECISION_PARENT)
-        val freshArtifacts = ResearchRunArtifacts.loadAndVerify(precisionDirectory, DECISION_LOCAL_LEARNABILITY_PRECISION)
-        fun registered(directory: Path, paths: Set<String>, name: String): String {
-            require(name in paths) { "Required artifact is not registered: $name" }
-            return Files.readString(ResearchRunFiles.resolveBelow(directory, name))
-        }
-        val oldPaths = oldArtifacts.artifacts.map { it.relativePath }.toSet()
-        val freshPaths = freshArtifacts.artifacts.map { it.relativePath }.toSet()
-        val oldReport = evidenceJson.decodeFromString<DecisionLocalExperimentReport>(registered(parentDirectory, oldPaths, "report.json"))
-        val precision = evidenceJson.decodeFromString<DecisionLocalPrecisionReport>(registered(precisionDirectory, freshPaths, "report.json"))
-        val precisionPlan = evidenceJson.decodeFromString<DecisionLocalPrecisionPlan>(registered(precisionDirectory, freshPaths, "plan.json"))
-        require(precisionPlan == precision.plan && precisionPlan.protocol == DECISION_LOCAL_PRECISION_PROTOCOL)
-        require(precision.researchRunIdentity == DECISION_LOCAL_LEARNABILITY_PRECISION && precisionPlan.bindings.identity == precision.researchRunIdentity)
-        require(precisionPlan.parentIdentity == DECISION_LOCAL_PRECISION_PARENT && oldReport.researchRunIdentity == precisionPlan.parentIdentity)
-        require(precisionPlan.bindings.material.getValue("parent-manifest") == researchSha256File(parentDirectory.resolve(ResearchRunArtifacts.MANIFEST_FILE)))
-        require(precision.completedRoots == 40 && precision.failedRoots == 0 && precision.failures.isEmpty())
-        require(precision.completedTerminalContinuations == 2808 && precision.uncompletedAssignedContinuations == 0)
-        require(oldReport.admittedRoots == 40 && oldReport.excludedRoots == 0 && oldReport.terminalContinuations == 936)
-        require(oldReport.model == null && oldReport.testMetrics.isEmpty() && oldReport.challengeMetrics.isEmpty())
-        require(oldReport.featureSchema == LEARNED_OUTCOME_VALUE_FEATURE_SCHEMA_V1)
+        val (oldReport, precision, precisionPlan, oldHashes, freshHashes, combined) =
+            loadDecisionLocalLearnabilityInputs(parentDirectory, precisionDirectory)
         val manifest = precisionPlan.rootManifest
-        require(oldReport.rootManifestId == manifest.manifestId && oldReport.argentumSha == manifest.argentumCommit)
-        require(oldReport.historicalRootSourceMtgalliumSha == manifest.historicalRootSourceCommit)
-        val assignments = manifest.assignments.filter { it.split != DecisionLocalSplit.TEST }.sortedBy { it.root.pairIndex }
-        val expectedOldPaths = assignments.map { "roots/${it.split.name.lowercase()}-${it.root.id}.json" }.toSet()
-        val expectedFreshPaths = assignments.map { "roots/${it.root.id}.json" }.toSet()
-        require(oldPaths.filter { it.startsWith("roots/") }.toSet() == expectedOldPaths)
-        require(freshPaths.filter { it.startsWith("roots/") }.toSet() == expectedFreshPaths)
-        val oldHashes = linkedMapOf<String, String>()
-        val freshHashes = linkedMapOf<String, String>()
-        val combined = assignments.map { assignment ->
-            val r = assignment.root
-            val (oldEnvelope, freshEnvelope) = loadLearnabilityRootCheckpoints(parentDirectory, precisionDirectory, r.id, assignment.split, r.pairIndex)
-            val old = evidenceJson.decodeFromString<DecisionLocalRootEvidence>(oldEnvelope.payload().decodeToString())
-            val fresh = evidenceJson.decodeFromString<PrecisionRootSamples>(freshEnvelope.payload().decodeToString())
-            require(old.rootId == r.id && old.split == assignment.split && old.pairIndex == r.pairIndex && old.rootActor == r.rootActor)
-            require(old.candidateFamilyDigest == r.candidateFamilyDigest && old.productionScheduleDigest == r.schedule.scheduleDigest)
-            require(old.candidates.map { it.signature } == r.candidateSignatures)
-            require(fresh.originalCheckpointPayloadSha256 == oldEnvelope.payloadSha256 && precisionPlan.originalPayloadHashes.getValue(r.id) == oldEnvelope.payloadSha256)
-            val liveSeed = ComponentSeeds.derive(r.schedule.originalGameId, r.schedule.decisionIndex, r.schedule.policySearchBaseSeed, "live-search")
-            fresh.candidates.forEach { candidate -> candidate.samples.forEach { s ->
-                require(s.replicate in decisionLocalPrecisionReplicates)
-                require(s.particleIndex == r.schedule.coordinates[s.replicate].rootParticleIndex)
-                require(s.futureSeed == ComponentSeeds.derive(DECISION_LOCAL_CONTINUATION_SEED_RULE, r.id, assignment.split.name, s.replicate))
-                require(s.continuationSeed == ComponentSeeds.derive(liveSeed, assignment.split.name, s.replicate, "terminal-continuation"))
-            } }
-            val frozen = precisionPlan.frozenComparisons.single { it.rootId == r.id }
-            require(analyzePrecisionRoot(old, fresh, frozen) == precision.roots.single { it.rootId == r.id })
-            oldHashes[r.id] = oldEnvelope.payloadSha256
-            freshHashes[r.id] = freshEnvelope.payloadSha256
-            combineLearnabilityRoot(old, fresh)
-        }
-        require(combined.size == 40 && combined.sumOf { it.candidates.size } == 117)
-        val train = combined.filter { it.split == DecisionLocalSplit.TRAIN }
-        val validation = combined.filter { it.split == DecisionLocalSplit.VALIDATION }
-        require(train.size == 34 && validation.size == 6)
         val bindings = ResearchRunBindings(protocol = DECISION_LOCAL_LEARNABILITY_PROTOCOL, material = mapOf(
             "analysis-source" to provenance.outerCommit,
             "analysis-provenance" to researchSha256(evidenceJson.encodeToString(provenance)),

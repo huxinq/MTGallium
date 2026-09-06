@@ -60,6 +60,14 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         return
     }
 
+    if (options.suite in setOf("research-preflight", "research-preflight-verify")) {
+        val output = diagnosticOutput(requireNotNull(options.outputPath))
+        val report = ResearchPreflightRunner(root).run(requireNotNull(options.profilePath), output,
+            verifyOnly = options.suite == "research-preflight-verify")
+        println("Research preflight passed: ${report.bindings.identity}; output=$output")
+        return
+    }
+
     if (options.suite == "decision-local-learnability-pilot") {
         val output = diagnosticOutput(requireNotNull(options.outputPath))
         val report = DecisionLocalLearnabilityPilot(root).run(requireNotNull(options.precisionParent),

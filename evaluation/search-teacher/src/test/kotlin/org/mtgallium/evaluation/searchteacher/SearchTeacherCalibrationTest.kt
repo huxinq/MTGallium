@@ -247,6 +247,26 @@ class SearchTeacherCalibrationTest {
             arena.evidenceBinding(changed, null, source).identity)
     }
 
+    @Test
+    fun `preflight accepts losing valid games and rejects stopped or missing legs`() {
+        val smoke = plan.copy(phase = SearchTeacherCalibrationPhase.PREFLIGHT, pairCount = 1)
+        val loss0 = game("loss0", true).copy(winner = "p0")
+        val loss1 = game("loss1", true).copy(p0PolicyId = candidate.id, p1PolicyId = control.id, winner = "p1")
+        fun report(games: List<GameRunResult>): SearchTeacherCalibrationReport {
+            val comparison = calibrationComparison(smoke, candidate,
+                listOf(searchBudgetFrontierPair(0, smoke.pairSeed(0), games, candidate.id)))
+            return SearchTeacherCalibrationReport(runIdentity = "synthetic", generatedAtUtc = "synthetic",
+                sourceProvenance = source, deckHash = "deck", cardPoolHash = "pool", plan = smoke,
+                workerThreads = 1, currentAttemptElapsedMillis = 1.0, policies = emptyList(),
+                comparisons = listOf(comparison), valid = comparison.validPairs == 1)
+        }
+        val losses = report(listOf(loss0, loss1))
+        assertEquals(0.0, losses.comparisons.single().candidatePointRate)
+        requireGameplayPreflightComplete(losses, smoke)
+        assertFails { requireGameplayPreflightComplete(report(listOf(loss0, game("stopped", false))), smoke) }
+        assertFails { requireGameplayPreflightComplete(report(listOf(loss0)), smoke) }
+    }
+
     private fun game(id: String, terminal: Boolean) = GameRunResult(gameId = id, seed = plan.pairSeed(0),
         p0Policy = ArenaPolicyKind.SEARCH, p1Policy = ArenaPolicyKind.SEARCH,
         winner = if (terminal) "p1" else null, terminal = terminal,
