@@ -1,11 +1,14 @@
 package org.mtgallium.agent.searchteacher
 
 import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.mtgallium.agent.infoset.core.PolicyAttackerView
 import org.mtgallium.agent.infoset.core.PolicyCardView
+import org.mtgallium.agent.infoset.core.PolicyCombatView
 import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
 import org.mtgallium.agent.infoset.core.PolicyInformationState
 import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
@@ -165,6 +168,213 @@ class MonoRedTacticalEvaluatorTest {
         assertTrue(cold > standard && standard > warm && warm > 0.0)
     }
 
+    @Test
+    fun `durable mana rewards developed empty hand and is stable when land taps`() {
+        val developed = state(
+            rootBattlefield = listOf(card("m", "Mountain", "BATTLEFIELD", types = setOf("LAND"))),
+        )
+        val held = state(rootBattlefield = emptyList())
+        val tapped = state(
+            rootBattlefield = listOf(card("m", "Mountain", "BATTLEFIELD", types = setOf("LAND"), tapped = true)),
+        )
+        assertTrue(evaluator.evaluateDetailed(developed, "p0").components.getValue("phiDurableMana") > 0.0)
+        assertEquals(
+            evaluator.evaluateDetailed(developed, "p0").components.getValue("phiDurableMana"),
+            evaluator.evaluateDetailed(tapped, "p0").components.getValue("phiDurableMana"),
+        )
+        assertTrue(evaluator.evaluate(developed, "p0") > evaluator.evaluate(held, "p0"))
+    }
+
+    @Test
+    fun `one generic source and rockface cannot cast red burn`() {
+        val hand = listOf(card("shock", "Shock", "HAND"))
+        val sanctuary = state(
+            rootHand = hand,
+            rootBattlefield = listOf(card("s", "Soulstone Sanctuary", "BATTLEFIELD", types = setOf("LAND"))),
+        )
+        val rockface = state(
+            rootHand = hand,
+            rootBattlefield = listOf(card("r", "Rockface Village", "BATTLEFIELD", types = setOf("LAND"))),
+        )
+        assertEquals(0.0, evaluator.evaluateDetailed(sanctuary, "p0").components.getValue("rootBurnNow"))
+        assertEquals(0.0, evaluator.evaluateDetailed(rockface, "p0").components.getValue("rootBurnNow"))
+    }
+
+    @Test
+    fun `restricted mana and summoning-sick creature lands are not ordinary sources`() {
+        val restrictedOnly = state(
+            rootHand = listOf(card("shock", "Shock", "HAND")),
+            rootBattlefield = emptyList(),
+            rootMana = PolicyManaPool(
+                restricted = listOf(
+                    org.mtgallium.agent.infoset.core.PolicyRestrictedMana(
+                        color = "R",
+                        spendRestriction = "creature spells only",
+                        count = 1,
+                    ),
+                ),
+            ),
+        )
+        val sickCreatureLand = state(
+            rootHand = listOf(card("shock", "Shock", "HAND")),
+            rootBattlefield = listOf(
+                card(
+                    "land",
+                    "Mountain",
+                    "BATTLEFIELD",
+                    types = setOf("LAND", "CREATURE"),
+                    summoningSick = true,
+                ),
+            ),
+        )
+
+        assertEquals(0.0, evaluator.evaluateDetailed(restrictedOnly, "p0").components.getValue("rootBurnNow"))
+        assertTrue(evaluator.evaluateDetailed(restrictedOnly, "p0").flags.contains("restricted-mana-omitted"))
+        assertEquals(0.0, evaluator.evaluateDetailed(sickCreatureLand, "p0").components.getValue("rootBurnNow"))
+    }
+
+    @Test
+    fun `represented attackers exclude ready creatures after attackers are committed`() {
+        val attacker = creature("attacker", power = 2, tapped = true)
+        val declined = creature("declined", power = 3)
+        val combat = PolicyCombatView(
+            attackingPlayerId = "p0",
+            attackers = listOf(PolicyAttackerView("attacker", "p1")),
+            blockers = emptyList(),
+        )
+        val information = state(
+            rootBattlefield = listOf(attacker, declined),
+            phase = "COMBAT",
+            step = "DECLARE_BLOCKERS",
+            combat = combat,
+        )
+
+        assertEquals(
+            2.0 / 8.0,
+            evaluator.evaluateDetailed(information, "p0").components.getValue("phiAttackCapacity"),
+        )
+    }
+
+    @Test
+    fun `reserve assigns burn to separate current and next untap windows`() {
+        val oneMountain = listOf(card("m", "Mountain", "BATTLEFIELD", types = setOf("LAND")))
+        val strike = state(
+            opponentLife = 20,
+            rootHand = listOf(card("strike", "Lightning Strike", "HAND")),
+            rootBattlefield = oneMountain,
+        )
+        val shocks = state(
+            opponentLife = 20,
+            rootHand = listOf(card("s1", "Shock", "HAND"), card("s2", "Shock", "HAND")),
+            rootBattlefield = oneMountain,
+        )
+
+        val strikeResult = evaluator.evaluateDetailed(strike, "p0")
+        val shocksResult = evaluator.evaluateDetailed(shocks, "p0")
+        assertEquals(0.0, strikeResult.components.getValue("rootBurnNow"))
+        assertEquals(0.0, strikeResult.components.getValue("phiReach"))
+        assertEquals(2.0, shocksResult.components.getValue("rootBurnNow"))
+        val fourDamageReserve = (ln(21.0) - ln(17.0)) / ln(41.0)
+        assertEquals(fourDamageReserve, shocksResult.components.getValue("phiReach"), absoluteTolerance = 1e-12)
+    }
+
+    @Test
+    fun `reach family gates both held damage terms`() {
+        val information = state(rootHand = listOf(card("shock", "Shock", "HAND")))
+        val full = evaluator.evaluateDetailed(information, "p0")
+        val disabled = MonoRedTacticalEvaluator(
+            MonoRedTacticalEvaluatorSettings(
+                enabledFamilies = TacticalFeatureFamily.entries.toSet() - TacticalFeatureFamily.REACH,
+            ),
+        ).evaluateDetailed(information, "p0")
+        assertTrue(full.components.getValue("phiReach") != 0.0 || full.components.getValue("phiLethal") != 0.0)
+        assertEquals(0.0, disabled.components.getValue("phiReach"))
+        assertEquals(0.0, disabled.components.getValue("phiLethal"))
+    }
+
+    @Test
+    fun `casting Hired Claw improves value when its Mountain taps`() {
+        val before = state(
+            rootLife = 20,
+            opponentLife = 20,
+            rootHand = listOf(card("claw", "Hired Claw", "HAND")),
+            rootBattlefield = listOf(card("mountain", "Mountain", "BATTLEFIELD", types = setOf("LAND"))),
+        )
+        val after = state(
+            rootLife = 20,
+            opponentLife = 20,
+            rootBattlefield = listOf(
+                card("mountain", "Mountain", "BATTLEFIELD", types = setOf("LAND"), tapped = true),
+                card(
+                    "claw",
+                    "Hired Claw",
+                    "BATTLEFIELD",
+                    types = setOf("CREATURE"),
+                    power = 1,
+                    toughness = 2,
+                    summoningSick = true,
+                ),
+            ),
+        )
+
+        val beforeResult = evaluator.evaluateDetailed(before, "p0")
+        val afterResult = evaluator.evaluateDetailed(after, "p0")
+        assertTrue(afterResult.rawScore > beforeResult.rawScore)
+        assertTrue(afterResult.value > beforeResult.value)
+    }
+
+    @Test
+    fun `family set is snapshotted when evaluator is constructed`() {
+        val mutableFamilies = TacticalFeatureFamily.entries.toMutableSet()
+        val snapshotted = MonoRedTacticalEvaluator(
+            MonoRedTacticalEvaluatorSettings(enabledFamilies = mutableFamilies),
+        )
+        val information = state(rootHand = listOf(card("shock", "Shock", "HAND")))
+        val before = snapshotted.evaluateDetailed(information, "p0")
+        mutableFamilies.clear()
+        assertEquals(before, snapshotted.evaluateDetailed(information, "p0"))
+    }
+
+    @Test
+    fun `each disabled family zeroes only its weighted components`() {
+        val information = state(
+            rootLife = 10,
+            opponentLife = 20,
+            rootHand = listOf(card("shock", "Shock", "HAND"), card("claw", "Hired Claw", "HAND")),
+            rootBattlefield = listOf(
+                card("m", "Mountain", "BATTLEFIELD", types = setOf("LAND")),
+                creature("c", power = 2),
+            ),
+        )
+        fun disabled(family: TacticalFeatureFamily) = MonoRedTacticalEvaluator(
+            MonoRedTacticalEvaluatorSettings(enabledFamilies = TacticalFeatureFamily.entries.toSet() - family),
+        ).evaluateDetailed(information, "p0").components
+
+        val life = disabled(TacticalFeatureFamily.NONLINEAR_LIFE)
+        assertEquals(0.0, life.getValue("phiLife"))
+        val combat = disabled(TacticalFeatureFamily.COMBAT_READINESS)
+        assertEquals(0.0, combat.getValue("phiBody"))
+        assertEquals(0.0, combat.getValue("phiAttackCapacity"))
+        assertEquals(0.0, combat.getValue("phiBlock"))
+        val reach = disabled(TacticalFeatureFamily.REACH)
+        assertEquals(0.0, reach.getValue("phiLethal"))
+        assertEquals(0.0, reach.getValue("phiReach"))
+        val hand = disabled(TacticalFeatureFamily.HAND_VALUE)
+        assertEquals(0.0, hand.getValue("phiHand"))
+        val mana = disabled(TacticalFeatureFamily.DURABLE_MANA)
+        assertEquals(0.0, mana.getValue("phiDurableMana"))
+        val initiative = disabled(TacticalFeatureFamily.INITIATIVE)
+        assertEquals(0.0, initiative.getValue("phiInitiative"))
+    }
+
+    @Test
+    fun `settings record corrected schema and annotation strings`() {
+        val s = MonoRedTacticalEvaluatorSettings()
+        assertEquals(2, s.schemaVersion)
+        assertEquals("mono-red-tactical-annotations-v2", s.annotationVersion)
+        assertTrue(s.configurationId.contains("schema-2"))
+    }
+
     private fun state(
         rootLife: Int = 3,
         opponentLife: Int = 3,
@@ -174,18 +384,22 @@ class MonoRedTacticalEvaluatorTest {
             card("mountain", "Mountain", zone = "BATTLEFIELD", types = setOf("LAND"))
         ),
         opponentBattlefield: List<PolicyCardView> = emptyList(),
+        phase: String = "PRECOMBAT_MAIN",
+        step: String = "PRECOMBAT_MAIN",
+        combat: PolicyCombatView? = null,
+        rootMana: PolicyManaPool = PolicyManaPool(),
     ): PolicyInformationState {
         val observation = PolicyObservation(
             perspectivePlayerId = "p0",
             turnNumber = 4,
-            phase = "PRECOMBAT_MAIN",
-            step = "PRECOMBAT_MAIN",
+            phase = phase,
+            step = step,
             activePlayerId = "p0",
             priorityPlayerId = "p0",
             players = listOf(
                 PolicyPlayerView(
                     "p0", "Root", rootLife, rootHand.size, 40, 0, 0,
-                    PolicyManaPool(), active = true, priority = true, lost = false,
+                    rootMana, active = true, priority = true, lost = false,
                 ),
                 PolicyPlayerView(
                     "p1", "Opponent", opponentLife, opponentHidden.size, 40, 0, 0,
@@ -199,6 +413,7 @@ class MonoRedTacticalEvaluatorTest {
                 PolicyZoneView("p1", "BATTLEFIELD", hidden = false, opponentBattlefield.size, opponentBattlefield),
             ),
             stack = emptyList(),
+            combat = combat,
             pendingDecision = null,
             observationDigest = "fixture-observation",
         )

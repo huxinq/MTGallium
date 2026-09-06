@@ -10,16 +10,15 @@ import org.mtgallium.agent.infoset.core.PolicyInformationState
 import org.mtgallium.agent.infoset.core.PolicyManaPool
 import org.mtgallium.agent.infoset.core.PolicyObservation
 import org.mtgallium.agent.infoset.core.PolicyPlayerView
-import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 
+/** Disjoint weighted feature families. Priors inform reach and hand only. */
 @Serializable
 enum class TacticalFeatureFamily {
     NONLINEAR_LIFE,
     COMBAT_READINESS,
-    ROOT_KNOWN_REACH,
-    SAFE_OPPONENT_PRIOR,
-    MANA_FIT,
-    KNOWN_CARD_VALUE,
+    REACH,
+    HAND_VALUE,
+    DURABLE_MANA,
     INITIATIVE,
 }
 
@@ -33,42 +32,28 @@ data class MonoRedTacticalEvaluatorWeights(
     val reach: Double = 0.85,
     val hand: Double = 0.55,
     val mana: Double = 0.65,
-    val landConversion: Double = 0.20,
     val initiative: Double = 0.25,
 ) {
     init {
-        require(
-            listOf(life, lethal, body, attack, block, reach, hand, mana, landConversion, initiative)
-                .all(Double::isFinite)
-        )
+        require(listOf(life, lethal, body, attack, block, reach, hand, mana, initiative).all(Double::isFinite))
     }
 
     val configurationId: String
-        get() = listOf(
-            life,
-            lethal,
-            body,
-            attack,
-            block,
-            reach,
-            hand,
-            mana,
-            landConversion,
-            initiative,
-        ).joinToString(",", transform = ::canonicalTacticalNumber)
+        get() = listOf(life, lethal, body, attack, block, reach, hand, mana, initiative)
+            .joinToString(",", transform = ::canonicalTacticalNumber)
 }
 
 @Serializable
 data class MonoRedTacticalEvaluatorSettings(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val outputTemperature: Double = 2.0,
     val startingLife: Int = 20,
-    val annotationVersion: String = "mono-red-tactical-annotations-v1",
+    val annotationVersion: String = "mono-red-tactical-annotations-v2",
     val enabledFamilies: Set<TacticalFeatureFamily> = TacticalFeatureFamily.entries.toSet(),
     val weights: MonoRedTacticalEvaluatorWeights = MonoRedTacticalEvaluatorWeights(),
 ) {
     init {
-        require(schemaVersion == 1)
+        require(schemaVersion == 2)
         require(outputTemperature.isFinite() && outputTemperature > 0.0)
         require(startingLife > 0)
         require(annotationVersion.isNotBlank())
@@ -78,14 +63,12 @@ data class MonoRedTacticalEvaluatorSettings(
         get() = listOf(
             MonoRedTacticalEvaluator.EVALUATOR_ID,
             "schema-$schemaVersion",
-            "temperature-${canonicalNumber(outputTemperature)}",
+            "temperature-${canonicalTacticalNumber(outputTemperature)}",
             "life-$startingLife",
             annotationVersion,
             enabledFamilies.sortedBy(TacticalFeatureFamily::name).joinToString("+") { it.name },
             "weights-${weights.configurationId}",
         ).joinToString(":")
-
-    private fun canonicalNumber(value: Double): String = canonicalTacticalNumber(value)
 }
 
 private fun canonicalTacticalNumber(value: Double): String =
@@ -102,16 +85,14 @@ data class TacticalEvaluationResult(
 )
 
 /**
- * Information-safe, hand-designed tactical successor to [MonoRedInformationEvaluator].
- *
- * It deliberately consumes only the already projected [PolicyInformationState]. Root-private
- * identities are read only from the root's projected hand/knowledge; opponent hidden identities
- * and sampled-world fields are never inputs. The opponent term is a coarse hypergeometric prior
- * derived from the declared known deck and perspective-safe depletion ledger.
+ * Projected-information tactical evaluator. Burn availability is an approximation, never a legal
+ * spell claim. The tactical output is for nonterminal leaf evaluation only.
  */
 class MonoRedTacticalEvaluator(
     val settings: MonoRedTacticalEvaluatorSettings = MonoRedTacticalEvaluatorSettings(),
 ) : ConfiguredInformationStateEvaluator {
+    private val enabledFamilies = settings.enabledFamilies.toSet()
+
     override val id: String = EVALUATOR_ID
     override val configurationId: String = settings.configurationId
 
@@ -132,126 +113,118 @@ class MonoRedTacticalEvaluator(
         require(information.knowledge.perspectivePlayerId == rootPlayer) {
             "Knowledge perspective ${information.knowledge.perspectivePlayerId} does not match root $rootPlayer"
         }
+
         val root = observation.players.single { it.playerId == rootPlayer }
         val opponent = observation.players.single { it.playerId != rootPlayer }
         val flags = sortedSetOf<String>()
         if (!information.knowledge.epistemicallyComplete) flags += "knowledge-incomplete"
 
-        val publicBattlefield = observation.zones.asSequence()
+        val battlefield = observation.zones
             .filter { it.zone.equals("BATTLEFIELD", ignoreCase = true) && !it.hidden }
-            .flatMap { it.cards.asSequence() }
+            .flatMap { it.cards }
             .filterNot(PolicyCardView::faceDown)
-            .toList()
-        val rootHand = observation.zones.asSequence()
+        val rootBattlefield = battlefield.filter { it.controllerId == rootPlayer }
+        val opponentBattlefield = battlefield.filter { it.controllerId == opponent.playerId }
+        if (root.mana.restricted.isNotEmpty() || opponent.mana.restricted.isNotEmpty()) {
+            flags += "restricted-mana-omitted"
+        }
+        if (battlefield.any(::isUnrecognizedLand)) flags += "unrecognized-mana-source-omitted"
+
+        val rootHand = observation.zones
             .filter { it.ownerId == rootPlayer && it.zone.equals("HAND", ignoreCase = true) }
-            .flatMap { it.cards.asSequence() }
+            .flatMap { it.cards }
             .filterNot(PolicyCardView::faceDown)
-            .toList()
-        val knownOpponentHand = information.knowledge.zones.asSequence()
+            .map(::descriptorForCard)
+        val knownOpponentHand = information.knowledge.zones
             .filter { it.ownerId == opponent.playerId && it.zone.equals("HAND", ignoreCase = true) }
-            .flatMap { zone -> zone.knownCardCounts.asSequence().flatMap { (name, count) -> List(count) { name }.asSequence() } }
-            .map(::descriptorForName)
-            .toList()
+            .flatMap { zone -> zone.knownCardCounts.flatMap { (name, count) -> List(count) { descriptorForName(name) } } }
+        if ((rootHand + knownOpponentHand).any { it.annotationMissing }) flags += "annotation-missing"
 
-        val components = linkedMapOf<String, Double>()
-
-        val phiLife = if (TacticalFeatureFamily.NONLINEAR_LIFE in settings.enabledFamilies) {
-            lifeUtility(root.life) - lifeUtility(opponent.life)
-        } else 0.0
-        components["phiLife"] = phiLife
-
-        val rootBattlefield = publicBattlefield.filter { it.controllerId == rootPlayer }
-        val opponentBattlefield = publicBattlefield.filter { it.controllerId == opponent.playerId }
-        val rootCombat = combatFeatures(rootPlayer, opponent.playerId, rootBattlefield, opponentBattlefield, observation)
-        val opponentCombat = combatFeatures(opponent.playerId, rootPlayer, opponentBattlefield, rootBattlefield, observation)
+        val rootCombat = combatFeatures(rootPlayer, rootBattlefield, observation)
+        val opponentCombat = combatFeatures(opponent.playerId, opponentBattlefield, observation)
         if (rootCombat.approximationUsed || opponentCombat.approximationUsed) flags += "combat-approximation"
-        val phiBody = if (TacticalFeatureFamily.COMBAT_READINESS in settings.enabledFamilies) {
-            normalizedDifference(rootCombat.body, opponentCombat.body, 12.0)
-        } else 0.0
-        val phiAttack = if (TacticalFeatureFamily.COMBAT_READINESS in settings.enabledFamilies) {
-            normalizedDifference(rootCombat.attackPressure, opponentCombat.attackPressure, 8.0)
-        } else 0.0
-        val phiBlock = if (TacticalFeatureFamily.COMBAT_READINESS in settings.enabledFamilies) {
-            normalizedDifference(rootCombat.blockCapacity, opponentCombat.blockCapacity, 8.0)
-        } else 0.0
-        components["phiBody"] = phiBody
-        components["phiAttack"] = phiAttack
-        components["phiBlock"] = phiBlock
 
-        val rootMana = usableMana(rootPlayer, root, rootBattlefield)
-        val opponentMana = usableMana(opponent.playerId, opponent, opponentBattlefield)
-        val rootDescriptors = rootHand.map(::descriptorForCard)
-        if (rootDescriptors.any { it.annotationMissing }) flags += "root-annotation-missing"
-        if (knownOpponentHand.any { it.annotationMissing }) flags += "opponent-annotation-missing"
-
-        val rootBurnNow = bestBurn(rootDescriptors, rootMana)
-        val rootNextMana = maxOf(rootMana, controlledLandCount(rootBattlefield) + 1).coerceAtMost(8)
-        val rootReachReserve = bestBurn(rootDescriptors, rootMana + rootNextMana)
-        val opponentPrior = opponentBurnPrior(information, opponent.playerId, opponent.handSize)
+        val rootMana = currentMana(root, rootBattlefield)
+        val opponentMana = currentMana(opponent, opponentBattlefield)
+        val rootBurnNow = bestBurn(rootHand, rootMana)
+        val rootBurnReserve = bestBurnAcrossWindows(rootHand, rootMana, nextUntapMana(rootBattlefield))
+        val opponentPrior = opponentPrior(
+            information = information,
+            opponent = opponent.playerId,
+            handSize = opponent.handSize,
+            known = knownOpponentHand,
+            mana = opponentMana,
+            nextMana = nextUntapMana(opponentBattlefield),
+            rootLife = root.life,
+        )
         if (opponentPrior.used) flags += "opponent-safe-prior"
         if (!opponentPrior.available) flags += "opponent-prior-missing"
-        val knownOpponentBurn = knownOpponentHand.sumOf(CardTacticalDescriptor::faceDamage)
-        val opponentReachReserve = knownOpponentBurn + opponentPrior.expectedDamage
-        val opponentBurnNow = minOf(
-            opponentReachReserve,
-            opponentReachReserve * (opponentMana.toDouble() / maxOf(1.0, opponentPrior.expectedManaNeed)),
+
+        fun enabled(family: TacticalFeatureFamily, value: Double): Double =
+            if (family in enabledFamilies) value else 0.0
+
+        val components = linkedMapOf<String, Double>()
+        components["phiLife"] = enabled(
+            TacticalFeatureFamily.NONLINEAR_LIFE,
+            lifeUtility(root.life) - lifeUtility(opponent.life),
+        )
+        components["phiBody"] = enabled(
+            TacticalFeatureFamily.COMBAT_READINESS,
+            normalizedDifference(rootCombat.body, opponentCombat.body, 12.0),
+        )
+        // This is potential attacker power, never inferred unblocked face damage.
+        components["phiAttackCapacity"] = enabled(
+            TacticalFeatureFamily.COMBAT_READINESS,
+            normalizedDifference(rootCombat.attackCapacity, opponentCombat.attackCapacity, 8.0),
+        )
+        components["phiBlock"] = enabled(
+            TacticalFeatureFamily.COMBAT_READINESS,
+            normalizedDifference(rootCombat.blockCapacity, opponentCombat.blockCapacity, 8.0),
+        )
+        components["rootBurnNow"] = rootBurnNow
+        components["opponentExpectedBurnNow"] = opponentPrior.now
+        components["phiLethal"] = enabled(
+            TacticalFeatureFamily.REACH,
+            sigmoid((rootBurnNow - opponent.life + 0.5) / 1.25) - opponentPrior.lethalAgainstRoot,
+        )
+        components["phiReach"] = enabled(
+            TacticalFeatureFamily.REACH,
+            lifeLossUtility(opponent.life, rootBurnReserve) - opponentPrior.reserveLifeLoss,
+        )
+        components["phiHand"] = enabled(
+            TacticalFeatureFamily.HAND_VALUE,
+            normalizedDifference(
+                retainedNonReachValue(rootHand),
+                retainedNonReachValue(knownOpponentHand) + opponentPrior.expectedNonReach,
+                8.0,
+            ),
+        )
+        components["phiDurableMana"] = enabled(
+            TacticalFeatureFamily.DURABLE_MANA,
+            normalizedDifference(
+                MonoRedInformationEvaluator.developedManaValue(controlledLands(rootBattlefield)),
+                MonoRedInformationEvaluator.developedManaValue(controlledLands(opponentBattlefield)),
+                8.0,
+            ),
+        )
+        components["phiInitiative"] = enabled(
+            TacticalFeatureFamily.INITIATIVE,
+            initiative(rootPlayer, observation) - initiative(opponent.playerId, observation),
         )
 
-        val rootDamageWindow = rootBurnNow + rootCombat.attackPressure
-        val opponentDamageWindow = opponentBurnNow + opponentCombat.attackPressure
-        val phiLethal = if (
-            TacticalFeatureFamily.ROOT_KNOWN_REACH in settings.enabledFamilies ||
-            TacticalFeatureFamily.SAFE_OPPONENT_PRIOR in settings.enabledFamilies
-        ) {
-            sigmoid((rootDamageWindow - opponent.life + 0.5) / 1.25) -
-                sigmoid((opponentDamageWindow - root.life + 0.5) / 1.25)
-        } else 0.0
-        val phiReach = if (TacticalFeatureFamily.ROOT_KNOWN_REACH in settings.enabledFamilies) {
-            normalizedDifference(rootReachReserve, opponentReachReserve, 6.0)
-        } else 0.0
-        components["rootBurnNow"] = rootBurnNow
-        components["opponentExpectedBurnNow"] = opponentBurnNow
-        components["phiLethal"] = phiLethal
-        components["phiReach"] = phiReach
-
-        val rootRetained = retainedNonReachValue(rootDescriptors)
-        val opponentKnownRetained = retainedNonReachValue(knownOpponentHand)
-        val phiHand = if (TacticalFeatureFamily.KNOWN_CARD_VALUE in settings.enabledFamilies) {
-            normalizedDifference(rootRetained, opponentKnownRetained, 8.0)
-        } else 0.0
-        components["phiHand"] = phiHand
-
-        val rootManaFit = manaFit(rootMana, rootDescriptors, information, rootPlayer)
-        val opponentManaFit = coarseOpponentManaFit(opponentMana, opponent.handSize, opponentPrior)
-        val phiMana = if (TacticalFeatureFamily.MANA_FIT in settings.enabledFamilies) {
-            (rootManaFit - opponentManaFit).coerceIn(-1.0, 1.0)
-        } else 0.0
-        val rootLandConversion = marginalLandConversion(rootMana, rootDescriptors, information, rootPlayer)
-        val phiLandConversion = if (TacticalFeatureFamily.MANA_FIT in settings.enabledFamilies) {
-            rootLandConversion
-        } else 0.0
-        components["phiMana"] = phiMana
-        components["phiLandConversion"] = phiLandConversion
-
-        val phiInitiative = if (TacticalFeatureFamily.INITIATIVE in settings.enabledFamilies) {
-            initiative(rootPlayer, observation) - initiative(opponent.playerId, observation)
-        } else 0.0
-        components["phiDurable"] = 0.0
-        components["phiInitiative"] = phiInitiative
-
         val weights = settings.weights
-        val rawScore = weights.life * phiLife +
-            weights.lethal * phiLethal +
-            weights.body * phiBody +
-            weights.attack * phiAttack +
-            weights.block * phiBlock +
-            weights.reach * phiReach +
-            weights.hand * phiHand +
-            weights.mana * phiMana +
-            weights.landConversion * phiLandConversion +
-            weights.initiative * phiInitiative
+        val rawScore = weights.life * components.getValue("phiLife") +
+            weights.lethal * components.getValue("phiLethal") +
+            weights.body * components.getValue("phiBody") +
+            weights.attack * components.getValue("phiAttackCapacity") +
+            weights.block * components.getValue("phiBlock") +
+            weights.reach * components.getValue("phiReach") +
+            weights.hand * components.getValue("phiHand") +
+            weights.mana * components.getValue("phiDurableMana") +
+            weights.initiative * components.getValue("phiInitiative")
         val value = 0.95 * tanh(rawScore.coerceIn(-6.0, 6.0) / settings.outputTemperature)
         require(value.isFinite() && value > -0.95 && value < 0.95)
+
         return TacticalEvaluationResult(
             evaluatorId = id,
             configurationId = configurationId,
@@ -263,243 +236,318 @@ class MonoRedTacticalEvaluator(
     }
 
     private fun lifeUtility(life: Int): Double =
-        ln(1.0 + life.coerceIn(0, settings.startingLife * 2)) /
-            ln(1.0 + settings.startingLife * 2.0)
+        ln(1.0 + life.coerceIn(0, settings.startingLife * 2)) / ln(1.0 + settings.startingLife * 2.0)
+
+    private fun lifeLossUtility(life: Int, damage: Double): Double =
+        lifeUtility(life) - lifeUtility((life - damage).coerceAtLeast(0.0).toInt())
 
     private fun combatFeatures(
         player: String,
-        opponent: String,
-        ownBattlefield: List<PolicyCardView>,
-        opposingBattlefield: List<PolicyCardView>,
+        own: List<PolicyCardView>,
         observation: PolicyObservation,
     ): CombatFeatures {
-        val creatures = ownBattlefield.filter { it.types.any { type -> type.equals("CREATURE", true) } }
-        val blockers = opposingBattlefield.filter { card ->
-            card.types.any { it.equals("CREATURE", true) } && !card.tapped && damageMargin(card) > 0
-        }
+        val creatures = own.filter { it.types.any { type -> type.equals("CREATURE", ignoreCase = true) } }
+        val declared = observation.combat?.takeIf { it.attackingPlayerId == player }
         val body = creatures.sumOf { card ->
             0.45 * (card.power ?: 0).coerceIn(0, 8) +
-                0.25 * damageMargin(card).coerceIn(0, 8) + 0.30
+                0.25 * damageMargin(card).coerceIn(0, 8) +
+                0.30
         }
-        val blockCapacity = creatures.filter { !it.tapped && damageMargin(it) > 0 }
+        val block = creatures
+            .filter { !it.tapped && damageMargin(it) > 0 }
             .sumOf { damageMargin(it).coerceAtMost(4).toDouble() }
-        val declared = observation.combat?.takeIf { it.attackingPlayerId == player }
-        val attackPressure = if (declared != null && declared.attackers.isNotEmpty()) {
-            val byRef = creatures.associateBy(PolicyCardView::objectRef)
-            declared.attackers.filter { it.blockerObjectRefs.isEmpty() }
-                .sumOf { attack -> (byRef[attack.attackerObjectRef]?.power ?: 0).coerceAtLeast(0).toDouble() }
-        } else {
-            val readyPowers = creatures.filter { card ->
-                !card.tapped && (!card.summoningSick || card.keywords.any { it.equals("HASTE", true) })
-            }.map { (it.power ?: 0).coerceAtLeast(0) }.sortedDescending()
-            val open = readyPowers.drop(blockers.size).sum().toDouble()
-            when {
-                observation.activePlayerId == player && attackWindowRemains(observation) -> open
-                observation.activePlayerId == opponent && attackWindowRemains(observation) -> 0.0
-                else -> 0.60 * open
+        val attack = if (observation.activePlayerId == player && attackWindowRemains(observation)) {
+            val attackers = if (declared == null) {
+                creatures.filter { card ->
+                    !card.tapped && (!card.summoningSick || card.hasKeyword("HASTE"))
+                }
+            } else {
+                val committedRefs = declared.attackers.mapTo(sortedSetOf()) { it.attackerObjectRef }
+                creatures.filter { it.objectRef in committedRefs }
             }
+            attackers.sumOf { (it.power ?: 0).coerceAtLeast(0).toDouble() }
+        } else {
+            0.0
         }
-        val approximation = declared == null || creatures.any { card ->
-            card.keywords.any { it.uppercase() !in SUPPORTED_COMBAT_KEYWORDS }
-        }
-        return CombatFeatures(body, attackPressure, blockCapacity, approximation)
+        return CombatFeatures(
+            body = body,
+            attackCapacity = attack,
+            blockCapacity = block,
+            approximationUsed = declared == null || creatures.any(::hasUnsupportedCombatKeyword),
+        )
     }
 
     private fun damageMargin(card: PolicyCardView): Int =
         ((card.toughness ?: 0) - card.damageMarked).coerceAtLeast(0)
 
-    private fun attackWindowRemains(observation: PolicyObservation): Boolean {
-        if (observation.phase.equals("PRECOMBAT_MAIN", true)) return true
-        if (!observation.phase.equals("COMBAT", true)) return false
-        return observation.step.uppercase() !in setOf("COMBAT_DAMAGE", "END_COMBAT")
-    }
+    private fun attackWindowRemains(observation: PolicyObservation): Boolean =
+        observation.phase.equals("PRECOMBAT_MAIN", ignoreCase = true) ||
+            (observation.phase.equals("COMBAT", ignoreCase = true) &&
+                observation.step.uppercase() !in setOf("FIRST_STRIKE_COMBAT_DAMAGE", "COMBAT_DAMAGE", "END_COMBAT"))
 
-    private fun usableMana(
-        player: String,
-        playerView: PolicyPlayerView,
-        battlefield: List<PolicyCardView>,
-    ): Int = playerView.mana.total() + battlefield.count { card ->
-        card.controllerId == player && !card.tapped && card.types.any { it.equals("LAND", true) }
-    }
+    private fun controlledLands(battlefield: List<PolicyCardView>): Int =
+        battlefield.count { it.types.any { type -> type.equals("LAND", ignoreCase = true) } }
 
-    private fun controlledLandCount(battlefield: List<PolicyCardView>): Int =
-        battlefield.count { card -> card.types.any { it.equals("LAND", true) } }
-
-    private fun bestBurn(cards: List<CardTacticalDescriptor>, mana: Int): Double {
-        if (mana <= 0) return 0.0
-        val dp = DoubleArray(mana + 1)
-        cards.filter { it.faceDamage > 0.0 && it.manaCost in 1..mana }.forEach { card ->
-            for (budget in mana downTo card.manaCost) {
-                dp[budget] = maxOf(dp[budget], dp[budget - card.manaCost] + card.faceDamage)
-            }
+    private fun currentMana(player: PolicyPlayerView, battlefield: List<PolicyCardView>): Mana {
+        val availableLands = battlefield.filter { card ->
+            !card.tapped && isManaSource(card) && (!card.isCreatureLand() || !card.summoningSick || card.hasKeyword("HASTE"))
         }
-        return dp.maxOrNull() ?: 0.0
+        return Mana(
+            total = player.mana.total() + availableLands.size,
+            red = player.mana.red + availableLands.count(::redSource),
+        )
     }
 
-    private fun retainedNonReachValue(cards: List<CardTacticalDescriptor>): Double = cards.sumOf { card ->
-        0.55 * card.removalSwing + card.bodyCreated + card.cardsGenerated +
-            0.80 * card.repeatableNonReach + 0.60 * card.usefulManaCreated
+    // Current lands only: no projected land drop and no floating mana next turn.
+    private fun nextUntapMana(battlefield: List<PolicyCardView>): Mana = Mana(
+        total = battlefield.count(::isManaSource),
+        red = battlefield.count(::redSource),
+    )
+
+    private fun isManaSource(card: PolicyCardView): Boolean =
+        card.types.any { it.equals("LAND", ignoreCase = true) } && card.name in MANA_SOURCES
+
+    private fun isUnrecognizedLand(card: PolicyCardView): Boolean =
+        card.types.any { it.equals("LAND", ignoreCase = true) } && !isManaSource(card)
+
+    private fun redSource(card: PolicyCardView): Boolean = isManaSource(card) && card.name in RED_SOURCES
+
+    /** Exact 0/1 knapsack over projected burn cards and one mana window. */
+    private fun bestBurn(cards: List<CardTacticalDescriptor>, mana: Mana): Double {
+        var states = mapOf(ManaSpent() to 0.0)
+        cards.filter { it.faceDamage > 0.0 }.forEach { card ->
+            val next = states.toMutableMap()
+            states.forEach { (spent, damage) ->
+                val nextSpent = spent + card.manaCost.toManaSpent(card.requiresRed)
+                if (nextSpent.fits(mana)) {
+                    next[nextSpent] = maxOf(next[nextSpent] ?: 0.0, damage + card.faceDamage)
+                }
+            }
+            states = next
+        }
+        return states.values.maxOrNull() ?: 0.0
     }
 
-    private fun opponentBurnPrior(
+    /**
+     * Exact two-window allocation. A card is omitted, paid in the current window, or paid after
+     * the next untap; it cannot spend mana pooled across windows or be cast twice.
+     */
+    private fun bestBurnAcrossWindows(
+        cards: List<CardTacticalDescriptor>,
+        currentMana: Mana,
+        nextMana: Mana,
+    ): Double {
+        var states = mapOf(TwoWindowSpent() to 0.0)
+        cards.filter { it.faceDamage > 0.0 }.forEach { card ->
+            val next = states.toMutableMap()
+            states.forEach { (spent, damage) ->
+                val cost = card.manaCost.toManaSpent(card.requiresRed)
+                val current = spent.copy(current = spent.current + cost)
+                if (current.current.fits(currentMana)) {
+                    next[current] = maxOf(next[current] ?: 0.0, damage + card.faceDamage)
+                }
+                val future = spent.copy(next = spent.next + cost)
+                if (future.next.fits(nextMana)) {
+                    next[future] = maxOf(next[future] ?: 0.0, damage + card.faceDamage)
+                }
+            }
+            states = next
+        }
+        return states.values.maxOrNull() ?: 0.0
+    }
+
+    /**
+     * Mixes over the public depletion ledger. Nonlinear terms are calculated for each possible
+     * composition before weighted averaging, never from an expected damage total.
+     */
+    private fun opponentPrior(
         information: PolicyInformationState,
         opponent: String,
         handSize: Int,
+        known: List<CardTacticalDescriptor>,
+        mana: Mana,
+        nextMana: Mana,
+        rootLife: Int,
     ): OpponentPrior {
         val unlocated = information.knowledge.unlocatedCardCounts[opponent].orEmpty()
-        if (unlocated.isEmpty() || handSize <= 0) return OpponentPrior.NONE
-        val knownInHand = information.knowledge.zones.firstOrNull {
-            it.ownerId == opponent && it.zone.equals("HAND", true)
-        }?.knownCardCounts.orEmpty()
-        val unknownHand = (handSize - knownInHand.values.sum()).coerceAtLeast(0)
-        val total = unlocated.values.sum().coerceAtLeast(1)
-        val expectedDamagePerCard = unlocated.entries.sumOf { (name, count) ->
-            descriptorForName(name).faceDamage * count
+        val unknown = (handSize - known.size).coerceAtLeast(0)
+        val knownNow = bestBurn(known, mana)
+        val knownReserve = bestBurnAcrossWindows(known, mana, nextMana)
+        if (unknown == 0) return knownPrior(knownNow, knownReserve, rootLife, available = true)
+        if (unknown > unlocated.values.sum() || unlocated.isEmpty()) {
+            return knownPrior(knownNow, knownReserve, rootLife, available = false)
+        }
+
+        val shockCount = unlocated.entries.sumOf { (name, count) ->
+            if (descriptorForName(name).burnGroup == 1) count else 0
+        }
+        val strikeCount = unlocated.entries.sumOf { (name, count) ->
+            if (descriptorForName(name).burnGroup == 2) count else 0
+        }
+        val total = unlocated.values.sum()
+        var now = 0.0
+        var reserve = 0.0
+        var lethalAgainstRoot = 0.0
+        var reserveLifeLoss = 0.0
+        for (shocks in 0..minOf(shockCount, unknown)) {
+            for (strikes in 0..minOf(strikeCount, unknown - shocks)) {
+                val other = unknown - shocks - strikes
+                if (other > total - shockCount - strikeCount) continue
+                val probability = choose(shockCount, shocks) * choose(strikeCount, strikes) *
+                    choose(total - shockCount - strikeCount, other) / choose(total, unknown)
+                if (probability == 0.0) continue
+                val cards = known + List(shocks) { SHOCK } + List(strikes) { STRIKE }
+                val current = bestBurn(cards, mana)
+                val future = bestBurnAcrossWindows(cards, mana, nextMana)
+                now += probability * current
+                reserve += probability * future
+                lethalAgainstRoot += probability * sigmoid((current - rootLife + 0.5) / 1.25)
+                reserveLifeLoss += probability * lifeLossUtility(rootLife, future)
+            }
+        }
+        val expectedNonReach = unknown * unlocated.entries.sumOf { (name, count) ->
+            descriptorForName(name).nonReachValue * count
         } / total
-        val burnCopies = unlocated.entries.sumOf { (name, count) ->
-            if (descriptorForName(name).faceDamage > 0.0) count else 0
-        }
-        val expectedBurnCopies = unknownHand * burnCopies.toDouble() / total
-        val expectedManaNeed = if (burnCopies == 0) 1.0 else {
-            unlocated.entries.sumOf { (name, count) ->
-                val descriptor = descriptorForName(name)
-                if (descriptor.faceDamage > 0.0) descriptor.manaCost * count.toDouble() else 0.0
-            } / burnCopies
-        }
-        return OpponentPrior(
-            expectedDamage = unknownHand * expectedDamagePerCard,
-            expectedBurnCopies = expectedBurnCopies,
-            expectedManaNeed = expectedManaNeed.coerceAtLeast(1.0),
-            used = true,
-            available = true,
+        return OpponentPrior(now, reserve, expectedNonReach, lethalAgainstRoot, reserveLifeLoss, used = true, available = true)
+    }
+
+    private fun knownPrior(now: Double, reserve: Double, rootLife: Int, available: Boolean): OpponentPrior =
+        OpponentPrior(
+            now = now,
+            reserve = reserve,
+            expectedNonReach = 0.0,
+            lethalAgainstRoot = sigmoid((now - rootLife + 0.5) / 1.25),
+            reserveLifeLoss = lifeLossUtility(rootLife, reserve),
+            used = false,
+            available = available,
         )
+
+    private fun choose(n: Int, k: Int): Double {
+        if (k < 0 || k > n) return 0.0
+        var result = 1.0
+        for (index in 1..k) result = result * (n - k + index) / index
+        return result
     }
 
-    private fun manaFit(
-        mana: Int,
-        cards: List<CardTacticalDescriptor>,
-        information: PolicyInformationState,
-        player: String,
-    ): Double {
-        if (cards.isEmpty()) return 0.0
-        val total = cards.sumOf { it.totalRetainedUtility }.coerceAtLeast(1.0)
-        val castable = cards.filter { it.manaCost <= mana }.sumOf { it.totalRetainedUtility } / total
-        val usefulDemand = cards.count { it.manaCost >= 1 }.toDouble() / cards.size
-        val development = (mana.toDouble() / maxOf(1, cards.maxOf { it.manaCost })).coerceIn(0.0, 1.0) *
-            (0.25 + 0.75 * usefulDemand)
-        val floating = information.observation.players.single { it.playerId == player }.mana.total()
-        val hasLegalUse = information.actingPlayerId == player && information.candidates.any {
-            it.operationFamily in setOf(SemanticOperationFamily.CAST_SPELL, SemanticOperationFamily.ACTIVATE_ABILITY)
-        }
-        val expiringWaste = if (floating > 0 && !hasLegalUse) {
-            floating.toDouble() / maxOf(1, mana)
-        } else 0.0
-        return (development + 0.50 * castable - 0.70 * expiringWaste).coerceIn(0.0, 1.5) / 1.5
-    }
+    private fun retainedNonReachValue(cards: List<CardTacticalDescriptor>): Double = cards.sumOf { it.nonReachValue }
 
-    private fun coarseOpponentManaFit(
-        mana: Int,
-        handSize: Int,
-        prior: OpponentPrior,
-    ): Double {
-        if (handSize <= 0) return 0.0
-        val demand = if (prior.available) (0.25 + 0.75 * prior.expectedBurnCopies.coerceIn(0.0, 1.0)) else 0.5
-        return (mana.toDouble() / maxOf(1.0, prior.expectedManaNeed + 1.0) * demand).coerceIn(0.0, 1.0)
-    }
-
-    private fun marginalLandConversion(
-        mana: Int,
-        cards: List<CardTacticalDescriptor>,
-        information: PolicyInformationState,
-        player: String,
-    ): Double {
-        val legalLandDrop = information.actingPlayerId == player && information.candidates.any {
-            it.operationFamily == SemanticOperationFamily.PLAY_LAND
-        }
-        if (!legalLandDrop) return 0.0
-        val before = cards.filter { it.manaCost <= mana }.sumOf { it.totalRetainedUtility }
-        val after = cards.filter { it.manaCost <= mana + 1 }.sumOf { it.totalRetainedUtility }
-        return ((after - before) / 3.0).coerceIn(0.0, 1.0)
-    }
-
-    private fun initiative(player: String, observation: PolicyObservation): Double {
-        var value = 0.0
-        if (observation.priorityPlayerId == player) value += 0.5
-        if (observation.activePlayerId == player && attackWindowRemains(observation)) value += 0.5
-        return value
-    }
+    private fun initiative(player: String, observation: PolicyObservation): Double =
+        (if (observation.priorityPlayerId == player) 0.5 else 0.0) +
+            (if (observation.activePlayerId == player && attackWindowRemains(observation)) 0.5 else 0.0)
 
     private fun descriptorForCard(card: PolicyCardView): CardTacticalDescriptor {
         val known = descriptorForName(card.name)
-        if (!known.annotationMissing) return known
-        val createsBody = card.types.any { it.equals("CREATURE", true) }
-        return known.copy(
-            manaCost = card.manaValue.coerceAtLeast(0),
-            bodyCreated = if (createsBody) 0.35 + 0.30 * card.manaValue.coerceIn(0, 6) else 0.0,
-        )
+        return if (!known.annotationMissing) {
+            known
+        } else {
+            known.copy(
+                manaCost = card.manaValue.coerceAtLeast(0),
+                bodyCreated = if (card.types.any { it.equals("CREATURE", ignoreCase = true) }) {
+                    0.35 + 0.30 * card.manaValue.coerceIn(0, 6)
+                } else {
+                    0.0
+                },
+            )
+        }
     }
 
     private fun descriptorForName(name: String): CardTacticalDescriptor =
         CARD_DESCRIPTORS[name] ?: CardTacticalDescriptor(annotationMissing = true)
 
-    private fun normalizedDifference(root: Double, opponent: Double, scale: Double): Double =
-        ((root - opponent) / scale).coerceIn(-1.0, 1.0)
+    private fun normalizedDifference(left: Double, right: Double, scale: Double): Double =
+        ((left - right) / scale).coerceIn(-1.0, 1.0)
 
     private fun sigmoid(value: Double): Double = 1.0 / (1.0 + exp(-value))
 
+    private fun PolicyCardView.hasKeyword(keyword: String): Boolean =
+        keywords.any { it.equals(keyword, ignoreCase = true) }
+
+    private fun PolicyCardView.isCreatureLand(): Boolean =
+        types.any { it.equals("CREATURE", ignoreCase = true) }
+
+    private fun hasUnsupportedCombatKeyword(card: PolicyCardView): Boolean =
+        card.keywords.any { it.uppercase() !in SUPPORTED_COMBAT_KEYWORDS }
+
     private data class CombatFeatures(
         val body: Double,
-        val attackPressure: Double,
+        val attackCapacity: Double,
         val blockCapacity: Double,
         val approximationUsed: Boolean,
     )
 
+    private data class Mana(
+        val total: Int,
+        val red: Int,
+    )
+
+    private data class ManaSpent(
+        val total: Int = 0,
+        val red: Int = 0,
+    ) {
+        operator fun plus(other: ManaSpent): ManaSpent = ManaSpent(total + other.total, red + other.red)
+        fun fits(mana: Mana): Boolean = total <= mana.total && red <= mana.red
+    }
+
+    private data class TwoWindowSpent(
+        val current: ManaSpent = ManaSpent(),
+        val next: ManaSpent = ManaSpent(),
+    )
+
+    private fun Int.toManaSpent(requiresRed: Boolean): ManaSpent =
+        ManaSpent(total = this, red = if (requiresRed) 1 else 0)
+
     private data class OpponentPrior(
-        val expectedDamage: Double,
-        val expectedBurnCopies: Double,
-        val expectedManaNeed: Double,
+        val now: Double,
+        val reserve: Double,
+        val expectedNonReach: Double,
+        val lethalAgainstRoot: Double,
+        val reserveLifeLoss: Double,
         val used: Boolean,
         val available: Boolean,
-    ) {
-        companion object {
-            val NONE = OpponentPrior(0.0, 0.0, 1.0, used = false, available = false)
-        }
-    }
+    )
 
     private data class CardTacticalDescriptor(
         val manaCost: Int = 0,
         val faceDamage: Double = 0.0,
+        val requiresRed: Boolean = false,
         val removalSwing: Double = 0.0,
         val bodyCreated: Double = 0.0,
         val cardsGenerated: Double = 0.0,
         val repeatableNonReach: Double = 0.0,
         val usefulManaCreated: Double = 0.0,
         val annotationMissing: Boolean = false,
+        val burnGroup: Int = 0,
     ) {
-        val totalRetainedUtility: Double
-            get() = faceDamage + 0.55 * removalSwing + bodyCreated + cardsGenerated +
+        val nonReachValue: Double
+            get() = 0.55 * removalSwing + bodyCreated + cardsGenerated +
                 0.80 * repeatableNonReach + 0.60 * usefulManaCreated
     }
 
     companion object {
         const val EVALUATOR_ID = "mono-red-tactical-value-v3"
+
         private val SUPPORTED_COMBAT_KEYWORDS = setOf("HASTE", "FLYING", "MENACE", "FIRST_STRIKE")
+        private val MANA_SOURCES = setOf("Mountain", "Temple of Power", "Soulstone Sanctuary", "Rockface Village")
+        private val RED_SOURCES = setOf("Mountain", "Temple of Power")
+        private val SHOCK = CardTacticalDescriptor(1, 2.0, requiresRed = true, removalSwing = 0.7, burnGroup = 1)
+        private val STRIKE = CardTacticalDescriptor(2, 3.0, requiresRed = true, removalSwing = 0.9, burnGroup = 2)
         private val CARD_DESCRIPTORS = mapOf(
             "Mountain" to CardTacticalDescriptor(),
+            "Temple of Power" to CardTacticalDescriptor(),
             "Rockface Village" to CardTacticalDescriptor(usefulManaCreated = 0.20),
             "Soulstone Sanctuary" to CardTacticalDescriptor(usefulManaCreated = 0.20),
-            "Shock" to CardTacticalDescriptor(manaCost = 1, faceDamage = 2.0, removalSwing = 0.7),
-            "Burst Lightning" to CardTacticalDescriptor(manaCost = 1, faceDamage = 2.0, removalSwing = 0.7),
-            "Lightning Strike" to CardTacticalDescriptor(manaCost = 2, faceDamage = 3.0, removalSwing = 0.9),
-            "Hired Claw" to CardTacticalDescriptor(manaCost = 1, bodyCreated = 0.65, repeatableNonReach = 0.20),
-            "Burnout Bashtronaut" to CardTacticalDescriptor(manaCost = 1, bodyCreated = 0.75),
-            "Hexing Squelcher" to CardTacticalDescriptor(manaCost = 2, bodyCreated = 1.05),
-            "Razorkin Needlehead" to CardTacticalDescriptor(manaCost = 2, bodyCreated = 1.10, repeatableNonReach = 0.20),
-            "Magebane Lizard" to CardTacticalDescriptor(manaCost = 3, bodyCreated = 1.25, repeatableNonReach = 0.20),
-            "Nova Hellkite" to CardTacticalDescriptor(manaCost = 5, bodyCreated = 2.20),
-            "Howlsquad Heavy" to CardTacticalDescriptor(manaCost = 3, bodyCreated = 1.40),
-            "Sunspine Lynx" to CardTacticalDescriptor(manaCost = 4, bodyCreated = 1.80, repeatableNonReach = 0.30),
-            "Ojer Axonil, Deepest Might" to CardTacticalDescriptor(manaCost = 4, bodyCreated = 1.75, repeatableNonReach = 0.45),
+            "Shock" to SHOCK,
+            "Burst Lightning" to SHOCK,
+            "Lightning Strike" to STRIKE,
+            "Hired Claw" to CardTacticalDescriptor(1, bodyCreated = 0.65, repeatableNonReach = 0.20),
+            "Burnout Bashtronaut" to CardTacticalDescriptor(1, bodyCreated = 0.75),
+            "Hexing Squelcher" to CardTacticalDescriptor(2, bodyCreated = 1.05),
+            "Razorkin Needlehead" to CardTacticalDescriptor(2, bodyCreated = 1.10, repeatableNonReach = 0.20),
+            "Magebane Lizard" to CardTacticalDescriptor(2, bodyCreated = 1.25, repeatableNonReach = 0.20),
+            "Nova Hellkite" to CardTacticalDescriptor(5, bodyCreated = 2.20),
+            "Howlsquad Heavy" to CardTacticalDescriptor(3, bodyCreated = 1.40),
+            "Sunspine Lynx" to CardTacticalDescriptor(4, bodyCreated = 1.80, repeatableNonReach = 0.30),
+            "Ojer Axonil, Deepest Might" to CardTacticalDescriptor(4, bodyCreated = 1.75, repeatableNonReach = 0.45),
         )
     }
 }
