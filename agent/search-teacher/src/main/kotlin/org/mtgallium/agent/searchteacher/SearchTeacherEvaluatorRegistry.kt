@@ -28,10 +28,13 @@ object SearchTeacherEvaluatorRegistry {
                 evaluator,
                 informationEvaluator ?: MonoRedTacticalEvaluatorV3,
                 supportsTraceReuse = false,
-                settleAtRolloutHorizon = leaf.rolloutHorizonSettlementOverride == null,
+                settleAtRolloutHorizon = leaf.rolloutHorizonSettlementOverride !=
+                    RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
                 unresolvedLeafHandling = when (leaf.rolloutHorizonSettlementOverride) {
                     null -> UnresolvedLeafHandling.BACK_UP_NEUTRAL
                     RolloutHorizonSettlementOverride.DIRECT_EVALUATION -> UnresolvedLeafHandling.EVALUATE
+                    RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK ->
+                        UnresolvedLeafHandling.EVALUATE
                 },
             )
         }

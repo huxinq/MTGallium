@@ -669,6 +669,13 @@ class InformationSetSearch(
         )
     }
 
+    /**
+     * Horizon quiescence may advance only an exact singleton priority pass. A quiet state is one
+     * for which [isVolatile] is false: no stack, no combat except END_COMBAT, no pending Combat,
+     * Damage, or Order decision, and no lethal-damage battlefield creature. It need not have no
+     * candidates. Thus this method never consumes a genuine branching decision, a singleton mana
+     * ability, or another strategic action while seeking a state to evaluate.
+     */
     private fun settleStaticLeaf(
         world: SearchWorld,
         rootPlayer: String,

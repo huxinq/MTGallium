@@ -69,33 +69,46 @@ class SearchTeacherLeafConfigurationsTest {
         val direct = default.copy(
             rolloutHorizonSettlementOverride = RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
         )
+        val quiescenceEvaluation = default.copy(
+            rolloutHorizonSettlementOverride =
+                RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+        )
 
         val defaultStrategy = SearchTeacherEvaluatorRegistry.strategy(default)
         val directStrategy = SearchTeacherEvaluatorRegistry.strategy(direct)
+        val quiescenceEvaluationStrategy = SearchTeacherEvaluatorRegistry.strategy(quiescenceEvaluation)
         assertEquals(true, defaultStrategy.settleAtRolloutHorizon)
         assertEquals(UnresolvedLeafHandling.BACK_UP_NEUTRAL, defaultStrategy.unresolvedLeafHandling)
         assertEquals(false, directStrategy.settleAtRolloutHorizon)
         assertEquals(UnresolvedLeafHandling.EVALUATE, directStrategy.unresolvedLeafHandling)
+        assertEquals(true, quiescenceEvaluationStrategy.settleAtRolloutHorizon)
+        assertEquals(UnresolvedLeafHandling.EVALUATE, quiescenceEvaluationStrategy.unresolvedLeafHandling)
         assertEquals(
             """{"stateSource":"BOUNDED_ROLLOUT","evaluator":"MTGALLIUM_TACTICAL_V3","rolloutHorizonSettlementOverride":"DIRECT_EVALUATION"}""",
             PolicyJson.format.encodeToString(direct),
         )
+        assertEquals(
+            """{"stateSource":"BOUNDED_ROLLOUT","evaluator":"MTGALLIUM_TACTICAL_V3","rolloutHorizonSettlementOverride":"QUIESCENCE_WITH_EVALUATION_FALLBACK"}""",
+            PolicyJson.format.encodeToString(quiescenceEvaluation),
+        )
     }
 
     @Test
-    fun `registry rejects direct settlement overrides outside bounded tactical v3`() {
+    fun `registry rejects rollout horizon settlement overrides outside bounded tactical v3`() {
         listOf(
             LeafEvaluator.MTGALLIUM_VISIBLE_V2,
             LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1,
             LeafEvaluator.ARGENTUM_BOARD_V1,
         ).forEach { evaluator ->
-            val leaf = LeafEvaluationConfig(
-                LeafStateSource.BOUNDED_ROLLOUT,
-                evaluator,
-                RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
-            )
-            assertFailsWith<IllegalArgumentException>(evaluator.name) {
-                SearchTeacherEvaluatorRegistry.strategy(leaf)
+            RolloutHorizonSettlementOverride.entries.forEach { override ->
+                val leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT,
+                    evaluator,
+                    override,
+                )
+                assertFailsWith<IllegalArgumentException>("$evaluator / $override") {
+                    SearchTeacherEvaluatorRegistry.strategy(leaf)
+                }
             }
         }
     }

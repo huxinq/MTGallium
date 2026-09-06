@@ -69,6 +69,22 @@ class SearchTeacherCalibrationTest {
     }
 
     @Test
+    fun `tactical quiescence evaluation fallback remains an explicit leaf treatment`() {
+        val tactical = control.copy(
+            tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+            rolloutHorizonSettlementOverride =
+                RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+        )
+
+        val parameters = tactical.parameters(72)
+        assertEquals(
+            RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+            parameters.leaf.rolloutHorizonSettlementOverride,
+        )
+        assertEquals(parameters, tactical.policy(72).effectiveParameters(72))
+    }
+
+    @Test
     fun `explicit nonoverlapping offsets supply disjoint seeds and candidates share schedule`() {
         val confirmation = plan.copy(phase = SearchTeacherCalibrationPhase.CONFIRMATION, pairOffset = 100)
         val developmentSeeds = (0..1).map(plan::pairSeed).toSet()

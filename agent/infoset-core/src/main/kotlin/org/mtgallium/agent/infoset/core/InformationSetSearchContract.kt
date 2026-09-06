@@ -18,7 +18,12 @@ enum class LeafEvaluator(val evaluatorId: String) {
 
 /** Explicit experiment-controlled settlement change for a bounded-rollout leaf. */
 @Serializable
-enum class RolloutHorizonSettlementOverride { DIRECT_EVALUATION }
+enum class RolloutHorizonSettlementOverride {
+    /** Skip quiescence and evaluate the state reached at the bounded rollout horizon. */
+    DIRECT_EVALUATION,
+    /** Advance only forced priority passes, then evaluate an unresolved quiescence fallback. */
+    QUIESCENCE_WITH_EVALUATION_FALLBACK,
+}
 
 @Serializable
 data class LeafEvaluationConfig(
@@ -239,7 +244,7 @@ data class InformationSetSearchDiagnostics(
     val evaluatorCalls: Int = 0,
     val evaluatorNanos: Long = 0,
     val evaluatorOutputChecksum: String = "0000000000000000",
-    /** V3 backs up neutral uncertainty instead of applying a quiet evaluator to unresolved tactics. */
+    /** Unresolved horizon fallbacks backed up as neutral instead of evaluated. */
     val quiescenceUnresolvedBackups: Int = 0,
     val wallClockBudgetMillis: Long? = null,
 ) {

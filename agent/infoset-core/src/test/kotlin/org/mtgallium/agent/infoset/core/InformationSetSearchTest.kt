@@ -860,6 +860,89 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `quiescence evaluation fallback advances forced passes and evaluates unresolved horizon`() {
+        val probe = QuiescenceProbe()
+        val config = InformationSetSearchConfig(
+            simulations = 2,
+            maxPolicyDecisions = 1,
+            maxQuiescenceForcedPasses = 1,
+            leaf = LeafEvaluationConfig(
+                LeafStateSource.BOUNDED_ROLLOUT,
+                LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+            ),
+        )
+        val search = coreSearch(
+            config,
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        )
+
+        val unresolved = search.search(
+            "p0",
+            batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.ENDLESS_PASS))),
+            106L,
+        )
+
+        assertEquals(2, unresolved.diagnostics.quiescenceForcedPasses)
+        assertEquals(2, unresolved.diagnostics.quiescenceOverflows)
+        assertEquals(0, unresolved.diagnostics.quiescenceUnresolvedBackups)
+        assertEquals(2, unresolved.diagnostics.evaluatorCalls)
+        assertTrue(probe.evaluatedStages.all { it == 2 })
+        assertTrue(unresolved.candidateSettlementCounts.values.sumOf {
+            it.heuristicSettlementBackups
+        } > 0)
+        assertEquals(0, unresolved.candidateSettlementCounts.values.sumOf {
+            it.neutralUnresolvedSettlementBackups
+        })
+
+        val volatileProbe = QuiescenceProbe()
+        val volatile = coreSearch(
+            config,
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(volatileProbe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        ).search(
+            "p0",
+            batch(listOf(QuiescenceWorld(
+                volatileProbe,
+                QuiescenceBranch.FORCED_PASS,
+                volatileThroughStage = 2,
+            ))),
+            107L,
+        )
+
+        assertEquals(2, volatile.diagnostics.quiescenceForcedPasses)
+        assertEquals(0, volatile.diagnostics.quiescenceOverflows)
+        assertEquals(0, volatile.diagnostics.quiescenceStrategicDecisions)
+        assertEquals(0, volatile.diagnostics.quiescenceUnresolvedBackups)
+        assertEquals(2, volatile.diagnostics.evaluatorCalls)
+        assertTrue(volatileProbe.evaluatedStages.all { it == 2 })
+        assertTrue(volatileProbe.evaluatedCandidateCounts.all { it == 2 })
+        assertTrue(volatile.candidateSettlementCounts.values.sumOf {
+            it.heuristicSettlementBackups
+        } > 0)
+        assertEquals(0, volatile.candidateSettlementCounts.values.sumOf {
+            it.neutralUnresolvedSettlementBackups
+        })
+
+        val terminalProbe = QuiescenceProbe()
+        val terminal = coreSearch(
+            config,
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(terminalProbe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        ).search(
+            "p0",
+            batch(listOf(QuiescenceWorld(terminalProbe, QuiescenceBranch.FORCED_PASS, terminalAtStage = 2))),
+            108L,
+        )
+
+        assertEquals(0, terminal.diagnostics.evaluatorCalls)
+        assertTrue(terminal.candidateSettlementCounts.values.all {
+            it.terminalPayoffBackups == it.successfulBackups && it.heuristicSettlementBackups == 0
+        })
+    }
+
+    @Test
     fun `search fails closed when root particles disagree about visible information`() {
         val search = coreSearch(
             InformationSetSearchConfig(
@@ -1173,11 +1256,13 @@ private fun testLeafEvaluationStrategy(
         configuredEvaluatorId = evaluator.evaluatorId,
         source = LeafValueSource.Information(informationEvaluator),
         supportsTraceReuse = false,
-        settleAtRolloutHorizon = leaf.rolloutHorizonSettlementOverride == null,
-        unresolvedLeafHandling = if (leaf.rolloutHorizonSettlementOverride == null) {
-            UnresolvedLeafHandling.BACK_UP_NEUTRAL
-        } else {
-            UnresolvedLeafHandling.EVALUATE
+        settleAtRolloutHorizon = leaf.rolloutHorizonSettlementOverride !=
+            RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+        unresolvedLeafHandling = when (leaf.rolloutHorizonSettlementOverride) {
+            null -> UnresolvedLeafHandling.BACK_UP_NEUTRAL
+            RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+            RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK ->
+                UnresolvedLeafHandling.EVALUATE
         },
     )
     LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 ->
@@ -1192,6 +1277,7 @@ private enum class QuiescenceBranch { FORCED_PASS, REAL_BRANCH, SINGLETON_MANA, 
 
 private class QuiescenceProbe {
     val evaluatedStages = mutableListOf<Int>()
+    val evaluatedCandidateCounts = mutableListOf<Int>()
 }
 
 private fun recordingEvaluator(
@@ -1202,6 +1288,7 @@ private fun recordingEvaluator(
 
     override fun evaluate(information: PolicyInformationState, rootPlayer: String): Double {
         probe.evaluatedStages += information.observation.turnNumber
+        probe.evaluatedCandidateCounts += information.candidates.size
         return 0.25
     }
 }
@@ -1212,16 +1299,20 @@ private class QuiescenceWorld(
     private var stage: Int = 0,
     private var rootChoice: String? = null,
     private val rejectAtStage: Int? = null,
+    private val terminalAtStage: Int? = null,
+    private val volatileThroughStage: Int? = null,
 ) : SearchWorld {
     override fun actorToAct(): String = "p0"
 
     override fun informationState(viewer: String): PolicyInformationState {
         val expansion = expandChoices()
+        val volatile = stage == 1 || branch == QuiescenceBranch.ENDLESS_PASS && stage > 0 ||
+            volatileThroughStage?.let { stage in 1..it } == true
         val observation = PolicyObservation(
             perspectivePlayerId = viewer,
             turnNumber = stage,
-            phase = if (stage == 1 || branch == QuiescenceBranch.ENDLESS_PASS && stage > 0) "COMBAT" else "TEST",
-            step = if (stage == 1 || branch == QuiescenceBranch.ENDLESS_PASS && stage > 0) {
+            phase = if (volatile) "COMBAT" else "TEST",
+            step = if (volatile) {
                 "COMBAT_DAMAGE"
             } else {
                 "QUIET"
@@ -1279,9 +1370,12 @@ private class QuiescenceWorld(
         return SearchStepResult(true)
     }
 
-    override fun fork(): SearchWorld = QuiescenceWorld(probe, branch, stage, rootChoice, rejectAtStage)
+    override fun fork(): SearchWorld = QuiescenceWorld(
+        probe, branch, stage, rootChoice, rejectAtStage, terminalAtStage, volatileThroughStage,
+    )
 
-    override fun terminalPayoff(rootPlayer: String): Double? = null
+    override fun terminalPayoff(rootPlayer: String): Double? =
+        if (terminalAtStage != null && stage >= terminalAtStage) 1.0 else null
 
     override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.5
 }
