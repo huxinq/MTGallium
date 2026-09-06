@@ -103,8 +103,19 @@ CI pass. Passing tests are technical evidence, not a research conclusion.
   and repair of failures caused by the change. An initial patch is not completion.
   Use reasonable assumptions for routine reversible choices. Ask only when the
   missing answer changes the outcome materially, and continue independent work.
-- Existing owner authorization carries forward. Skills and templates guide the
-  work; they do not add approval gates or override explicit task instructions.
+- Existing authorization carries forward within its stated task, targets, and
+  effects. Read-only or audit-only requests prohibit edits and persistent record
+  updates unless separately authorized. Skills and templates guide the work;
+  they do not add approval gates or override explicit task instructions.
+- For implementation requests, proceed with necessary local reads, edits, and
+  tests. External messages, publication, deployment, production-data changes,
+  and deletion of existing user data require authorization covering that action
+  and target. Preparing a migration or deployment does not authorize applying
+  it to production. Reuse sufficient existing authorization rather than asking
+  again.
+- When approval is missing, finish the authorized preparation and validation,
+  then present the concrete action, target, effects, and remaining uncertainty.
+  Available tools and permissive execution settings do not supply authorization.
   If a local instruction blocks authorized work, identify its file and wording.
 - Reuse successful verification when its source, configuration, and inputs still
   apply. Report unrelated failures and continue unaffected work without modifying
@@ -139,67 +150,26 @@ narrow mechanical change.
 
 ## Codex allowance, time, and compute
 
-Conserving the owner's Codex allowance is a major operating priority. Optimize
-total agent work needed to complete the objective, including parent reasoning,
-subagents, context loading, and repeated turns; faster wall-clock completion
-alone does not justify more agent work. Preserve research correctness, required
-verification, and completion of authorized work. Do not invent allowance balances
-or savings when usage data is unavailable.
+Optimize total agent work while preserving research correctness, authorized
+completion, and required verification. Reuse relevant context and successful
+checks; avoid duplicate exploration, reviews, and polling.
 
-Use targeted reads and compact tool output; reuse established source context,
-handoffs, and still-applicable verification. Avoid broad repository reacquisition,
-duplicate reviews, speculative exploration, and repeated polling of unchanged
-work. Stop investigating when the evidence resolves the assigned question.
+For Astra, use the project effort default unless the owner selects otherwise
+or relevant task observations justify escalation. Escalate for a concrete
+reasoning gap, not missing inputs, tool failures, or slow compute. Report
+effort as unknown unless confirmed.
 
-Treat elapsed time and agent effort as operational evidence. Distinguish
-irreducible compute from repository reacquisition, repeated setup, broad
-verification, orchestration, serialization, and avoidable reasoning. Use the
-least intensive model or agent effort unlikely to reduce decision-relevant
-quality. For Astra, start at low effort unless the owner selects otherwise or
-the task-kind record supports a higher baseline. Escalate only for a concrete
-reasoning gap, such as an unresolved semantic ambiguity or a failed approach
-whose cause points to reasoning depth. Missing inputs, tool failures, and slow
-compute alone do not justify more effort. Use the smallest supported increase;
-do not claim an effort change unless the active setting is confirmed.
+Delegate only when a bounded question reduces total work or independent
+review materially improves confidence. Use the established specialist roles,
+minimal relevant context, and explicit stopping criteria.
 
-Keep a small private record at
-`~/.local/state/mtgallium/astra-effort-observations.md`. At task completion or a
-meaningful escalation, append one compact observation: task kind and reference,
-confirmed effort (or unknown), outcome and relevant check/rework, and escalation
-reason/result if any. Record low-effort successes as well as failures. Use only
-observations from requested work; do not run benchmarks, duplicate tasks at
-multiple efforts, or create a separate reporting workflow. Reuse an observation
-already recorded for the same task. Consult only relevant entries when choosing
-effort; no need to read the record for routine work starting at low.
+For implementation or research tasks, maintain the existing private handoff
+and append one compact effort observation at completion or meaningful
+escalation to `~/.local/state/mtgallium/astra-effort-observations.md`. Preserve
+task kind, confirmed effort, outcome, relevant checks, and escalation reason.
+Consult `~/.local/state/mtgallium/astra-effort-procedure.md` only when recording
+observations or adjusting a task-kind baseline. Do not write records during
+audit-only/read-only work without separate authorization.
 
-Raise a task-kind baseline when repeated comparable observations support it,
-or a concrete consequential failure and successful higher-effort repair justify
-it. Record the reason in one line; a single difficult task does not raise every
-baseline. Treat these as operational observations, not controlled comparisons
-or measured allowance savings. Keep the record brief and update it as part of
-the existing handoff, without an extra agent or review pass.
-
-Delegate a bounded question when it is likely to reduce total agent work or
-independent review materially improves confidence. Parallelizable work alone is
-not sufficient reason to delegate. Handle short, clear tasks locally. Give each agent
-its objective, relevant paths, ownership, and expected evidence. Reuse an existing
-agent for related questions; avoid duplicate exploration and serial handoffs
-whose answer is already established. Pass only relevant context, bound the
-deliverable, and stop agents whose work is no longer needed. Retain cheaper
-specialist models for bounded tracing and review; use Astra for difficult
-synthesis or ambiguity. Respect explicit owner model selections.
-
-When work encounters friction, briefly investigate its cause in the instructions,
-tools, code, or the agent's own approach. Distinguish demonstrated causes from
-suspicions. Make small reversible fixes within the objective and verify
-proportionately; report larger remedies or unresolved decisions while continuing
-independent work. Keep reflection proportionate to the friction.
-
-Lead updates and final reports with the outcome, its evidence, and material limits.
-Use concise prose, concrete examples, and lists only when they improve clarity.
-
-Owner research environments may provide durable execution for substantial
-compute. When available, use it after cheap preflight and inspect retained
-outputs after completion rather than rerunning expensive work. Durable
-execution mechanics, notifications, destinations, and credentials are private
-execution-layer concerns.
+Use durable execution for substantial compute after cheap preflight; inspect
+retained outputs instead of rerunning it. Do not invent allowance savings.
