@@ -2,11 +2,74 @@ package org.mtgallium.agent.infoset.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
 class RolloutPolicyAnnotationRequirementTest {
+    @Test
+    fun `zero-weight annotation consumers are not called to build the distribution`() {
+        val world = PolicyAdmissionWorld(ExpansionProbe())
+        val candidates = world.expandChoicesForPolicyAdmission().candidates
+        val mixture = zeroWeightMixture()
+
+        assertFalse(mixture.requiresPolicyAnnotations)
+        val distribution = mixture.distribution(world.informationState("p0"), candidates, 71L)
+
+        assertEquals(candidates.map { 0.5 }, distribution.entries.map { it.probability })
+        assertTrue(candidates.all { it.display.policyTags.isEmpty() })
+    }
+
+    @Test
+    fun `zero-weight annotation consumers are not called for posterior attribution`() {
+        val world = PolicyAdmissionWorld(ExpansionProbe())
+        val candidates = world.expandChoicesForPolicyAdmission().candidates
+        val mixture = zeroWeightMixture()
+
+        val diagnostic = mixture.decisionDiagnostic(
+            world.informationState("p0"), candidates, candidates.first(), 71L, 72L,
+        )
+
+        assertEquals(UniformOpponentPolicy.id, diagnostic.selectedComponentId)
+        assertEquals(UniformOpponentPolicy.id, diagnostic.effectivePolicyId)
+    }
+
+    @Test
+    fun `inactive components retain original indices in active policy and attribution seeds`() {
+        val world = PolicyAdmissionWorld(ExpansionProbe())
+        val candidates = world.expandChoicesForPolicyAdmission().candidates
+        val first = SeedRecordingMixturePolicy("first")
+        val second = SeedRecordingMixturePolicy("second")
+        val mixture = MixtureOpponentPolicy("interleaved-mixture", listOf(
+            OpponentPolicyMixtureEntry(InactiveAnnotationPolicy, 0.0),
+            OpponentPolicyMixtureEntry(first, 1.0),
+            OpponentPolicyMixtureEntry(InactiveAnnotationPolicy, 0.0),
+            OpponentPolicyMixtureEntry(second, 2.0),
+        ))
+        val policySeed = 71L
+        val attributionSeed = 72L
+
+        mixture.distribution(world.informationState("p0"), candidates, policySeed)
+        val diagnostic = mixture.decisionDiagnostic(
+            world.informationState("p0"), candidates, candidates.first(), policySeed, attributionSeed,
+        )
+
+        for ((index, policy) in listOf(1 to first, 3 to second)) {
+            val expectedSeed = ComponentSeeds.derive(policySeed, index, policy.id)
+            assertEquals(listOf(expectedSeed, expectedSeed), policy.distributionSeeds)
+            val expectedDiagnostics = if (diagnostic.selectedComponentId == policy.id) listOf(
+                expectedSeed to ComponentSeeds.derive(attributionSeed, index, policy.id, "nested-component-attribution")
+            ) else emptyList()
+            assertEquals(expectedDiagnostics, policy.diagnosticSeeds)
+        }
+    }
+
+    private fun zeroWeightMixture() = MixtureOpponentPolicy("zero-weight-mixture", listOf(
+        OpponentPolicyMixtureEntry(InactiveAnnotationPolicy, 0.0),
+        OpponentPolicyMixtureEntry(UniformOpponentPolicy, 1.0),
+    ))
+
     @Test
     fun `annotation-free rollout policies use policy admission without materializing annotations`() {
         val probe = ExpansionProbe()
@@ -82,6 +145,41 @@ class RolloutPolicyAnnotationRequirementTest {
             resamplingCount = 0,
         ),
     )
+}
+
+private object InactiveAnnotationPolicy : OpponentPolicy {
+    override val id = "inactive-annotation-policy"
+    override val requiresPolicyAnnotations = true
+    override fun distribution(
+        opponentInformation: PolicyInformationState,
+        candidates: List<SemanticChoice>,
+        policySeed: Long,
+    ): ProbabilityDistribution<SemanticChoice> = error("A zero-weight component must not execute")
+}
+
+private class SeedRecordingMixturePolicy(override val id: String) : OpponentPolicy {
+    val distributionSeeds = mutableListOf<Long>()
+    val diagnosticSeeds = mutableListOf<Pair<Long, Long>>()
+
+    override fun distribution(
+        opponentInformation: PolicyInformationState,
+        candidates: List<SemanticChoice>,
+        policySeed: Long,
+    ): ProbabilityDistribution<SemanticChoice> {
+        distributionSeeds += policySeed
+        return ProbabilityDistribution.uniform(candidates)
+    }
+
+    override fun decisionDiagnostic(
+        opponentInformation: PolicyInformationState,
+        candidates: List<SemanticChoice>,
+        chosen: SemanticChoice,
+        policySeed: Long,
+        attributionSeed: Long,
+    ): OpponentPolicyDecisionDiagnostic {
+        diagnosticSeeds += policySeed to attributionSeed
+        return OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = id)
+    }
 }
 
 private data class PerspectiveWitness(

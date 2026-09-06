@@ -48,6 +48,7 @@ class MixtureOpponentPolicy(
         val totals = candidates.associate { it.signature to 0.0 }.toMutableMap()
         val normalizer = components.sumOf { it.weight }
         for ((componentIndex, component) in components.withIndex()) {
+            if (component.weight == 0.0) continue
             val distribution = component.policy.distribution(
                 opponentInformation,
                 candidates,
@@ -73,11 +74,15 @@ class MixtureOpponentPolicy(
     ): OpponentPolicyDecisionDiagnostic {
         val contributions = components.mapIndexed { componentIndex, component ->
             val componentSeed = ComponentSeeds.derive(policySeed, componentIndex, component.policy.id)
-            val probability = component.policy.distribution(
-                opponentInformation,
-                candidates,
-                componentSeed,
-            ).probabilityOf { it.signature == chosen.signature }
+            // Keep original indices for seed/attribution identity, but never execute an inactive
+            // component: its annotation requirements are deliberately absent from the mixture.
+            val probability = if (component.weight == 0.0) 0.0 else {
+                component.policy.distribution(
+                    opponentInformation,
+                    candidates,
+                    componentSeed,
+                ).probabilityOf { it.signature == chosen.signature }
+            }
             Triple(component, componentSeed, component.weight * probability)
         }
         val selectedIndex = samplePositiveWeights(
