@@ -60,6 +60,15 @@ candidate-selection search randomness. Omission preserves historical seed
 derivation and plan bytes. Repetitions vary search sampling over the reconstructed
 particle batch; they do not independently rebuild that posterior approximation.
 
+Both search modes prepare a root once per policy and reuse its world/session
+across that policy's repetitions on one worker. Each search uses a fresh tree;
+no accepted action advances the prepared root. Different roots and policies
+remain separate. Preparation is held only for that worker group and is not a
+durable world snapshot. `reconstructionMillis` charges the work to repetition
+zero; later repetitions report zero and `reusedRootPreparation=true`. Selection
+time still includes each repetition's belief support check and search. A failed
+preparation refuses every requested repetition; it does not drop rows.
+
 Both search modes support the bound [research preflight](research-preflight.md)
 with `work.type = "position-screen"`. Reuse the finalized bank and reference
 estimates across candidates only while their source, configuration, action
