@@ -106,3 +106,36 @@ separate meanings. The descriptor retains its full composition, but fields used
 only by ordinary search or leaf evaluation do not control this terminal API.
 Adaptive tuning and any eventual strength claim still need an appropriate target,
 validation discipline and gameplay evidence.
+
+### Reviewing terminal reports
+
+After official research-run and bank verification, the standard-library utility
+[`position_bank_terminal_diagnostics.py`](../tools/analysis/position_bank_terminal_diagnostics.py)
+produces a private review derivative from the finalized terminal and bank reports:
+
+```sh
+python3 tools/analysis/position_bank_terminal_diagnostics.py \
+  --terminal-report "$TERMINAL_REPORT" --bank-report "$BANK_REPORT" \
+  --verified-terminal-identity "$TERMINAL_IDENTITY" \
+  --verified-bank-identity "$BANK_IDENTITY" \
+  --official-verification-completed \
+  --json-output "$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/search-teacher/work/review/diagnostics.json" \
+  --markdown-output "$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/search-teacher/work/review/diagnostics.md"
+```
+
+The verification flag attests to checks already performed by the caller; this
+utility does not perform official verification. It retains input and manifest
+hashes, input source provenance, identities and its own script hash. The analysis
+requires clean committed source and records that revision separately in a review
+identity bound to its inputs. Outputs must be new
+absolute paths outside source checkouts and finalized input directories.
+
+The analysis accounts for every assigned root, preserves invalid populations,
+and computes gaps only from complete paired candidate matrices. It counts exact
+cached-feature collisions at matching coordinates. If every retained terminal
+payoff is binary, it also reports two-sided paired sign tests with Holm adjustment
+across all available candidate pairs in the full report. These tests assume the
+paired replicates follow the declared sampling model; they do not correct for
+earlier exploration or certify actions. Nonbinary outcomes retain descriptive
+gaps without sign tests. Neither a small p-value nor a feature collision is a
+playing-strength result.
