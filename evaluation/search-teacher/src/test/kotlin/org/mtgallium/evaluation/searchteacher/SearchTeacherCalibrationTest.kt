@@ -8,6 +8,9 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
+import org.mtgallium.agent.infoset.core.LeafStateSource
+import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
+import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.PolicySourceTreeState
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
@@ -91,9 +94,11 @@ class SearchTeacherCalibrationTest {
             Files.deleteIfExists(directory.resolve("checkpoint.json"))
             Files.delete(directory)
         }
-        assertFails { SearchTeacherCli.parse(arrayOf("--suite", "search-teacher-calibration")) }
-        assertEquals("search-teacher-calibration", SearchTeacherCli.parse(arrayOf("--suite", "search-teacher-calibration",
-            "--profile", "/tmp/plan.json", "--output", "/tmp/output", "--deck-manifest", "/tmp/deck.json")).suite)
+        listOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen").forEach { suite ->
+            assertFails { SearchTeacherCli.parse(arrayOf("--suite", suite)) }
+            assertEquals(suite, SearchTeacherCli.parse(arrayOf("--suite", suite, "--profile", "/tmp/plan.json",
+                "--output", "/tmp/output", "--deck-manifest", "/tmp/deck.json")).suite)
+        }
     }
 
     @Test
@@ -129,6 +134,46 @@ class SearchTeacherCalibrationTest {
         val withoutBlend = evidenceJson.parseToJsonElement(encoded) as kotlinx.serialization.json.JsonObject
         assertFails { evidenceJson.decodeFromString<SearchTeacherCalibrationPolicy>(
             kotlinx.serialization.json.JsonObject(withoutBlend - "rolloutHeuristicProbability").toString()) }
+    }
+
+    @Test
+    fun `absent evaluator and sequential rule preserve historical descriptor bytes and material keys`() {
+        val historical = """
+            {
+                "id": "control",
+                "particles": 8,
+                "simulations": 64,
+                "maxPolicyDecisions": 32,
+                "explorationConstant": 1.4,
+                "singletonSelection": false,
+                "rolloutHeuristicProbability": 1.0
+            }
+        """.trimIndent()
+        assertEquals(historical, evidenceJson.encodeToString(control))
+        assertEquals(control, evidenceJson.decodeFromString<SearchTeacherCalibrationPolicy>(historical))
+        val bindings = searchTeacherCalibrationBindings(plan, source, mapOf("control" to "c"), "deck", "pool", 1)
+        assertEquals(setOf("plan", "source-provenance", "policy-evidence", "deck", "card-pool", "schedule", "worker-threads"), bindings.material.keys)
+        val rule = PairedSequentialRule(nullPointRate = .5, targetPointRate = .6,
+            falsePositiveRate = .05, falseNegativeRate = .05, maximumPairs = plan.pairCount)
+        assertNotEquals(bindings.identity, searchTeacherCalibrationBindings(plan, source,
+            mapOf("control" to "c"), "deck", "pool", 1, rule).identity)
+        assertFails { SearchTeacherSequentialPlan(plan.copy(candidates = listOf(candidate, candidate.copy(id = "other"))), rule) }
+        assertFails { SearchTeacherSequentialPlan(plan, rule.copy(maximumPairs = plan.pairCount + 1)) }
+    }
+
+    @Test
+    fun `configured visible evaluator preserves bounded rollout and binds every coefficient`() {
+        val manifest = SearchTeacherDeckManifest("calibration-evaluator-test", "Synthetic", "synthetic", "2026-09-06",
+            "public synthetic fixture", mapOf("Mountain" to 60), emptyMap())
+        val arena = SearchTeacherArena(buildRegistry(), manifest, calibrationPresentationProfile(source), plan.baseSeed)
+        val configured = control.copy(evaluator = MonoRedVisibleEvaluatorConfig()).policy(plan.baseSeed)
+        val changed = control.copy(evaluator = MonoRedVisibleEvaluatorConfig(life = .2)).policy(plan.baseSeed)
+        assertEquals(LeafStateSource.BOUNDED_ROLLOUT, configured.effectiveParameters(plan.baseSeed).leaf.stateSource)
+        assertEquals(control.parameters(plan.baseSeed), configured.effectiveParameters(plan.baseSeed))
+        assertNotEquals(arena.evidenceBinding(control.policy(plan.baseSeed), null, source).identity,
+            arena.evidenceBinding(configured, null, source).identity)
+        assertNotEquals(arena.evidenceBinding(configured, null, source).identity,
+            arena.evidenceBinding(changed, null, source).identity)
     }
 
     private fun game(id: String, terminal: Boolean) = GameRunResult(gameId = id, seed = plan.pairSeed(0),

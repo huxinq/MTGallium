@@ -37,6 +37,7 @@ internal fun publishDurableRunProgress(
     total: Int,
     phase: String,
     detail: String,
+    unit: String = "pairs",
 ) {
     val target = path ?: return
     ResearchRunFiles.atomicWrite(
@@ -47,6 +48,7 @@ internal fun publishDurableRunProgress(
                 total = total.toLong(),
                 phase = phase,
                 detail = detail,
+                unit = unit,
             ),
         ) + "\n",
     )

@@ -1214,6 +1214,34 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         check(report.valid) { "Outcome qualification run did not materialize every assigned pair: ${report.failureReasons}" }
         return
     }
+    if (options.suite == "real-game-position-bank") {
+        val plan = evidenceJson.decodeFromString<RealGamePositionBankPlan>(
+            Files.readString(requireNotNull(options.profilePath)))
+        val output = requireNotNull(options.outputPath)
+        val report = RealGamePositionBankRunner(root, registry, manifest).run(plan, output)
+        println("Real-game position bank ${report.bankIdentity}; report=${output.resolve("report.json")}")
+        check(report.complete) { "Position bank includes reconstruction refusals; inspect the retained report" }
+        return
+    }
+    if (options.suite == "position-bank-screen") {
+        val plan = evidenceJson.decodeFromString<PositionBankScreenPlan>(
+            Files.readString(requireNotNull(options.profilePath)))
+        val output = requireNotNull(options.outputPath)
+        val report = PositionBankScreenRunner(root, registry, manifest).run(plan, output, options.threads)
+        println("Position screen ${report.researchRunIdentity}; valid=${report.valid}; report=${output.resolve("report.json")}")
+        check(report.valid) { "Position screen includes refusals; inspect the retained report" }
+        return
+    }
+    if (options.suite == "search-teacher-sequential") {
+        val plan = evidenceJson.decodeFromString<SearchTeacherSequentialPlan>(
+            Files.readString(requireNotNull(options.profilePath)))
+        val output = requireNotNull(options.outputPath)
+        val report = SearchTeacherCalibrationRunner(root, registry, manifest)
+            .run(plan.calibration, output, options.threads, plan.rule)
+        println("Sequential gameplay ${report.sequentialResult?.disposition}; valid=${report.valid}; report=${output.resolve("report.md")}")
+        check(report.valid) { "Sequential gameplay includes invalid pairs; inspect the retained report" }
+        return
+    }
     if (options.suite == "search-teacher-calibration") {
         val plan = evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(
             Files.readString(requireNotNull(options.profilePath)))

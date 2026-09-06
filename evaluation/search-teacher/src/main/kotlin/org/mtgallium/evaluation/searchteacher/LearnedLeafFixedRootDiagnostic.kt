@@ -1135,11 +1135,12 @@ internal fun fixedRootRetainedCandidateSignatures(
     return detail.candidateStatistics.map { it.choice.signature }.sorted().also { require(it.size >= 2) }
 }
 
+/** A null session reconstructs world/history only; a supplied session additionally replays sequential belief observations. */
 internal fun replayFixedRootPrefix(
     decisionIndex: Int,
     replay: VerifiedCanonicalSemanticReplay,
     actual: ArgentumSearchWorld,
-    session: SearchTeacherPolicySession,
+    session: SearchTeacherPolicySession?,
 ) {
     val stateEquivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
     requireFixedRootReplayStateMatch(
@@ -1186,7 +1187,7 @@ internal fun replayFixedRootPrefix(
                 rawOrdinal = expected.ordinal,
             )
         }
-        session.observeAccepted(actual, actor, exact, decision.decisionIndex, applied.result.privateToActor)
+        session?.observeAccepted(actual, actor, exact, decision.decisionIndex, applied.result.privateToActor)
     }
 }
 
