@@ -1,0 +1,39 @@
+{
+  "calibration": {
+    "schemaVersion": 1,
+    "phase": "DEVELOPMENT",
+    "baseSeed": 20260910,
+    "pairOffset": 0,
+    "pairCount": 24,
+    "control": {
+      "id": "reference-8p64s",
+      "particles": 8,
+      "simulations": 64,
+      "maxPolicyDecisions": 32,
+      "explorationConstant": 1.4,
+      "singletonSelection": true,
+      "rolloutHeuristicProbability": 1.0
+    },
+    "candidates": [
+      {
+        "id": "candidate-8p32s",
+        "particles": 8,
+        "simulations": 32,
+        "maxPolicyDecisions": 32,
+        "explorationConstant": 1.4,
+        "singletonSelection": true,
+        "rolloutHeuristicProbability": 1.0
+      }
+    ]
+  },
+  "rule": {
+    "schemaVersion": 1,
+    "populationModel": "independent-seed-pair-mean-v1",
+    "nullPointRate": 0.5,
+    "targetPointRate": 0.5,
+    "falsePositiveRate": 0.025,
+    "falseNegativeRate": 0.025,
+    "maximumPairs": 24,
+    "betFractions": [0.2, 0.5, 0.8]
+  }
+}

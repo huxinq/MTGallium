@@ -11,6 +11,12 @@ The production policy is a hand-authored information-set Search Teacher over a
 pinned Argentum engine; learned-policy work is exploratory rather than the
 production policy.
 
+For new head-to-head experiments, start with the
+[paired gameplay quick start](docs/real-game-screening.md#sequential-gameplay)
+and its [example plan](examples/search-teacher-sequential.json). The reusable
+runner supports prospective early stopping, complete seat-swapped pairs and
+explicit accounting for invalid games and work completed after stopping.
+
 The [experimental learned outcome-value subsystem](docs/learned-outcome-value.md)
 includes checkpoint inference, training and admission, and research diagnostics.
 Its private inputs and historical engine compatibility remain explicit.

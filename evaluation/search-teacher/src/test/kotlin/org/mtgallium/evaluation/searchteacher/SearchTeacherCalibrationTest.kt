@@ -14,10 +14,46 @@ import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.PolicySourceTreeState
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
+import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.research.run.ResearchRunCheckpoints
 
 @Tag("public-source")
 class SearchTeacherCalibrationTest {
+    @Test
+    fun `sequential quick start output belongs beneath the private work subtree`() {
+        val store = EvidenceStore(Files.createTempDirectory("sequential-example-repository-"))
+        val output = store.workRoot.resolve("sequential-trial")
+        assertEquals(output.toAbsolutePath().normalize(),
+            store.requireDiagnosticOutput(output, "sequential example"))
+        assertFails {
+            store.requireDiagnosticOutput(store.workRoot.parent.parent.resolve("sequential-trial"),
+                "sequential example outside work")
+        }
+    }
+
+    @Test
+    fun `public sequential example parses and stops decisive sequences before its cap`() {
+        val fixture = generateSequence(java.nio.file.Path.of("").toAbsolutePath()) { it.parent }
+            .map { it.resolve("examples/search-teacher-sequential.json") }
+            .first { Files.isRegularFile(it) }
+        val example = evidenceJson.decodeFromString<SearchTeacherSequentialPlan>(Files.readString(fixture))
+        assertEquals(example.calibration.pairCount, example.rule.maximumPairs)
+        assertEquals(64, example.calibration.control.simulations)
+        assertEquals(8, example.calibration.control.particles)
+        assertEquals(example.calibration.control.copy(id = "candidate-8p32s", simulations = 32),
+            example.calibration.candidates.single())
+        assertEquals(PairedSequentialRule(nullPointRate = 0.5, targetPointRate = 0.5,
+            falsePositiveRate = 0.025, falseNegativeRate = 0.025, maximumPairs = 24,
+            betFractions = listOf(0.2, 0.5, 0.8)), example.rule)
+        for ((score, expected) in listOf(1.0 to PairedSequentialDisposition.ABOVE_NULL,
+            0.0 to PairedSequentialDisposition.BELOW_TARGET)) {
+            val result = pairedSequentialTest(example.rule,
+                List(example.rule.maximumPairs) { PairedSequentialScore(it, score) }, 0)
+            assertEquals(expected, result.disposition)
+            assertTrue(result.inspectedPairs < example.rule.maximumPairs)
+        }
+    }
+
     private val control = SearchTeacherCalibrationPolicy("control", 8, 64, 32, 1.4, false, 1.0)
     private val candidate = control.copy(id = "candidate", simulations = 32)
     private val plan = SearchTeacherCalibrationPlan(phase = SearchTeacherCalibrationPhase.DEVELOPMENT,

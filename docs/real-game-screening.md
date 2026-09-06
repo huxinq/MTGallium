@@ -46,6 +46,58 @@ accuracy score. Accessing validation roots must be disclosed in later claims.
 
 ## Sequential gameplay
 
+Use this suite for head-to-head strength experiments that should stop when
+evidence is decisive. Start from the public
+[example plan](../examples/search-teacher-sequential.json): it compares an
+8-particle, 32-simulation candidate with an 8-particle, 64-simulation reference,
+holding the other declared settings fixed. This is an example intervention,
+not a recommended stronger policy or an existing experiment result.
+
+From the repository root, set real absolute paths outside the checkout:
+
+```bash
+export MTGALLIUM_PUBLIC_SOURCE=1
+export MTGALLIUM_PRIVATE_EVIDENCE_ROOT="/absolute/path/to/private-evidence"
+DECK_MANIFEST="/absolute/path/to/deck-manifest.json"
+mkdir -p "$MTGALLIUM_PRIVATE_EVIDENCE_ROOT"
+cp examples/search-teacher-sequential.json "$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/sequential-plan.json"
+```
+
+Edit that private plan to select the candidate, a fresh seed schedule and the
+stopping rule before looking at outcomes. Keep `calibration.pairCount` equal to
+`rule.maximumPairs`, and supply exactly one candidate. Commit treatment source
+before substantial compute, then run:
+
+```bash
+bash tools/mtgallium-gradle :evaluation:search-teacher:run \
+  --args="--suite search-teacher-sequential --profile \"$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/sequential-plan.json\" --output \"$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/search-teacher/work/sequential-trial\" --deck-manifest \"$DECK_MANIFEST\" --threads 2"
+```
+
+Use a new output directory beneath `search-teacher/work` in the private evidence
+root for a new trial; the runner enforces this location. The deck manifest is an owner-supplied
+input; the example contains no private deck, evidence or execution service.
+Owner environments can run the same suite through their durable execution layer.
+
+The example caps work at 24 pairs / 48 games. Equal `0.5` boundaries test both
+directions around parity, with a 2.5% error allocation in each direction under
+the model below. Distinct null/target boundaries are also supported. Freeze the
+bet mixture prospectively; do not tune it after seeing losses or wins. Early
+stopping is possible, not promised. Two workers can leave one extra completed
+pair beyond the first stopping prefix.
+
+After completion, verify the research-run manifest and checkpoints before using
+`report.json` or `report.md`. `sequentialResult` gives the stopping disposition;
+`sequentialPopulation` separates planned, executed, inspected, unexecuted and
+overshoot pairs. `comparisons[0].pairs` owns the inference prefix, while
+`sequentialOvershootPairs` retains extra work. `BUDGET_EXHAUSTED` is inconclusive;
+`INVALID_PAIR` stops inference without turning a software failure into a loss.
+
+The [plan and schedule](../evaluation/search-teacher/src/main/kotlin/org/mtgallium/evaluation/searchteacher/SearchTeacherSequentialPlan.kt),
+[stopping rule](../evaluation/search-teacher/src/main/kotlin/org/mtgallium/evaluation/searchteacher/PairedSequentialTest.kt)
+and [focused tests](../evaluation/search-teacher/src/test/kotlin/org/mtgallium/evaluation/searchteacher/PairedSequentialTestTest.kt)
+are the source authorities. The public test lane also parses this example and
+checks that decisive synthetic sequences stop before its cap.
+
 `--suite search-teacher-sequential` accepts `SearchTeacherSequentialPlan`, which
 wraps a one-candidate calibration plan and `PairedSequentialRule`. Freeze both
 before inspecting outcomes. Each observation is a complete seat-swapped pair's
