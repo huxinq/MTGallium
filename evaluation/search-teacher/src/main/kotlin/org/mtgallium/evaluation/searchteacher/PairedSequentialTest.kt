@@ -8,7 +8,9 @@ import kotlinx.serialization.Serializable
 /**
  * A future independent-seed game population, not inference about a finite committed seed list.
  * Frozen policies/deck and independent pair seeds are assumed to give a common conditional mean.
- * Each X is one COMPLETE seat-swapped pair's point rate, including game draws.
+ * Each X is one COMPLETE seat-swapped pair's point rate, including game draws. Equal boundaries
+ * define opposing directional tests around one common reference point; they do not create a gap
+ * or an automatic indifference conclusion.
  */
 @Serializable
 internal data class PairedSequentialRule(
@@ -23,7 +25,7 @@ internal data class PairedSequentialRule(
 ) {
     init {
         require(schemaVersion == 1 && populationModel == "independent-seed-pair-mean-v1")
-        require(nullPointRate > 0 && nullPointRate < targetPointRate && targetPointRate < 1)
+        require(nullPointRate > 0 && nullPointRate <= targetPointRate && targetPointRate < 1)
         require(falsePositiveRate > 0 && falsePositiveRate < 1)
         require(falseNegativeRate > 0 && falseNegativeRate < 1)
         require(maximumPairs > 0)
@@ -72,7 +74,7 @@ internal data class PairedSequentialResult(
     val assumptions: List<String> = listOf(
         "This is a bounded-mean betting test under the declared independent-seed common conditional-mean model, not a finite-schedule confidence interval.",
         "Pair order, policies, populations, bet fractions and boundaries must be fixed before outcomes are inspected.",
-        "ABOVE_NULL rejects mean <= nullPointRate; BELOW_TARGET rejects mean >= targetPointRate. Neither is itself a game result or automatic policy promotion.",
+        "ABOVE_NULL rejects mean <= nullPointRate; BELOW_TARGET rejects mean >= targetPointRate. Equal boundaries are opposing directional tests around their common reference. Neither is itself a game result or automatic policy promotion.",
         "Error guarantees are per test; exploratory multiple-candidate selection needs separate independent confirmation or explicit error allocation.",
         "BUDGET_EXHAUSTED is inconclusive. This rule does not guarantee earlier stopping or quantify a cost improvement.",
     ),
