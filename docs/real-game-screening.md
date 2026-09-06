@@ -139,3 +139,25 @@ paired replicates follow the declared sampling model; they do not correct for
 earlier exploration or certify actions. Nonbinary outcomes retain descriptive
 gaps without sign tests. Neither a small p-value nor a feature collision is a
 playing-strength result.
+
+## Decision-level rollout treatments
+
+Calibration policy descriptors can opt into two independent treatments:
+
+- `searchHeuristicProfile: "PRODUCTION_EXPIRING"` uses the pinned engine's
+  expiring-grant timing guard for heuristic annotations inside simulated search.
+  This affects the annotated tree opponent and both rollout seats. Represented
+  belief updates retain their original opponent model. The default is
+  `PRODUCTION`; the optional field participates in behavior identity.
+- `rolloutHorizonSettlementOverride: "POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK"`
+  continues an unsettled tactical-v3 rollout through explicit root/opponent
+  rollout-policy choices. Responses, blockers, targets and ordering remain
+  individual choices, with policy attribution and quiescence counters. The
+  continuation shares one forced-pass budget and uses the configured quiescence
+  decision cap. A quiet strategic decision is left for evaluation; exhaustion
+  remains a heuristic fallback, never a terminal outcome.
+
+The existing `QUIESCENCE_WITH_EVALUATION_FALLBACK` remains pass-only. Neither
+option changes the default policy or justifies promoting a treatment based on
+selected decision probes. Record the exact source, configuration and heuristic
+versus terminal settlement populations when comparing these treatments.

@@ -9,6 +9,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
+import org.mtgallium.agent.infoset.argentum.ArgentumHeuristicProfile
 import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.infoset.core.ComponentSeeds
@@ -67,6 +68,9 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rolloutHorizonSettlementOverride: RolloutHorizonSettlementOverride? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val searchHeuristicProfile: ArgentumHeuristicProfile? = null,
 ) {
     init {
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
@@ -85,6 +89,7 @@ internal data class SearchTeacherCalibrationPolicy(
         baseSeed = baseSeed, particles = particles, simulations = simulations,
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
+        searchHeuristicProfile = searchHeuristicProfile ?: ArgentumHeuristicProfile.PRODUCTION,
         leaf = tacticalEvaluator?.let {
             LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_TACTICAL_V3,
                 rolloutHorizonSettlementOverride)

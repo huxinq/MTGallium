@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
+import org.mtgallium.agent.infoset.argentum.ArgentumHeuristicProfile
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
 import org.mtgallium.agent.infoset.core.BeliefMode
@@ -66,6 +67,9 @@ class SearchTeacherPolicyIdentityTest {
             "singleton selection" to base.copy(
                 singletonSelection = PolicySingletonSelectionConfig(enabled = true)
             ),
+            "simulated heuristic profile" to base.copy(
+                searchHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION_EXPIRING
+            ),
         )
 
         mutations.forEach { (description, changed) ->
@@ -82,8 +86,10 @@ class SearchTeacherPolicyIdentityTest {
         )
         val encoded = PolicyJson.format.encodeToJsonElement(specification) as JsonObject
         assertFalse("singletonSelection" in encoded)
+        assertFalse("searchHeuristicProfile" in encoded)
         val decoded = PolicyJson.format.decodeFromJsonElement<SearchTeacherBehaviorSpecification>(encoded)
         assertFalse(decoded.singletonSelection.enabled)
+        assertEquals(ArgentumHeuristicProfile.PRODUCTION, decoded.searchHeuristicProfile)
         assertEquals(encoded, PolicyJson.format.encodeToJsonElement(decoded))
         assertEquals(
             "$SEARCH_TEACHER_BEHAVIOR_IDENTITY_PREFIX:${PolicyJson.digest(encoded)}",
@@ -94,6 +100,10 @@ class SearchTeacherPolicyIdentityTest {
         assertTrue("singletonSelection" in enabledJson)
         assertNotEquals(SearchTeacherPolicyIdentity.identity(specification), SearchTeacherPolicyIdentity.identity(enabled))
         assertEquals(enabled, PolicyJson.format.decodeFromJsonElement<SearchTeacherBehaviorSpecification>(enabledJson))
+        val expiring = specification.copy(searchHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION_EXPIRING)
+        val expiringJson = PolicyJson.format.encodeToJsonElement(expiring) as JsonObject
+        assertTrue("searchHeuristicProfile" in expiringJson)
+        assertNotEquals(SearchTeacherPolicyIdentity.identity(specification), SearchTeacherPolicyIdentity.identity(expiring))
     }
 
     @Test

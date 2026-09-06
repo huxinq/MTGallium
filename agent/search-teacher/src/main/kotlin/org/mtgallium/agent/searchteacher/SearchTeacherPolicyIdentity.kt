@@ -5,6 +5,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.encodeToJsonElement
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
+import org.mtgallium.agent.infoset.argentum.ArgentumHeuristicProfile
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
 import org.mtgallium.agent.infoset.core.BOUNDED_POLICY_INPUT_SCHEMA_CURRENT
 import org.mtgallium.agent.infoset.core.CANDIDATE_SCHEMA_CURRENT
@@ -129,6 +130,9 @@ data class SearchTeacherBehaviorSpecification(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val searchHeuristicProfile: ArgentumHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION,
 ) {
     init {
         require(schemaVersion == SEARCH_TEACHER_BEHAVIOR_SCHEMA_V1)
@@ -183,6 +187,7 @@ object SearchTeacherPolicyIdentity {
             inputSchemas = SearchTeacherInputSchemaSpecification(),
             integration = integration,
             singletonSelection = parameters.singletonSelection,
+            searchHeuristicProfile = parameters.searchHeuristicProfile,
         )
     }
 

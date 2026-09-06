@@ -802,6 +802,113 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `policy quiescence selects and accounts for both actors before evaluating a quiet leaf`() {
+        val probe = QuiescenceProbe()
+        val root = RecordingPolicy("quiescence-root")
+        val opponent = RecordingPolicy("quiescence-opponent")
+        val search = coreSearch(
+            policyQuiescenceConfig(),
+            opponentPolicy = UniformOpponentPolicy,
+            rolloutPolicy = root,
+            rolloutOpponentPolicy = opponent,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        )
+        val result = search.search("p0", batch(listOf(QuiescenceWorld(
+            probe, QuiescenceBranch.REAL_BRANCH, volatileThroughStage = 3, alternatingActors = true,
+        ))), 107L)
+
+        assertEquals(listOf(4, 4), probe.evaluatedStages)
+        assertEquals(6, result.diagnostics.quiescenceStrategicDecisions)
+        assertEquals(listOf("p0", "p0"), root.actors.map { requireNotNull(it) })
+        assertEquals(listOf("p1", "p1", "p1", "p1"), opponent.actors.map { requireNotNull(it) })
+        assertEquals(2, result.diagnostics.rootRolloutPolicyDecisions.decisions)
+        assertEquals(4, result.diagnostics.opponentRolloutPolicyDecisions.decisions)
+        assertEquals(0, result.diagnostics.quiescenceFallbacks)
+        assertEquals(2, result.candidateSettlementCounts.values.sumOf { it.heuristicSettlementBackups })
+    }
+
+    @Test
+    fun `policy quiescence budget exhaustion remains a heuristic fallback`() {
+        val probe = QuiescenceProbe()
+        val result = coreSearch(
+            policyQuiescenceConfig().copy(maxQuiescenceDecisions = 1),
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        ).search("p0", batch(listOf(QuiescenceWorld(
+            probe, QuiescenceBranch.REAL_BRANCH, volatileThroughStage = 8,
+        ))), 108L)
+
+        assertEquals(listOf(2, 2), probe.evaluatedStages)
+        assertEquals(2, result.diagnostics.quiescenceStrategicDecisions)
+        assertEquals(2, result.diagnostics.quiescenceOverflows)
+        assertEquals(2, result.diagnostics.quiescenceFallbacks)
+        assertEquals(0, result.candidateSettlementCounts.values.sumOf { it.terminalPayoffBackups })
+    }
+
+    @Test
+    fun `policy quiescence preserves terminal bypass and rejected decision failures`() {
+        val probe = QuiescenceProbe()
+        val search = coreSearch(
+            policyQuiescenceConfig(),
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        )
+        val terminal = search.search("p0", batch(listOf(QuiescenceWorld(
+            probe, QuiescenceBranch.REAL_BRANCH, terminalAtStage = 2, volatileThroughStage = 3,
+        ))), 109L)
+        assertEquals(1.0, terminal.rootValue)
+        assertEquals(0, terminal.diagnostics.evaluatorCalls)
+        assertEquals(2, terminal.candidateSettlementCounts.values.sumOf { it.terminalPayoffBackups })
+        assertFailsWith<RejectedSearchTransitionException> {
+            search.search("p0", batch(listOf(QuiescenceWorld(
+                probe, QuiescenceBranch.REAL_BRANCH, rejectAtStage = 1,
+            ))), 110L)
+        }
+    }
+
+    @Test
+    fun `policy quiescence does not advance a quiet strategic decision`() {
+        val probe = QuiescenceProbe()
+        val policy = RecordingPolicy("quiet-policy")
+        val settlement = coreSearch(
+            policyQuiescenceConfig(), opponentPolicy = policy, rolloutPolicy = policy,
+            rolloutOpponentPolicy = policy,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        ).settleFirstUnvisitedEdge(
+            QuiescenceWorld(probe, QuiescenceBranch.REAL_BRANCH, stage = 2), "p0", 111L, 0,
+        )
+        assertEquals(SearchSettlementOrigin.HEURISTIC_SETTLEMENT, settlement.origin)
+        assertEquals(listOf(2), probe.evaluatedStages)
+        assertTrue(policy.actors.isEmpty())
+    }
+
+    private fun policyQuiescenceConfig() = InformationSetSearchConfig(
+        simulations = 2,
+        maxPolicyDecisions = 1,
+        maxQuiescenceDecisions = 8,
+        leaf = LeafEvaluationConfig(
+            LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+            RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK,
+        ),
+    )
+
+    @Test
+    fun `policy quiescence shares one forced pass budget across intervening policy choices`() {
+        val probe = QuiescenceProbe()
+        val result = coreSearch(
+            policyQuiescenceConfig().copy(maxQuiescenceForcedPasses = 2),
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        ).search("p0", batch(listOf(QuiescenceWorld(
+            probe, QuiescenceBranch.ALTERNATING_PASS, volatileThroughStage = 8,
+        ))), 112L)
+        assertEquals(listOf(5, 5), probe.evaluatedStages)
+        assertEquals(4, result.diagnostics.quiescenceForcedPasses)
+        assertEquals(4, result.diagnostics.quiescenceStrategicDecisions)
+        assertEquals(2, result.diagnostics.quiescenceOverflows)
+    }
+
+    @Test
     fun `v3 backs up neutral uncertainty instead of scoring an unresolved overflow`() {
         val probe = QuiescenceProbe()
         val search = coreSearch(
@@ -1261,7 +1368,8 @@ private fun testLeafEvaluationStrategy(
         unresolvedLeafHandling = when (leaf.rolloutHorizonSettlementOverride) {
             null -> UnresolvedLeafHandling.BACK_UP_NEUTRAL
             RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
-            RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK ->
+            RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+            RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK ->
                 UnresolvedLeafHandling.EVALUATE
         },
     )
@@ -1273,7 +1381,7 @@ private fun testLeafEvaluationStrategy(
     )
 }
 
-private enum class QuiescenceBranch { FORCED_PASS, REAL_BRANCH, SINGLETON_MANA, ENDLESS_PASS }
+private enum class QuiescenceBranch { FORCED_PASS, REAL_BRANCH, SINGLETON_MANA, ENDLESS_PASS, ALTERNATING_PASS }
 
 private class QuiescenceProbe {
     val evaluatedStages = mutableListOf<Int>()
@@ -1301,8 +1409,9 @@ private class QuiescenceWorld(
     private val rejectAtStage: Int? = null,
     private val terminalAtStage: Int? = null,
     private val volatileThroughStage: Int? = null,
+    private val alternatingActors: Boolean = false,
 ) : SearchWorld {
-    override fun actorToAct(): String = "p0"
+    override fun actorToAct(): String = if (alternatingActors && stage % 2 == 1) "p1" else "p0"
 
     override fun informationState(viewer: String): PolicyInformationState {
         val expansion = expandChoices()
@@ -1329,7 +1438,7 @@ private class QuiescenceWorld(
             observationDigest = PolicyJson.sha256("quiescence:$viewer:$stage:$rootChoice:$branch"),
         )
         return PolicyInformationState(
-            actingPlayerId = "p0",
+            actingPlayerId = actorToAct(),
             observation = observation,
             informationStateDigest = PolicyJson.sha256("quiescence-info:$viewer:$stage:$rootChoice:$branch"),
             historyCommitment = PolicyHistoryCommitment.empty(),
@@ -1342,7 +1451,8 @@ private class QuiescenceWorld(
     override fun expandChoices(): PolicyExpansion {
         val candidates = when {
             stage == 0 -> listOf(quiescenceChoice("A"), quiescenceChoice("B"))
-            branch == QuiescenceBranch.ENDLESS_PASS -> listOf(
+            branch == QuiescenceBranch.ENDLESS_PASS ||
+                branch == QuiescenceBranch.ALTERNATING_PASS && stage % 2 == 1 -> listOf(
                 quiescenceChoice("Pass", SemanticOperationFamily.PASS_PRIORITY)
             )
             stage == 2 -> listOf(quiescenceChoice("A"), quiescenceChoice("B"))
@@ -1350,7 +1460,8 @@ private class QuiescenceWorld(
                 QuiescenceBranch.FORCED_PASS -> listOf(
                     quiescenceChoice("Pass", SemanticOperationFamily.PASS_PRIORITY)
                 )
-                QuiescenceBranch.REAL_BRANCH -> listOf(quiescenceChoice("X"), quiescenceChoice("Y"))
+                QuiescenceBranch.REAL_BRANCH,
+                QuiescenceBranch.ALTERNATING_PASS -> listOf(quiescenceChoice("X"), quiescenceChoice("Y"))
                 QuiescenceBranch.SINGLETON_MANA -> listOf(
                     quiescenceChoice("Float red", SemanticOperationFamily.MANA_ABILITY)
                 )
@@ -1371,7 +1482,7 @@ private class QuiescenceWorld(
     }
 
     override fun fork(): SearchWorld = QuiescenceWorld(
-        probe, branch, stage, rootChoice, rejectAtStage, terminalAtStage, volatileThroughStage,
+        probe, branch, stage, rootChoice, rejectAtStage, terminalAtStage, volatileThroughStage, alternatingActors,
     )
 
     override fun terminalPayoff(rootPlayer: String): Double? =

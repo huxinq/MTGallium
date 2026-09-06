@@ -23,6 +23,8 @@ enum class RolloutHorizonSettlementOverride {
     DIRECT_EVALUATION,
     /** Advance only forced priority passes, then evaluate an unresolved quiescence fallback. */
     QUIESCENCE_WITH_EVALUATION_FALLBACK,
+    /** Finish volatility with explicit rollout-policy decisions, bounded separately from rollout. */
+    POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK,
 }
 
 @Serializable

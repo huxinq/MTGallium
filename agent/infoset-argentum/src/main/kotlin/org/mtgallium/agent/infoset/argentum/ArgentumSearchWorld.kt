@@ -50,6 +50,18 @@ import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import kotlinx.serialization.encodeToString
 
+
+@Serializable
+enum class ArgentumHeuristicProfile {
+    PRODUCTION,
+    PRODUCTION_EXPIRING;
+
+    internal fun aiProfile(): AiProfile = when (this) {
+        PRODUCTION -> AiProfile.PRODUCTION
+        PRODUCTION_EXPIRING -> AiProfile.PRODUCTION_EXPIRING
+    }
+}
+
 /** Trusted, state-owning implementation of the narrow [SearchWorld] facade. */
 class ArgentumSearchWorld private constructor(
     private val environment: GameEnvironment,
@@ -523,6 +535,18 @@ class ArgentumSearchWorld private constructor(
         fork.auditedState = auditedState?.takeIf { it === fork.environment.state }
     }
 
+    /**
+     * Reannotates only a fork used inside simulated search. It preserves represented state,
+     * history, and candidates, while deliberately discarding annotation-dependent caches.
+     */
+    fun forkWithHeuristicProfile(profile: ArgentumHeuristicProfile): ArgentumSearchWorld = ArgentumSearchWorld(
+        environment = environment.fork(), gameId = gameId, seedBase = seedBase,
+        effectiveSetupSeed = effectiveSetupSeed, aliases = aliases, history = history.fork(),
+        decisionIndex = decisionIndex, expander = expander,
+        heuristicAnnotator = ArgentumHeuristicAnnotator(cardRegistry, knownDecks, profile),
+        knownDecks = knownDecks, heuristicResolutionSink = heuristicResolutionSink,
+    )
+
     /** Rebinds the root action-space policy after an exact scenario has been constructed. */
     fun withActionSpaceProfile(profile: SearchActionSpaceProfile): ArgentumSearchWorld =
         ArgentumSearchWorld(
@@ -866,7 +890,7 @@ class ArgentumSearchWorld private constructor(
                 history = PerspectiveHistory(environment.playerIds, projectionAuditSink),
                 decisionIndex = 0,
                 expander = expander,
-                heuristicAnnotator = knownDecks?.let { ArgentumHeuristicAnnotator(environment.cardRegistry, it) },
+                heuristicAnnotator = knownDecks?.let { ArgentumHeuristicAnnotator(environment.cardRegistry, it, ArgentumHeuristicProfile.PRODUCTION) },
                 knownDecks = knownDecks.orEmpty(),
                 heuristicResolutionSink = heuristicResolutionSink,
             )
@@ -1057,6 +1081,7 @@ data class ArgentumPrivilegedDebugSnapshot(
 private class ArgentumHeuristicAnnotator(
     private val cardRegistry: CardRegistry,
     private val knownDecks: Map<String, Map<String, Int>>,
+    private val profile: ArgentumHeuristicProfile,
 ) {
     private val materializer = KnownDeckWorldMaterializer(cardRegistry)
     // Share engine services for this annotator; every selection still gets fresh AI memory.
@@ -1235,7 +1260,7 @@ private class ArgentumHeuristicAnnotator(
         expansion: UnifiedExpansionResult,
     ): ArgentumEngineChoice = when {
             state.pendingDecision?.playerId == actor -> ArgentumEngineChoice.Decision(
-                playerFactory.create(actor, AiProfile.PRODUCTION)
+                playerFactory.create(actor, profile.aiProfile())
                     .respondToDecision(state, state.pendingDecision!!)
             )
             expansion.engineChoices.values.any { it is ArgentumEngineChoice.Action && it.value is KeepHand } -> {
@@ -1256,7 +1281,7 @@ private class ArgentumHeuristicAnnotator(
                     .maxBy { candidate -> bottomScore(state, candidate.value as BottomCards) }
             }
             else -> ArgentumEngineChoice.Action(
-                playerFactory.create(actor, AiProfile.PRODUCTION).chooseAction(state)
+                playerFactory.create(actor, profile.aiProfile()).chooseAction(state)
             )
         }
 

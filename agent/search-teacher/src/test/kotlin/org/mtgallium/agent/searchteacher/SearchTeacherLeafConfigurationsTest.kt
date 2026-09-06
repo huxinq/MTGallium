@@ -4,6 +4,7 @@ import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.LeafStateSource
@@ -91,6 +92,14 @@ class SearchTeacherLeafConfigurationsTest {
             """{"stateSource":"BOUNDED_ROLLOUT","evaluator":"MTGALLIUM_TACTICAL_V3","rolloutHorizonSettlementOverride":"QUIESCENCE_WITH_EVALUATION_FALLBACK"}""",
             PolicyJson.format.encodeToString(quiescenceEvaluation),
         )
+        val policyQuiescence = default.copy(
+            rolloutHorizonSettlementOverride =
+                RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK,
+        )
+        val policyStrategy = SearchTeacherEvaluatorRegistry.strategy(policyQuiescence)
+        assertEquals(true, policyStrategy.settleAtRolloutHorizon)
+        assertEquals(UnresolvedLeafHandling.EVALUATE, policyStrategy.unresolvedLeafHandling)
+        assertNotEquals(PolicyJson.format.encodeToString(quiescenceEvaluation), PolicyJson.format.encodeToString(policyQuiescence))
     }
 
     @Test
