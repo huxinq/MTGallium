@@ -70,12 +70,18 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootCloningFit: CloningFitReference? = null,
 ) {
     init {
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
         require(particles > 0 && simulations > 0 && maxPolicyDecisions > 0)
         require(explorationConstant.isFinite() && explorationConstant >= 0)
         require(rolloutHeuristicProbability.isFinite() && rolloutHeuristicProbability > 0 && rolloutHeuristicProbability <= 1)
+        require(rootCloningFit == null || (rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
+            "A learned root rollout must not silently override another root-policy configuration"
+        }
     }
 
     fun parameters(baseSeed: Long): SearchTeacherPolicyParameters = SearchTeacherRuntimeConfig().policyParameters().copy(
@@ -87,7 +93,9 @@ internal data class SearchTeacherCalibrationPolicy(
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
-        rootRolloutPolicy = configuredRolloutPolicy(
+        rootRolloutPolicy = rootCloningFit?.let {
+            it.load()
+        } ?: configuredRolloutPolicy(
             "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),
         ),
         opponentRolloutPolicy = configuredRolloutPolicy(

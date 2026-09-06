@@ -60,3 +60,26 @@ Corpus admission establishes trustworthy imitation examples. It does not
 establish teacher optimality, learner quality, a match between root and rollout
 state distributions, or stronger deployed play. Those remain separate
 training and gameplay questions.
+
+## Reusing admitted data
+
+Retain the finalized derived corpus once and reuse its `examples.jsonl.gz` for
+subsequent fits. Consumers verify the parent manifest and registered input
+hashes, and bind that dataset plus their own source and training configuration.
+Changing model settings does not require replay or trajectory extraction again.
+New data must pass admission; a new format needs a small complete extraction
+preflight before a larger run. Preserve the original generation and admission
+identities when consumer source advances.
+
+`CloningRootRolloutPolicy.fromVerifiedFit` loads a registered model once and
+uses the current safe encoder. Calibration references pin the exact fit
+manifest hash as well as run identity, so a changed model artifact cannot reuse
+a preflight for the previous checkpoint. It is an evaluation experiment for the root
+rollout override, leaving the opponent rollout, tree opponent model, belief
+likelihood and evaluator at their established settings. The model scores the
+caller's admitted menu, which can differ from represented action proposals;
+it does not rewrite that state's candidate commitment. Selection is deterministic
+argmax with first-menu-order tie breaking. Optional annotations are skipped
+only for the simulated root-player decisions where this policy is invoked.
+A verified model and a legal continuation are technical checks, not evidence
+of better gameplay or an equal-compute improvement.

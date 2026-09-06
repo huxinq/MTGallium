@@ -196,6 +196,18 @@ internal class NeuralBehavioralCloningFeatureEncoder(
     fun encodeForInference(input: BoundedPolicyInput): EncodedBcDecision =
         encode(input, labelIndex = 0)
 
+    /** Score a separately admitted policy menu without changing represented proposal history or digests. */
+    internal fun encodePolicyMenuForInference(
+        input: BoundedPolicyInput,
+        candidates: List<SemanticChoice>,
+    ): EncodedBcDecision {
+        input.requireValidDigest()
+        require(candidates.isNotEmpty() && candidates.map { it.signature }.distinct().size == candidates.size)
+        require(candidates.all { it.schemaVersion == input.candidateSchemaVersion })
+        val features = NeuralBcFeatureInput.current(input).copy(candidates = candidates.map(SemanticChoice::toNeuralBcFeatureCandidate))
+        return encode(features, labelIndex = 0, gameId = "inference", decisionIndex = 0)
+    }
+
     internal fun auditedStateFeatures(input: BoundedPolicyInput): Set<String> {
         input.requireValidDigest()
         val audit = linkedSetOf<String>()
