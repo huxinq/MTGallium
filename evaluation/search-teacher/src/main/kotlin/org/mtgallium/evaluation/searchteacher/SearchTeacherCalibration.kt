@@ -435,6 +435,9 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     appendLine("Worker threads: ${report.workerThreads}. Timing describes this concurrent arena workload.")
     report.sequentialResult?.let { result ->
         appendLine("Sequential rule: ${result.disposition} after ${result.inspectedPairs} inspected pairs; ${result.operationalOvershootPairs} completed overshoot pairs.")
+        if (result.disposition == PairedSequentialDisposition.FUTILITY) {
+            appendLine("Stopped for futility: neither directional boundary remains reachable within the planned pair cap. Inconclusive; parity or equivalence is not established.")
+        }
         appendLine("First-prefix valid=${report.valid}; all-attempt operational valid=${report.sequentialOperationalValid}.")
         report.sequentialPopulation?.let { population ->
             appendLine("Pairs: planned=${population.plannedPairs}, executed=${population.executedPairs}, inspected=${population.inspectedPairs}, planned but unexecuted=${population.plannedUnexecutedPairs}, overshoot=${population.overshootPairs}.")

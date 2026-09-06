@@ -1,8 +1,11 @@
 package org.mtgallium.evaluation.searchteacher
 
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.ln1p
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
@@ -13,6 +16,7 @@ import kotlinx.serialization.Serializable
  * or an automatic indifference conclusion.
  */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 internal data class PairedSequentialRule(
     val schemaVersion: Int = 1,
     val populationModel: String = "independent-seed-pair-mean-v1",
@@ -22,6 +26,9 @@ internal data class PairedSequentialRule(
     val falseNegativeRate: Double,
     val maximumPairs: Int,
     val betFractions: List<Double> = listOf(0.05, 0.1, 0.2, 0.4, 0.8),
+    /** Prospectively opt in; omitted false preserves existing rule bytes and run bindings. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val stopForFutility: Boolean = false,
 ) {
     init {
         require(schemaVersion == 1 && populationModel == "independent-seed-pair-mean-v1")
@@ -53,6 +60,7 @@ internal data class PairedSequentialScore(
 @Serializable
 internal enum class PairedSequentialDisposition {
     CONTINUE, ABOVE_NULL, BELOW_TARGET, BOTH_BOUNDARIES_CROSSED, BUDGET_EXHAUSTED, INVALID_PAIR,
+    FUTILITY,
 }
 
 @Serializable
@@ -77,7 +85,9 @@ internal data class PairedSequentialResult(
         "ABOVE_NULL rejects mean <= nullPointRate; BELOW_TARGET rejects mean >= targetPointRate. Equal boundaries are opposing directional tests around their common reference. Neither is itself a game result or automatic policy promotion.",
         "Error guarantees are per test; exploratory multiple-candidate selection needs separate independent confirmation or explicit error allocation.",
         "BUDGET_EXHAUSTED is inconclusive. This rule does not guarantee earlier stopping or quantify a cost improvement.",
-    ),
+    ) + if (rule.stopForFutility) listOf(
+        "FUTILITY is inconclusive: after a complete valid pair, neither directional boundary can be reached within the remaining pair cap, even with its most favorable continuation. It does not establish parity or equivalence.",
+    ) else emptyList(),
 )
 
 /**
@@ -123,6 +133,8 @@ internal fun pairedSequentialTest(
             above -> PairedSequentialDisposition.ABOVE_NULL
             below -> PairedSequentialDisposition.BELOW_TARGET
             inspected == rule.maximumPairs -> PairedSequentialDisposition.BUDGET_EXHAUSTED
+            rule.stopForFutility && boundariesUnreachable(rule, upper, lower, rule.maximumPairs - inspected) ->
+                PairedSequentialDisposition.FUTILITY
             else -> PairedSequentialDisposition.CONTINUE
         }
         if (disposition != PairedSequentialDisposition.CONTINUE) break
@@ -132,6 +144,46 @@ internal fun pairedSequentialTest(
         sha256(evidenceJson.encodeToString(scores.take(inspected))),
         logMeanExp(upper), logMeanExp(lower), upper.toList(), lower.toList(),
         scores.size - inspected, invalid)
+}
+
+/**
+ * Upper factors increase with X; lower factors decrease with X. Thus all remaining X=1
+ * maximize the upper mixture and all X=0 maximize the lower mixture, at EVERY future prefix.
+ * Both endpoint growth factors exceed one, so their cap-time maxima bound earlier crossings.
+ * Bound repeated-addition rounding as well as the real-valued cap. Keep a small final
+ * log-space margin: a numerically borderline bound must continue, never prune.
+ */
+private fun boundariesUnreachable(
+    rule: PairedSequentialRule,
+    upper: DoubleArray,
+    lower: DoubleArray,
+    remainingPairs: Int,
+): Boolean {
+    val maximumUpper = DoubleArray(upper.size) { index ->
+        maximumFutureLogCapital(upper[index], remainingPairs,
+            ln1p(rule.betFractions[index] / rule.nullPointRate * (1 - rule.nullPointRate)))
+    }
+    val maximumLower = DoubleArray(lower.size) { index ->
+        maximumFutureLogCapital(lower[index], remainingPairs,
+            ln1p(rule.betFractions[index] / (1 - rule.targetPointRate) * rule.targetPointRate))
+    }
+    return logMeanExp(maximumUpper) < -ln(rule.falsePositiveRate) - 1e-10 &&
+        logMeanExp(maximumLower) < -ln(rule.falseNegativeRate) - 1e-10
+}
+
+/**
+ * The test updates capital by repeated +=, not one multiplication. Its forward error is
+ * bounded by gamma_n * (abs(capital) + n * abs(growth)), gamma_n = n*u / (1-n*u).
+ * u=2^-53; the Int pair cap keeps n*u below one. Round the bound outwards so cancellation
+ * in the linear estimate cannot suppress a boundary reachable by the actual update path.
+ */
+private fun maximumFutureLogCapital(capital: Double, remainingPairs: Int, growth: Double): Double {
+    val n = remainingPairs.toDouble()
+    val nu = Math.nextUp(n * (Math.ulp(1.0) / 2))
+    val gamma = Math.nextUp(nu / Math.nextDown(1 - nu))
+    val magnitude = Math.nextUp(abs(capital) + Math.nextUp(n * abs(growth)))
+    val linearUpper = Math.nextUp(capital + Math.nextUp(n * growth))
+    return Math.nextUp(linearUpper + Math.nextUp(gamma * magnitude))
 }
 
 private fun logMeanExp(values: DoubleArray): Double {

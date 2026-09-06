@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -45,7 +46,7 @@ class SearchTeacherCalibrationTest {
             example.calibration.candidates.single())
         assertEquals(PairedSequentialRule(nullPointRate = 0.5, targetPointRate = 0.5,
             falsePositiveRate = 0.025, falseNegativeRate = 0.025, maximumPairs = 24,
-            betFractions = listOf(0.2, 0.5, 0.8)), example.rule)
+            betFractions = listOf(0.2, 0.5, 0.8), stopForFutility = true), example.rule)
         for ((score, expected) in listOf(1.0 to PairedSequentialDisposition.ABOVE_NULL,
             0.0 to PairedSequentialDisposition.BELOW_TARGET)) {
             val result = pairedSequentialTest(example.rule,
@@ -218,6 +219,15 @@ class SearchTeacherCalibrationTest {
             falsePositiveRate = .05, falseNegativeRate = .05, maximumPairs = plan.pairCount)
         assertNotEquals(bindings.identity, searchTeacherCalibrationBindings(plan, source,
             mapOf("control" to "c"), "deck", "pool", 1, rule).identity)
+        val encodedRule = evidenceJson.encodeToString(rule)
+        assertFalse("stopForFutility" in encodedRule)
+        assertEquals(rule, evidenceJson.decodeFromString<PairedSequentialRule>(encodedRule))
+        val futileRule = rule.copy(stopForFutility = true)
+        assertEquals(futileRule, evidenceJson.decodeFromString<PairedSequentialRule>(evidenceJson.encodeToString(futileRule)))
+        assertNotEquals(searchTeacherCalibrationBindings(plan, source,
+            mapOf("control" to "c"), "deck", "pool", 1, rule).identity,
+            searchTeacherCalibrationBindings(plan, source,
+                mapOf("control" to "c"), "deck", "pool", 1, futileRule).identity)
         assertFails { SearchTeacherSequentialPlan(plan.copy(candidates = listOf(candidate, candidate.copy(id = "other"))), rule) }
         assertFails { SearchTeacherSequentialPlan(plan, rule.copy(maximumPairs = plan.pairCount + 1)) }
     }

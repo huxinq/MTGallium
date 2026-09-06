@@ -85,11 +85,22 @@ bet mixture prospectively; do not tune it after seeing losses or wins. Early
 stopping is possible, not promised. Two workers can leave one extra completed
 pair beyond the first stopping prefix.
 
+The example enables `stopForFutility`. After each complete valid pair, the rule
+checks whether even winning every remaining pair could cross the upper boundary,
+or losing every remaining pair could cross the lower boundary. If neither is
+reachable within the planned cap, it reports `FUTILITY`: an inconclusive result,
+not evidence of parity or equivalence. The scheduler finishes its already-running
+worker chunk, retains any pairs beyond that first stopping prefix as overshoot,
+and launches no further chunk. Borderline numerical bounds continue conservatively.
+The setting is prospectively bound into the run identity. Omitted or false keeps
+the historical behavior and serialized rule bytes; do not retrofit it onto a
+running or completed experiment's original report.
+
 After completion, verify the research-run manifest and checkpoints before using
 `report.json` or `report.md`. `sequentialResult` gives the stopping disposition;
 `sequentialPopulation` separates planned, executed, inspected, unexecuted and
 overshoot pairs. `comparisons[0].pairs` owns the inference prefix, while
-`sequentialOvershootPairs` retains extra work. `BUDGET_EXHAUSTED` is inconclusive;
+`sequentialOvershootPairs` retains extra work. `BUDGET_EXHAUSTED` and `FUTILITY` are inconclusive;
 `INVALID_PAIR` stops inference without turning a software failure into a loss.
 
 The [plan and schedule](../evaluation/search-teacher/src/main/kotlin/org/mtgallium/evaluation/searchteacher/SearchTeacherSequentialPlan.kt),
