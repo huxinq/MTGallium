@@ -12,6 +12,7 @@ import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.PolicyBehaviorBinding
 import org.mtgallium.research.run.ResearchRunBindings
 import org.mtgallium.agent.infoset.core.PLANNER_EVIDENCE_SCHEMA_CURRENT
+import org.mtgallium.agent.infoset.core.PlannerEvidenceSidecar
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.PolicyTrajectoryHeader
 import org.mtgallium.agent.infoset.core.PolicyTrajectoryRecord
@@ -89,6 +90,8 @@ internal data class CalibrationCloningLineage(
     /** Both legs from a source pair share this group; this corpus supplies only its p0 teacher leg. */
     val wholePairGroupByGame: Map<String, String>,
     val selection: String = "reference-p0-leg-from-every-reported-pair-no-outcome-based-filter-v1",
+    val generationLimitedGameExclusionsEnabled: Boolean = false,
+    val excludedGames: Map<String, String> = emptyMap(),
 )
 
 internal data class AdmittedCalibrationCloning(
@@ -108,6 +111,7 @@ internal fun admitCalibrationReferenceCloning(
     expectedParentIdentity: String,
     deck: DeckManifest,
     output: Path,
+    allowGenerationLimitedGameExclusions: Boolean = false,
 ): AdmittedCalibrationCloning {
     val provenance = ResearchRunProvenance.capture(repositoryRoot, "third_party/argentum-engine").also { it.requireReady() }
     require(!provenance.outerDirty && !provenance.engineDirty) { "Commit admission source before retaining a derived corpus" }
@@ -145,6 +149,9 @@ internal fun admitCalibrationReferenceCloning(
             val publicPath = input(publicRelative)
             val plannerRelative = "public/planner/$gameId.p0.planner.json.gz"
             val plannerPath = input(plannerRelative)
+            val planner = PlannerEvidenceSidecar.readCompressed(plannerPath)
+            require(planner.binding.researchRunIdentity == expectedParentIdentity)
+            require(planner.binding.gameId == gameId && planner.binding.safeTrajectorySha256 == registered.getValue(publicRelative).sha256)
             val header = GZIPInputStream(Files.newInputStream(publicPath)).bufferedReader().use { reader ->
                 PolicyJson.format.decodeFromString(PolicyTrajectoryRecord.serializer(), requireNotNull(reader.readLine()))
                     as? PolicyTrajectoryHeader ?: error("Public trajectory does not begin with a header")
@@ -158,7 +165,7 @@ internal fun admitCalibrationReferenceCloning(
                 policyEvidenceIdentity = teacher.binding.identity,
                 behaviorSpecificationSha256 = teacher.binding.behaviorSpecificationSha256,
                 plannerEvidence = PlannerEvidenceArtifact(plannerRelative,
-                    registered.getValue(plannerRelative).sha256, Files.size(plannerPath), PLANNER_EVIDENCE_SCHEMA_CURRENT),
+                    registered.getValue(plannerRelative).sha256, Files.size(plannerPath), PLANNER_EVIDENCE_SCHEMA_CURRENT, planner.binding.safeTrajectoryReference),
                 replayVerified = game.replayVerified, game = game.toCorpusGameSummary(), teacherSeat = "p0",
             )
         }
@@ -166,20 +173,38 @@ internal fun admitCalibrationReferenceCloning(
     require(entries.isNotEmpty())
     val identity = CorpusManifest.computeDatasetIdentity(scope.profileId, scope.profileHash,
         report.sourceProvenance, entries.size, entries.size, entries.size, entries, true)
-    val manifest = CorpusManifest(generatedAtUtc = Instant.now().toString(), profileId = scope.profileId,
+    var manifest = CorpusManifest(generatedAtUtc = Instant.now().toString(), profileId = scope.profileId,
         profileHash = scope.profileHash, outerCommit = scope.expectedOuterRevision,
         argentumCommit = scope.expectedArgentumRevision, sourceProvenance = report.sourceProvenance,
         requestedGames = entries.size, terminalGames = entries.size, replayVerifiedGames = entries.size,
         entries = entries, passed = true, datasetIdentity = identity)
-    val lineage = CalibrationCloningLineage(provenance, expectedParentIdentity,
-        researchSha256File(parent.resolve(ResearchRunArtifacts.MANIFEST_FILE)), identity,
-        teacher.descriptor.id, teacher.binding.identity, groups)
     Files.createDirectories(directory)
+    val populationPath = ResearchRunFiles.atomicWrite(directory.resolve("population-manifest.json"), evidenceJson.encodeToString(manifest))
+    var admission = BehavioralCloningAdmission(parent, scope).extract(populationPath)
+    ResearchRunFiles.atomicWrite(directory.resolve("population-validation.json"), evidenceJson.encodeToString(admission.validation))
+    val exclusions = if (!admission.passed && allowGenerationLimitedGameExclusions)
+        generationLimitedCloningExclusions(admission.validation) else emptyMap()
+    if (exclusions.isNotEmpty()) {
+        val retained = entries.filter { it.gameId !in exclusions }
+        require(retained.isNotEmpty()) { "No generation-complete teacher games remain" }
+        manifest = manifest.copy(requestedGames = retained.size, terminalGames = retained.size,
+            replayVerifiedGames = retained.size, entries = retained,
+            datasetIdentity = CorpusManifest.computeDatasetIdentity(scope.profileId, scope.profileHash,
+                report.sourceProvenance, retained.size, retained.size, retained.size, retained, true))
+    }
     val manifestPath = ResearchRunFiles.atomicWrite(directory.resolve("corpus-manifest.json"), evidenceJson.encodeToString(manifest))
-    ResearchRunFiles.atomicWrite(directory.resolve("lineage.json"), evidenceJson.encodeToString(lineage))
-    val admission = BehavioralCloningAdmission(parent, scope).extract(manifestPath)
+    // Re-run the unchanged extraction authority over the explicitly retained population.
+    if (exclusions.isNotEmpty()) admission = BehavioralCloningAdmission(parent, scope).extract(manifestPath)
     ResearchRunFiles.atomicWrite(directory.resolve("validation.json"), evidenceJson.encodeToString(admission.validation))
     require(admission.passed) { "Reference cloning admission failed: ${admission.failures.joinToString("; ")}" }
+    val lineage = CalibrationCloningLineage(provenance, expectedParentIdentity,
+        researchSha256File(parent.resolve(ResearchRunArtifacts.MANIFEST_FILE)), manifest.datasetIdentity,
+        teacher.descriptor.id, teacher.binding.identity, groups,
+        selection = if (allowGenerationLimitedGameExclusions)
+            "reference-p0-legs-with-explicit-whole-game-generation-limit-exclusions-v1"
+            else "reference-p0-leg-from-every-reported-pair-no-outcome-based-filter-v1",
+        generationLimitedGameExclusionsEnabled = allowGenerationLimitedGameExclusions, excludedGames = exclusions)
+    ResearchRunFiles.atomicWrite(directory.resolve("lineage.json"), evidenceJson.encodeToString(lineage))
     val exampleJson = Json(evidenceJson) { prettyPrint = false }
     GZIPOutputStream(Files.newOutputStream(directory.resolve("examples.jsonl.gz"))).bufferedWriter().use { writer ->
         admission.examples.forEach { writer.appendLine(exampleJson.encodeToString(it)) }
@@ -205,9 +230,21 @@ internal fun finalizeCalibrationCloningAdmission(
     ResearchRunFiles.atomicWrite(directory.resolve("retained-plan.json"), planJson)
     ResearchRunFiles.atomicWrite(directory.resolve("bindings.json"), evidenceJson.encodeToString(bindings))
     ResearchRunArtifacts(directory, bindings.identity).also { artifacts ->
-        listOf("corpus-manifest.json", "lineage.json", "validation.json", "retained-plan.json", "bindings.json", "examples.jsonl.gz")
+        listOf("corpus-manifest.json", "lineage.json", "validation.json", "retained-plan.json", "bindings.json", "examples.jsonl.gz", "population-manifest.json", "population-validation.json")
             .forEach { artifacts.register(it) }
         artifacts.finalize()
     }
     return bindings.identity
+}
+
+/** Fail closed for every other admission problem; an exclusion is never a strategic outcome. */
+internal fun generationLimitedCloningExclusions(validation: CorpusValidationReport): Map<String, String> {
+    val failed = validation.files.filterNot { it.passed }
+    require(failed.isNotEmpty())
+    val reason = "teacher expansion exhausted a response or generation limit"
+    require(failed.all { it.failures == listOf(reason) }) { "Only explicit generation-limit game exclusions are supported" }
+    require(validation.failures.sorted() == failed.map { "${it.gameId}: $reason" }.sorted()) {
+        "Population has admission failures outside the generation-limited games"
+    }
+    return failed.associate { it.gameId to reason }
 }

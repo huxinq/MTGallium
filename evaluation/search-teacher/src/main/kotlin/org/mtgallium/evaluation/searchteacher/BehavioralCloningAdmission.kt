@@ -26,6 +26,7 @@ internal class BehavioralCloningAdmissionScope private constructor(
     val simulations: Int,
     val invokedEvaluatorConfigurationId: String,
     private val frozenMainDeckEntries: List<Pair<String, Int>>,
+    private val authenticatedSharedTreeTeacherIdentity: String? = null,
 ) {
     init {
         require(expectedOuterRevision.isNotBlank())
@@ -50,6 +51,23 @@ internal class BehavioralCloningAdmissionScope private constructor(
         return mapOf("p0" to p0, "p1" to p1)
     }
 
+    /** A two-searcher game has no unique planner summary; its authenticated teacher supplies the authority. */
+    fun requireSharedTreeTeacher(entry: CorpusEntry): SearchPlannerKind {
+        if (authenticatedSharedTreeTeacherIdentity != null) {
+            require(entry.policyEvidenceIdentity == authenticatedSharedTreeTeacherIdentity)
+            require(entry.teacherSeat != null)
+            if (entry.game.searchSeat == null) {
+                require(entry.game.p0Policy == ArenaPolicyKind.SEARCH && entry.game.p1Policy == ArenaPolicyKind.SEARCH)
+                require(entry.game.searchPlanner == null)
+                return SearchPlannerKind.SHARED_TREE
+            }
+        }
+        require(entry.game.searchPlanner == SearchPlannerKind.SHARED_TREE) {
+            "entry did not use the admitted shared-tree Search Teacher"
+        }
+        return SearchPlannerKind.SHARED_TREE
+    }
+
     companion object {
         /** The caller must first authenticate this retained report through its research-run manifest. */
         fun retainedCalibrationReference(
@@ -58,6 +76,7 @@ internal class BehavioralCloningAdmissionScope private constructor(
         ): BehavioralCloningAdmissionScope {
             require(deck.deckHash() == report.deckHash && deck.cardPoolHash() == report.cardPoolHash)
             val control = report.teacher
+            require(control.policy.kind == ArenaPolicyKind.SEARCH && control.policy.searchPlanner == SearchPlannerKind.SHARED_TREE)
             require(control.descriptor.evaluator == null) { "This admission path supports the recorded default evaluator only" }
             require(control.search.simulations == control.descriptor.simulations)
             val leaf = control.search.leaf
@@ -66,6 +85,7 @@ internal class BehavioralCloningAdmissionScope private constructor(
                 expectedArgentumRevision = report.sourceProvenance.argentum.revision,
                 deckManifestHash = report.deckHash,
                 cardPoolHash = report.cardPoolHash,
+                authenticatedSharedTreeTeacherIdentity = control.binding.identity,
                 profileId = "retained-calibration-reference-v1",
                 profileHash = report.profileHash,
                 actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,

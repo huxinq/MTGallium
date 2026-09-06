@@ -55,6 +55,20 @@ class CalibrationBehavioralCloningTest {
         }
         val read = readRetainedCalibrationCloningSource(evidenceJson.encodeToString(rawReport),
             evidenceJson.encodeToString(rawPlan), identity)
+        val scope = BehavioralCloningAdmissionScope.retainedCalibrationReference(deck, read)
+        val game = CorpusGameSummary(gameId = "g", p0Policy = ArenaPolicyKind.SEARCH,
+            p1Policy = ArenaPolicyKind.SEARCH, winner = "p0", terminal = true, decisions = 1,
+            searchSeat = null, searchScore = null, illegalResponses = 0, fallbacks = 0, stepLimit = false)
+        val entry = CorpusEntry(gameId = "g", publicTrajectory = "g.gz", publicSha256 = "a".repeat(64),
+            publicSizeBytes = 1, policyEvidenceIdentity = read.teacher.binding.identity,
+            behaviorSpecificationSha256 = read.teacher.binding.behaviorSpecificationSha256,
+            replayVerified = true, game = game, teacherSeat = "p0")
+        scope.requireSharedTreeTeacher(entry)
+        assertFails { scope.requireSharedTreeTeacher(entry.copy(policyEvidenceIdentity = "wrong-teacher")) }
+        assertFails { scope.requireSharedTreeTeacher(entry.copy(teacherSeat = null)) }
+        assertFails { scope.requireSharedTreeTeacher(entry.copy(game = game.copy(searchPlanner = SearchPlannerKind.SHARED_TREE))) }
+        assertFails { BehavioralCloningAdmissionScope.retainedCalibrationReference(deck,
+            read.copy(teacher = read.teacher.copy(policy = read.teacher.policy.copy(searchPlanner = SearchPlannerKind.NO_SEARCH_HEURISTIC)))) }
         assertEquals(control, read.teacher.descriptor)
         assertEquals(rawPlan, read.plan)
         assertEquals(plan.pairSeed(0), read.pairSeed(0))
@@ -69,6 +83,19 @@ class CalibrationBehavioralCloningTest {
     }
 
     @Test
+    fun `generation limit exclusions reject every unrelated admission failure`() {
+        val reason = "teacher expansion exhausted a response or generation limit"
+        val file = CorpusValidationFile("g", "g.gz", 0, 0, 0, 1, false, listOf(reason))
+        val report = CorpusValidationReport(generatedAtUtc = "synthetic", outerCommit = "source", argentumCommit = "source",
+            sourceManifest = "population.json", sourceManifestHash = "a".repeat(64), profileHash = "b".repeat(64),
+            games = 1, terminalGames = 0, searchDecisions = 0, events = 0,
+            files = listOf(file), passed = false, failures = listOf("g: $reason"))
+        assertEquals(mapOf("g" to reason), generationLimitedCloningExclusions(report))
+        assertFails { generationLimitedCloningExclusions(report.copy(failures = report.failures + "wrong source")) }
+        assertFails { generationLimitedCloningExclusions(report.copy(files = listOf(file.copy(failures = listOf("invalid action"))))) }
+    }
+
+    @Test
     fun `derived corpus authenticates lineage and retained plan`() {
         val output = Files.createTempDirectory("cloning-lineage-")
         val provenance = ResearchRunProvenance("source", "source", "source", false, false, source)
@@ -78,8 +105,10 @@ class CalibrationBehavioralCloningTest {
         Files.writeString(output.resolve("validation.json"), "synthetic validation")
         Files.writeString(output.resolve("lineage.json"), evidenceJson.encodeToString(lineage))
         Files.writeString(output.resolve("examples.jsonl.gz"), "synthetic extracted examples")
+        Files.writeString(output.resolve("population-manifest.json"), "synthetic population")
+        Files.writeString(output.resolve("population-validation.json"), "synthetic population validation")
         val identity = finalizeCalibrationCloningAdmission(output, lineage, evidenceJson.encodeToString(plan))
-        assertEquals(6, ResearchRunArtifacts.loadAndVerify(output, identity).artifacts.size)
+        assertEquals(8, ResearchRunArtifacts.loadAndVerify(output, identity).artifacts.size)
         Files.writeString(output.resolve("lineage.json"), evidenceJson.encodeToString(lineage.copy(
             wholePairGroupByGame = mapOf("game" to "another-pair"))))
         assertFails { ResearchRunArtifacts.loadAndVerify(output, identity) }

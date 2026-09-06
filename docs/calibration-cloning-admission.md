@@ -10,7 +10,12 @@ The adapter authenticates the parent artifact manifest, every consumed file,
 the plan and report's research-run binding, and each selected game checkpoint.
 It selects the reference player's p0 leg from every reported pair, without
 filtering by wins, losses, or action quality. An invalid selected game rejects
-admission. A recorded successful canonical replay verification must remain
+admission by default. An explicit generation-limit exclusion mode can remove
+whole games whose first admission failure is action-generation exhaustion.
+It retains the complete attempted population, validation, and named exclusions;
+every other failure still rejects the run. No partial game or truncated candidate
+family is admitted, and this selected population is not claimed to represent all
+teacher positions. A recorded successful canonical replay verification must remain
 attached to that replay's exact hash. Hash verification alone does not set the
 replay-verified flag.
 
@@ -19,7 +24,9 @@ therefore explicitly names the perspective supplying the labels. The original
 game summary still records both SEARCH players and no unique search seat.
 The public corpus validator requires the declared teacher to be an actual
 SEARCH player and checks the trajectory perspective and every decision actor
-against that seat. Omitting the new field preserves the historical serialized
+against that seat. For dual-Search games, the authenticated teacher policy
+supplies the shared-tree planner in example provenance; the game-wide planner
+summary remains null. Omitting the new field preserves the historical serialized
 corpus bytes, dataset identity and unique-searcher requirement. When present,
 the field participates in the dataset identity.
 
@@ -44,7 +51,10 @@ together in subsequent training and validation, including across candidate
 comparisons that share a source pair. Game-wide cost metadata is not a
 measurement of the chosen teacher seat alone. A finalized derived research-run
 manifest binds the admission source, parent, dataset, lineage, full retained
-plan and validation; the original corpus identity remains unchanged.
+plan, attempted population, exclusions and validation; the original corpus
+identity remains unchanged. Relocated sidecars preserve their original safe
+trajectory locator as bound metadata without dereferencing it; the actual
+trajectory remains checked by its registered local path, hash, game and policy.
 
 Corpus admission establishes trustworthy imitation examples. It does not
 establish teacher optimality, learner quality, a match between root and rollout

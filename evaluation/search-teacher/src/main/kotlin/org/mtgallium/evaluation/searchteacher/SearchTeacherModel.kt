@@ -716,11 +716,14 @@ data class PopulationEvaluationReport(
 )
 
 @Serializable
-data class PlannerEvidenceArtifact(
+data class PlannerEvidenceArtifact @JvmOverloads constructor(
     val reference: String,
     val sha256: String,
     val sizeBytes: Long,
     val schemaVersion: Int,
+    /** Retained locator before relocation; it is compared as metadata, never dereferenced. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val originalSafeTrajectoryReference: String? = null,
 ) {
     init {
         require(reference.isNotBlank() && !reference.startsWith('/') && ':' !in reference)
@@ -984,6 +987,7 @@ data class CorpusValidationReport(
     val sourceManifestHash: String,
     val profileHash: String,
     val games: Int,
+    /** Terminal game summaries in the input population, independent of label-admission success. */
     val terminalGames: Int,
     val searchDecisions: Int,
     val events: Int,

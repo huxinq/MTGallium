@@ -47,7 +47,48 @@ import org.mtgallium.agent.searchteacher.SearchTeacherBehaviorSpecification
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicySession
 import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
 
+@org.junit.jupiter.api.Tag("public-source")
 class BehavioralCloningAdmissionTest {
+    @Test
+    fun `generation-limited label admission does not erase a terminal game`() {
+        val limited = source.decision.copy(expansion = source.decision.expansion.copy(
+            isExhaustive = false, isProfileExhaustive = false,
+            omissionReasons = setOf(PolicyExpansionOmissionReason.RESPONSE_LIMIT)))
+        val fixture = fixture(decision = limited)
+        val result = admission(fixture).extract(fixture.manifest)
+        assertFalse(result.passed)
+        assertTrue(result.examples.isEmpty())
+        assertEquals(1, result.validation.terminalGames)
+        assertTrue(result.failures.single().contains("teacher expansion exhausted a response or generation limit"))
+    }
+
+    @Test
+    fun `dual Search Teacher extraction preserves null game planner and resolves teacher evidence`() {
+        val deck = org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest(
+            "synthetic-bc", "Synthetic", "synthetic", "2026-09-06", "public synthetic fixture",
+            source.knownDecks.getValue("p0"), emptyMap())
+        val descriptor = SearchTeacherCalibrationPolicy("control", source.profile.particles,
+            source.profile.simulations, source.profile.maxPolicyDecisions, source.profile.explorationConstant, false, 1.0)
+        val policy = descriptor.policy(99L)
+        val plan = SearchTeacherCalibrationPlan(phase = SearchTeacherCalibrationPhase.DEVELOPMENT,
+            baseSeed = 99L, pairOffset = 0, pairCount = 1, control = descriptor,
+            candidates = listOf(descriptor.copy(id = "candidate")))
+        val teacher = SearchTeacherCalibrationPolicyReport(descriptor, describeTournamentPolicy(policy),
+            descriptor.parameters(99L).searchConfig(), source.binding,
+            policy.effectiveRootRolloutPolicy().behaviorSpecification,
+            policy.effectiveOpponentRolloutPolicy().behaviorSpecification)
+        val retained = RetainedCalibrationCloningSource("synthetic", evidenceJson.encodeToJsonElement(plan).jsonObject,
+            source.provenance, deck.deckHash(), deck.cardPoolHash(), teacher, emptyList())
+        val scope = BehavioralCloningAdmissionScope.retainedCalibrationReference(deck, retained)
+        val fixture = fixture(header = source.header.copy(profileManifestHash = scope.profileHash),
+            game = { it.copy(p1Policy = ArenaPolicyKind.SEARCH, searchSeat = null, searchPlanner = null) },
+            scope = scope, teacherSeat = "p0")
+        val result = BehavioralCloningAdmission(fixture.root, scope).extract(fixture.manifest)
+        assertTrue(result.passed, result.failures.toString())
+        assertEquals(SearchPlannerKind.SHARED_TREE, result.examples.single().evidence.searchPlanner)
+        assertEquals(null, evidenceJson.decodeFromString<CorpusManifest>(Files.readString(fixture.manifest)).entries.single().game.searchPlanner)
+    }
+
     @Test
     fun `compact oracle with production projection session accepted step and writer yields one tuple`() {
         val fixture = fixture()
@@ -219,7 +260,7 @@ class BehavioralCloningAdmissionTest {
                 manifestPassed = false,
             ),
             RejectionCase(
-                "does not bind exactly one actual Search Teacher seat",
+                "entry game summary has an inconsistent unique Search Teacher seat",
                 game = { it.copy(searchSeat = "p1") },
             ),
             RejectionCase(
@@ -365,6 +406,8 @@ class BehavioralCloningAdmissionTest {
         game: (CorpusGameSummary) -> CorpusGameSummary = { it },
         replayVerified: Boolean = true,
         manifestPassed: Boolean = true,
+        scope: BehavioralCloningAdmissionScope = source.scope,
+        teacherSeat: String? = null,
     ): Fixture {
         val root = createTempDirectory("bc-admission")
         val relative = "corpus/v5/public/${source.gameId}.jsonl.gz"
@@ -404,13 +447,14 @@ class BehavioralCloningAdmissionTest {
             behaviorSpecificationSha256 = header.behaviorBinding.behaviorSpecificationSha256,
             replayVerified = replayVerified,
             game = summary,
+            teacherSeat = teacherSeat,
         )
         val entries = listOf(entry)
         val terminalGames = entries.count { it.game.terminal }
         val replayVerifiedGames = entries.count { it.replayVerified }
         val datasetIdentity = CorpusManifest.computeDatasetIdentity(
-            profileId = source.profile.id,
-            profileHash = source.scope.profileHash,
+            profileId = scope.profileId,
+            profileHash = scope.profileHash,
             sourceProvenance = source.provenance,
             requestedGames = 1,
             terminalGames = terminalGames,
@@ -420,8 +464,8 @@ class BehavioralCloningAdmissionTest {
         )
         val manifest = CorpusManifest(
             generatedAtUtc = "2026-08-31T00:00:00Z",
-            profileId = source.profile.id,
-            profileHash = source.scope.profileHash,
+            profileId = scope.profileId,
+            profileHash = scope.profileHash,
             outerCommit = source.provenance.outer.revision,
             argentumCommit = source.provenance.argentum.revision,
             sourceProvenance = source.provenance,
@@ -453,18 +497,14 @@ class BehavioralCloningAdmissionTest {
 
         private fun productionEvidence(): ProductionEvidence {
             val gameId = "bc-current-frozen-mono-red"
-            val deck = loadDeckManifest()
-            val profile = SearchTeacherArena.smokeProfile()
-            val scope = BehavioralCloningAdmissionScope.frozenMonoRed(
-                deck = deck,
-                profile = profile,
-            )
+            val deck = org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest(
+                "synthetic-bc", "Synthetic", "synthetic", "2026-09-06", "public synthetic fixture",
+                mapOf("Mountain" to 60), emptyMap())
             val emptyHash = PolicyJson.sha256("")
-            val provenance = PolicySourceProvenance(
-                expectedArgentumRevision = profile.argentumCommit,
-                outer = PolicySourceTreeState(profile.outerCommit, emptyHash, emptyHash, emptyHash),
-                argentum = PolicySourceTreeState(profile.argentumCommit, emptyHash, emptyHash, emptyHash),
-            )
+            val tree = PolicySourceTreeState("synthetic", emptyHash, emptyHash, emptyHash)
+            val provenance = PolicySourceProvenance(expectedArgentumRevision = "synthetic", outer = tree, argentum = tree)
+            val profile = calibrationPresentationProfile(provenance)
+            val scope = BehavioralCloningAdmissionScope.frozenMonoRed(deck, profile)
             val registry = buildRegistry()
             val environment = GameEnvironment.create(registry).also { env ->
                 env.reset(

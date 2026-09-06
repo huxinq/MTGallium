@@ -133,7 +133,7 @@ internal class PublicCorpusValidator(
             sourceManifestHash = sha256File(normalizedManifest),
             profileHash = manifest.profileHash,
             games = files.size,
-            terminalGames = files.count { it.passed },
+            terminalGames = manifest.entries.count { it.game.terminal },
             searchDecisions = files.sumOf { it.searchDecisions },
             events = files.sumOf { it.events },
             files = files,
@@ -197,11 +197,7 @@ internal class PublicCorpusValidator(
                 searchSeats.single()
             }
             check(teacherSeat in searchSeats) { "declared teacher seat is not an actual Search Teacher" }
-            admissionScope?.let {
-                check(entry.game.searchPlanner == SearchPlannerKind.SHARED_TREE) {
-                    "entry did not use the admitted shared-tree Search Teacher"
-                }
-            }
+            val teacherPlanner = admissionScope?.requireSharedTreeTeacher(entry)
 
             GZIPInputStream(Files.newInputStream(path)).bufferedReader().useLines { lines ->
                 lines.forEach { line ->
@@ -522,7 +518,7 @@ internal class PublicCorpusValidator(
                 }
                 val sidecar = PlannerEvidenceSidecar.readCompressed(plannerPath)
                 check(sidecar.binding.gameId == entry.gameId &&
-                    sidecar.binding.safeTrajectoryReference == entry.publicTrajectory &&
+                    sidecar.binding.safeTrajectoryReference == (artifact.originalSafeTrajectoryReference ?: entry.publicTrajectory) &&
                     sidecar.binding.safeTrajectorySha256 == entry.publicSha256 &&
                     sidecar.binding.trajectorySchemaVersion == trajectoryHeader.schemaVersion &&
                     sidecar.binding.candidateSchemaVersion == trajectoryHeader.candidateSchemaVersion &&
@@ -585,7 +581,7 @@ internal class PublicCorpusValidator(
                             candidateSchemaVersion = trajectoryHeader.candidateSchemaVersion,
                             historyCommitmentAlgorithm = trajectoryHeader.historyCommitmentAlgorithm,
                             actionSpaceProfile = trajectoryHeader.actionSpaceProfile,
-                            searchPlanner = requireNotNull(entry.game.searchPlanner),
+                            searchPlanner = requireNotNull(teacherPlanner),
                             policyEvidenceIdentity = trajectoryHeader.policyVersion,
                             behaviorIdentity = trajectoryHeader.behaviorBinding.behaviorIdentity,
                             behaviorSpecificationSha256 =

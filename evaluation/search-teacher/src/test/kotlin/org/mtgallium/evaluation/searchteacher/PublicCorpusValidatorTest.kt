@@ -36,6 +36,34 @@ import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 @Tag("public-source")
 class PublicCorpusValidatorTest {
     @Test
+    fun `relocated planner references remain explicit and hash bound without being dereferenced`() {
+        val fixture = fixture(listOf(header(), outcome()))
+        val original = evidenceJson.decodeFromString<CorpusManifest>(Files.readString(fixture.manifest))
+        val entry = original.entries.single()
+        val originalReference = "../../historical/public/trajectory.jsonl.gz"
+        val sidecar = org.mtgallium.agent.infoset.core.PlannerEvidenceSidecar(
+            binding = org.mtgallium.agent.infoset.core.PlannerEvidenceBinding(entry.gameId, originalReference,
+                requireNotNull(entry.publicSha256), header().schemaVersion, header().candidateSchemaVersion,
+                header().behaviorBinding, header().actionSpaceProfile), decisions = emptyList())
+        val path = fixture.root.resolve("planner/test.json.gz")
+        sidecar.writeCompressed(path)
+        val artifact = PlannerEvidenceArtifact("planner/test.json.gz", sha256File(path), Files.size(path), sidecar.schemaVersion)
+        assertFalse("originalSafeTrajectoryReference" in evidenceJson.encodeToString(artifact))
+        fun rewrite(next: PlannerEvidenceArtifact) {
+            val entries = listOf(entry.copy(plannerEvidence = next))
+            val identity = CorpusManifest.computeDatasetIdentity(original.profileId, original.profileHash,
+                original.sourceProvenance, 1, 1, 1, entries, true)
+            Files.writeString(fixture.manifest, evidenceJson.encodeToString(original.copy(entries = entries, datasetIdentity = identity)))
+        }
+        rewrite(artifact)
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        rewrite(artifact.copy(originalSafeTrajectoryReference = originalReference))
+        assertTrue(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        rewrite(artifact.copy(originalSafeTrajectoryReference = "wrong-reference"))
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+    }
+
+    @Test
     fun `two Search Teachers require an explicit matching perspective without relabeling the game`() {
         val fixture = fixture(listOf(header(), outcome()))
         val original = evidenceJson.decodeFromString<CorpusManifest>(Files.readString(fixture.manifest))
