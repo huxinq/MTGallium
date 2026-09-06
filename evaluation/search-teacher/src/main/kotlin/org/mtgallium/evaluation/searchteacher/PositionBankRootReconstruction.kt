@@ -5,7 +5,6 @@ import java.nio.file.Path
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.SemanticChoice
-import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicySession
 import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
 import org.mtgallium.research.run.ResearchRunFiles
@@ -26,7 +25,7 @@ internal fun reconstructPositionBankRoot(
     manifest: DeckManifest,
     policy: PositionBankScreenPolicy,
 ): ReconstructedPositionBankRoot {
-    val evaluator = ConfiguredMonoRedInformationEvaluator(policy.evaluator)
+    val evaluator = policy.informationEvaluator()
     val reconstructionStarted = System.nanoTime()
     val sourceEntry = bank.plan.sources.single { it.expectedRunIdentity == position.sourceRunIdentity }
     val sourceDirectory = Path.of(sourceEntry.runDirectory)

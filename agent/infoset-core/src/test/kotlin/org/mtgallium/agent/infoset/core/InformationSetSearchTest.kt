@@ -830,6 +830,36 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `explicit rollout horizon evaluation scores directly instead of neutral quiescence settlement`() {
+        val probe = QuiescenceProbe()
+        val search = coreSearch(
+            InformationSetSearchConfig(
+                simulations = 2,
+                maxPolicyDecisions = 1,
+                maxQuiescenceForcedPasses = 2,
+                leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT,
+                    LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                    RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+                ),
+            ),
+            opponentPolicy = UniformOpponentPolicy,
+            informationEvaluator = recordingEvaluator(probe, LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+        )
+
+        val result = search.search(
+            "p0",
+            batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.ENDLESS_PASS))),
+            105L,
+        )
+
+        assertEquals(0, result.diagnostics.quiescenceOverflows)
+        assertEquals(0, result.diagnostics.quiescenceUnresolvedBackups)
+        assertEquals(2, result.diagnostics.evaluatorCalls)
+        assertEquals(0.25, result.rootValue)
+    }
+
+    @Test
     fun `search fails closed when root particles disagree about visible information`() {
         val search = coreSearch(
             InformationSetSearchConfig(
@@ -1090,7 +1120,7 @@ class InformationSetSearchTest {
         opponentPolicy = opponentPolicy,
         rolloutPolicy = rolloutPolicy,
         rolloutOpponentPolicy = rolloutOpponentPolicy,
-        leafEvaluationStrategy = testLeafEvaluationStrategy(config.leaf.evaluator, informationEvaluator),
+        leafEvaluationStrategy = testLeafEvaluationStrategy(config.leaf, informationEvaluator),
         reuseConfig = reuseConfig,
     )
 
@@ -1106,7 +1136,7 @@ class InformationSetSearchTest {
         opponentPolicy = opponentPolicy,
         rolloutPolicy = rolloutPolicy,
         rolloutOpponentPolicy = rolloutOpponentPolicy,
-        leafEvaluationStrategy = testLeafEvaluationStrategy(config.leaf.evaluator, informationEvaluator),
+        leafEvaluationStrategy = testLeafEvaluationStrategy(config.leaf, informationEvaluator),
         reuseConfig = reuseConfig,
     )
 
@@ -1132,9 +1162,9 @@ private fun testEvaluator(evaluator: LeafEvaluator): InformationStateEvaluator =
     }
 
 private fun testLeafEvaluationStrategy(
-    evaluator: LeafEvaluator,
+    leaf: LeafEvaluationConfig,
     informationEvaluator: InformationStateEvaluator,
-): LeafEvaluationStrategy = when (evaluator) {
+): LeafEvaluationStrategy = when (val evaluator = leaf.evaluator) {
     LeafEvaluator.MTGALLIUM_VISIBLE_V2 -> LeafEvaluationStrategy(
         evaluator.evaluatorId,
         LeafValueSource.Information(informationEvaluator),
@@ -1143,8 +1173,12 @@ private fun testLeafEvaluationStrategy(
         configuredEvaluatorId = evaluator.evaluatorId,
         source = LeafValueSource.Information(informationEvaluator),
         supportsTraceReuse = false,
-        settleAtRolloutHorizon = true,
-        unresolvedLeafHandling = UnresolvedLeafHandling.BACK_UP_NEUTRAL,
+        settleAtRolloutHorizon = leaf.rolloutHorizonSettlementOverride == null,
+        unresolvedLeafHandling = if (leaf.rolloutHorizonSettlementOverride == null) {
+            UnresolvedLeafHandling.BACK_UP_NEUTRAL
+        } else {
+            UnresolvedLeafHandling.EVALUATE
+        },
     )
     LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 ->
         error("Core search fixtures do not construct Search Teacher checkpoint evaluators")
@@ -1160,8 +1194,11 @@ private class QuiescenceProbe {
     val evaluatedStages = mutableListOf<Int>()
 }
 
-private fun recordingEvaluator(probe: QuiescenceProbe) = object : InformationStateEvaluator {
-    override val id: String = LeafEvaluator.MTGALLIUM_VISIBLE_V2.evaluatorId
+private fun recordingEvaluator(
+    probe: QuiescenceProbe,
+    evaluator: LeafEvaluator = LeafEvaluator.MTGALLIUM_VISIBLE_V2,
+) = object : InformationStateEvaluator {
+    override val id: String = evaluator.evaluatorId
 
     override fun evaluate(information: PolicyInformationState, rootPlayer: String): Double {
         probe.evaluatedStages += information.observation.turnNumber

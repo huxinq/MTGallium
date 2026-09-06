@@ -14,6 +14,7 @@ import org.mtgallium.agent.infoset.core.SearchCandidateStatistics
 import org.mtgallium.agent.infoset.core.SearchSettlementCounts
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.MonoRedVisibleFeatures
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
@@ -30,13 +31,24 @@ internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
 @Serializable
 internal data class PositionBankScreenPolicy(
     val search: SearchTeacherCalibrationPolicy,
-    val evaluator: MonoRedVisibleEvaluatorConfig,
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val evaluator: MonoRedVisibleEvaluatorConfig? = null,
 ) {
     init {
+        require(search.tacticalEvaluator == null || evaluator == null) {
+            "Tactical screen policies cannot claim a cached visible-v2 evaluator"
+        }
+        require(search.tacticalEvaluator != null || evaluator != null) {
+            "Visible-v2 screen policies require an explicit cached evaluator"
+        }
         require(search.evaluator == null || search.evaluator == evaluator) {
             "Search and screen evaluator configurations must agree"
         }
     }
+
+    fun informationEvaluator() = search.informationEvaluator()
+        ?: ConfiguredMonoRedInformationEvaluator(requireNotNull(evaluator))
 }
 
 @Serializable
@@ -56,6 +68,9 @@ internal data class PositionBankScreenPlan(
         require(policies.map { it.search.id }.distinct().size == policies.size)
         require(mode != PositionBankScreenMode.FEATURES || repetitions == 1) {
             "Deterministic feature rescoring has no stochastic repetitions"
+        }
+        require(mode != PositionBankScreenMode.FEATURES || policies.all { it.search.tacticalEvaluator == null }) {
+            "Feature mode only rescales cached visible-v2 features"
         }
     }
 }
@@ -155,11 +170,17 @@ internal class PositionBankScreenRunner(
             }
             val reconstruction by lazy { runCatching { reconstructPositionBankRoot(position, bank, registry, manifest, policy) } }
             (0 until plan.repetitions).map { repetition ->
-                val evaluator = ConfiguredMonoRedInformationEvaluator(policy.evaluator)
-                // The cache is a derived view, not a replacement authority for the represented state.
-                require(MonoRedVisibleFeatures.extract(position.information, position.actor) == position.visibleFeatures)
-                val raw = position.visibleFeatures.rawScore(evaluator.config)
-                val bounded = position.visibleFeatures.evaluate(evaluator.config)
+                val evaluator = policy.informationEvaluator()
+                val (raw, bounded) = when (evaluator) {
+                    is ConfiguredMonoRedInformationEvaluator -> {
+                        // The cache is a derived view, not a replacement authority for the represented state.
+                        require(MonoRedVisibleFeatures.extract(position.information, position.actor) == position.visibleFeatures)
+                        position.visibleFeatures.rawScore(evaluator.config) to position.visibleFeatures.evaluate(evaluator.config)
+                    }
+                    is MonoRedTacticalEvaluator -> evaluator.evaluateDetailed(position.information, position.actor)
+                        .let { it.rawScore to it.value }
+                    else -> error("Unsupported screen evaluator ${evaluator.id}")
+                }
                 val scored = PositionBankScreenRow(position.rootId, policy.search.id, evaluator.configurationId,
                     repetition, PositionBankScreenDisposition.SCORED, raw, bounded)
                 var reconstructionCost: Double? = null
@@ -216,7 +237,7 @@ internal class PositionBankScreenRunner(
             plan.policies.forEach { policy ->
                 val group = rows.filter { it.policyId == policy.search.id }
                 appendLine("- ${policy.search.id}: ${group.groupingBy { it.disposition }.eachCount()}; " +
-                    "mean cached heuristic=${group.map { it.boundedRootHeuristic }.average()}; " +
+                    "mean root heuristic=${group.map { it.boundedRootHeuristic }.average()}; " +
                     "selection ms=${group.mapNotNull { it.selectionMillis }.takeIf { it.isNotEmpty() }?.average()}.")
             }
             report.limitations.forEach { appendLine("- $it") }

@@ -9,6 +9,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.MixtureOpponentPolicy
@@ -18,6 +19,11 @@ import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 import org.mtgallium.agent.searchteacher.SearchTeacherSearchFactory
 import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
+import org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride
+import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
+import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.core.LeafEvaluator
+import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.PolicyBehaviorBinding
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.searchteacher.PolicySingletonSelectionConfig
@@ -38,6 +44,10 @@ private const val CALIBRATION_SCHEDULE = "search-teacher-calibration-library-ord
 @Serializable
 internal enum class SearchTeacherCalibrationPhase { PREFLIGHT, DEVELOPMENT, CONFIRMATION }
 
+/** The fixed historical tactical form is an opt-in evaluation treatment. */
+@Serializable
+internal enum class SearchTeacherCalibrationTacticalEvaluator { V3_DEFAULT }
+
 /** Budget/rollout interventions are explicit; absent evaluator configuration preserves the historical production evaluator. */
 @Serializable
 internal data class SearchTeacherCalibrationPolicy(
@@ -51,24 +61,45 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val evaluator: MonoRedVisibleEvaluatorConfig? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val tacticalEvaluator: SearchTeacherCalibrationTacticalEvaluator? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutHorizonSettlementOverride: RolloutHorizonSettlementOverride? = null,
 ) {
     init {
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
         require(particles > 0 && simulations > 0 && maxPolicyDecisions > 0)
         require(explorationConstant.isFinite() && explorationConstant >= 0)
         require(rolloutHeuristicProbability.isFinite() && rolloutHeuristicProbability > 0 && rolloutHeuristicProbability <= 1)
+        require(evaluator == null || tacticalEvaluator == null) {
+            "Visible-v2 configuration and tactical evaluator selection are mutually exclusive"
+        }
+        require(rolloutHorizonSettlementOverride == null || tacticalEvaluator == SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT) {
+            "A rollout-horizon settlement override requires tactical-v3"
+        }
     }
 
     fun parameters(baseSeed: Long): SearchTeacherPolicyParameters = SearchTeacherRuntimeConfig().policyParameters().copy(
         baseSeed = baseSeed, particles = particles, simulations = simulations,
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
+        leaf = tacticalEvaluator?.let {
+            LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                rolloutHorizonSettlementOverride)
+        } ?: SearchTeacherRuntimeConfig().policyParameters().leaf,
     )
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
-        informationEvaluator = evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
+        informationEvaluator = informationEvaluator(),
         rootRolloutPolicy = mixture("root", SearchTeacherSearchFactory.rootRolloutPolicy()),
         opponentRolloutPolicy = mixture("opponent", SearchTeacherSearchFactory.opponentRolloutPolicy()))
+
+    fun informationEvaluator(): ConfiguredInformationStateEvaluator? = when (tacticalEvaluator) {
+        SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT -> MonoRedTacticalEvaluator()
+        null -> evaluator?.let(::ConfiguredMonoRedInformationEvaluator)
+    }
 
     private fun mixture(role: String, heuristic: OpponentPolicy): OpponentPolicy? =
         if (rolloutHeuristicProbability == 1.0) null else MixtureOpponentPolicy(

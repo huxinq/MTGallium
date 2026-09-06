@@ -313,7 +313,7 @@ internal class PositionBankTerminalContinuationRunner(
             val coordinates = positionBankTerminalCoordinates(plan.baseSeed, position.rootId, row.particleWeights, plan.samplesPerRoot)
             val search = SearchTeacherSearchFactory.create(plan.policy.search.parameters(position.baseSeed).searchConfig(),
                 rolloutPolicy = rootPolicy, rolloutOpponentPolicy = opponentPolicy,
-                informationEvaluator = ConfiguredMonoRedInformationEvaluator(plan.policy.evaluator))
+                informationEvaluator = plan.policy.informationEvaluator())
             val samples = coordinates.flatMap { coordinate -> candidates.map { candidate ->
                 sampleCandidate(worlds[coordinate.particleIndex], position.actor, candidate.signature, coordinate,
                     search, plan.maxContinuationDecisions)

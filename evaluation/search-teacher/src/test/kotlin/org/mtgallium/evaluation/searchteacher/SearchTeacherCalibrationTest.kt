@@ -9,6 +9,8 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
 import org.mtgallium.agent.infoset.core.LeafStateSource
+import org.mtgallium.agent.infoset.core.LeafEvaluator
+import org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
@@ -42,6 +44,28 @@ class SearchTeacherCalibrationTest {
         assertNotEquals(baseline, identity(policies = mapOf("control" to "c", "candidate" to "changed")))
         assertNotEquals(baseline, identity(deck = "other-deck"))
         assertNotEquals(baseline, identity(workers = 2))
+    }
+
+    @Test
+    fun `tactical settlement treatment selects v3 and binds its leaf configuration`() {
+        val tactical = control.copy(
+            tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+            rolloutHorizonSettlementOverride = RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+        )
+        val parameters = tactical.parameters(71)
+        val policy = tactical.policy(71)
+        assertEquals(LeafEvaluator.MTGALLIUM_TACTICAL_V3, parameters.leaf.evaluator)
+        assertEquals(RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+            parameters.leaf.rolloutHorizonSettlementOverride)
+        assertEquals("mono-red-tactical-value-v3", policy.informationEvaluator?.id)
+        assertEquals(parameters, policy.effectiveParameters(71))
+        assertFails { control.copy(
+            evaluator = MonoRedVisibleEvaluatorConfig(),
+            tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+        ) }
+        assertFails { control.copy(
+            rolloutHorizonSettlementOverride = RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+        ) }
     }
 
     @Test

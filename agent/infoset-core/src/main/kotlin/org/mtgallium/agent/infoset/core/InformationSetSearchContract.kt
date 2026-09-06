@@ -1,5 +1,7 @@
 package org.mtgallium.agent.infoset.core
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -14,11 +16,24 @@ enum class LeafEvaluator(val evaluatorId: String) {
     ;
 }
 
+/** Explicit experiment-controlled settlement change for a bounded-rollout leaf. */
+@Serializable
+enum class RolloutHorizonSettlementOverride { DIRECT_EVALUATION }
+
 @Serializable
 data class LeafEvaluationConfig(
     val stateSource: LeafStateSource,
     val evaluator: LeafEvaluator,
-)
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutHorizonSettlementOverride: RolloutHorizonSettlementOverride? = null,
+) {
+    init {
+        require(rolloutHorizonSettlementOverride == null || stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
+            "A rollout-horizon settlement override requires a bounded rollout"
+        }
+    }
+}
 
 @Serializable
 data class InformationSetSearchConfig(
