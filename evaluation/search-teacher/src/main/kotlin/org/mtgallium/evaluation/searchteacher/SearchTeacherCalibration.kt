@@ -47,7 +47,7 @@ internal enum class SearchTeacherCalibrationPhase { PREFLIGHT, DEVELOPMENT, CONF
 
 /** The fixed historical tactical form is an opt-in evaluation treatment. */
 @Serializable
-internal enum class SearchTeacherCalibrationTacticalEvaluator { V3_DEFAULT }
+internal enum class SearchTeacherCalibrationTacticalEvaluator { V3_DEFAULT, V3_WITHOUT_ATTACK_AND_INITIATIVE }
 
 /** Budget/rollout interventions are explicit; absent evaluator configuration preserves the historical production evaluator. */
 @Serializable
@@ -71,6 +71,9 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val searchHeuristicProfile: ArgentumHeuristicProfile? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutTurnHorizon: org.mtgallium.agent.infoset.core.RolloutTurnHorizon? = null,
 ) {
     init {
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
@@ -80,7 +83,7 @@ internal data class SearchTeacherCalibrationPolicy(
         require(evaluator == null || tacticalEvaluator == null) {
             "Visible-v2 configuration and tactical evaluator selection are mutually exclusive"
         }
-        require(rolloutHorizonSettlementOverride == null || tacticalEvaluator == SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT) {
+        require(rolloutHorizonSettlementOverride == null || tacticalEvaluator != null) {
             "A rollout-horizon settlement override requires tactical-v3"
         }
     }
@@ -90,6 +93,7 @@ internal data class SearchTeacherCalibrationPolicy(
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
         searchHeuristicProfile = searchHeuristicProfile ?: ArgentumHeuristicProfile.PRODUCTION,
+        rolloutTurnHorizon = rolloutTurnHorizon,
         leaf = tacticalEvaluator?.let {
             LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_TACTICAL_V3,
                 rolloutHorizonSettlementOverride)
@@ -103,6 +107,11 @@ internal data class SearchTeacherCalibrationPolicy(
 
     fun informationEvaluator(): ConfiguredInformationStateEvaluator? = when (tacticalEvaluator) {
         SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT -> MonoRedTacticalEvaluator()
+        SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE -> MonoRedTacticalEvaluator(
+            org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSettings(
+                weights = org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorWeights(attack = 0.0, initiative = 0.0),
+            ),
+        )
         null -> evaluator?.let(::ConfiguredMonoRedInformationEvaluator)
     }
 

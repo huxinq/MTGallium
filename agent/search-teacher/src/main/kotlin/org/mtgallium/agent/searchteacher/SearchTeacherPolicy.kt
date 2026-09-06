@@ -101,6 +101,7 @@ data class SearchTeacherPolicyParameters(
     val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
     /** Opt-in simulated-tree/root-and-opponent heuristic annotation only; belief updates are unchanged. */
     val searchHeuristicProfile: ArgentumHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION,
+    val rolloutTurnHorizon: org.mtgallium.agent.infoset.core.RolloutTurnHorizon? = null,
 ) {
     init {
         require(particles > 0)
@@ -127,6 +128,7 @@ data class SearchTeacherPolicyParameters(
         cacheSimulationTransitions = cacheSimulationTransitions,
         wallClockBudgetMillis = wallClockBudgetMillis,
         minimumSimulations = minimumSimulations,
+        rolloutTurnHorizon = rolloutTurnHorizon,
     )
 
     fun behaviorSpecification(

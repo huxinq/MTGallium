@@ -109,6 +109,34 @@ class ArgentumSearchWorldTest {
         assertEquals(original, world.determinizedHeuristicChoiceDiagnosis().choice)
         // The timing policy does not remove the pump from the legal/admitted action set.
         assertTrue(held.expandChoices().candidates.any { it.operationFamily == SemanticOperationFamily.ACTIVATE_ABILITY })
+
+        val pumped = world.fork() as ArgentumSearchWorld
+        assertTrue(pumped.step(requireNotNull(original)).accepted)
+        val evaluated = mutableListOf<org.mtgallium.agent.infoset.core.PolicyInformationState>()
+        val evaluator = object : org.mtgallium.agent.infoset.core.InformationStateEvaluator {
+            override val id = LeafEvaluator.MTGALLIUM_VISIBLE_V2.evaluatorId
+            override fun evaluate(information: org.mtgallium.agent.infoset.core.PolicyInformationState, rootPlayer: String): Double {
+                evaluated += information
+                return 0.0
+            }
+        }
+        val settlement = InformationSetSearch(
+            config = InformationSetSearchConfig(
+                simulations = 1, maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_VISIBLE_V2),
+                rolloutTurnHorizon = org.mtgallium.agent.infoset.core.RolloutTurnHorizon(1, 256),
+            ),
+            opponentPolicy = UniformOpponentPolicy, rolloutPolicy = UniformOpponentPolicy,
+            rolloutOpponentPolicy = UniformOpponentPolicy,
+            leafEvaluationStrategy = LeafEvaluationStrategy(evaluator.id, LeafValueSource.Information(evaluator)),
+        ).settleFirstUnvisitedEdge(pumped, "p0", 621L, 0, rootTurnNumber = 5)
+        assertEquals(org.mtgallium.agent.infoset.core.SearchSettlementOrigin.HEURISTIC_SETTLEMENT, settlement.origin)
+        val afterCleanup = evaluated.single().observation
+        assertEquals(6, afterCleanup.turnNumber)
+        assertEquals("UPKEEP", afterCleanup.step)
+        assertTrue(afterCleanup.zones.flatMap { it.cards }
+            .filter { it.zone == "BATTLEFIELD" && it.name == "Burnout Bashtronaut" }
+            .all { it.power == 1 })
     }
 
     private fun sampledWorldLeafStrategy() = LeafEvaluationStrategy(

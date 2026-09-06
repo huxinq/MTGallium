@@ -11,6 +11,9 @@ import org.junit.jupiter.api.Tag
 import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride
+import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorWeights
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
@@ -38,12 +41,34 @@ class SearchTeacherCalibrationTest {
             plan.copy(control = control.copy(particles = 4))) + listOf(
             candidate.copy(particles = 4), candidate.copy(simulations = 16), candidate.copy(maxPolicyDecisions = 16),
             candidate.copy(explorationConstant = 0.7), candidate.copy(singletonSelection = true),
-            candidate.copy(rolloutHeuristicProbability = 0.9)).map { plan.copy(candidates = listOf(it)) }
+            candidate.copy(rolloutHeuristicProbability = 0.9),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(1)),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(2)),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(1, 513)),
+            candidate.copy(tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE),
+        ).map { plan.copy(candidates = listOf(it)) }
         variations.forEach { assertNotEquals(baseline, identity(it)) }
         assertNotEquals(baseline, identity(s = source.copy(outer = tree.copy(revision = "later"))))
         assertNotEquals(baseline, identity(policies = mapOf("control" to "c", "candidate" to "changed")))
         assertNotEquals(baseline, identity(deck = "other-deck"))
         assertNotEquals(baseline, identity(workers = 2))
+    }
+
+    @Test
+    fun `completed turn horizons support v2 and both independently identified v3 forms`() {
+        val forms = listOf(null, SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+            SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE)
+        for (form in forms) {
+            val policy = control.copy(tacticalEvaluator = form, rolloutTurnHorizon = RolloutTurnHorizon(3))
+            assertEquals(RolloutTurnHorizon(3), policy.parameters(71).searchConfig().rolloutTurnHorizon)
+        }
+        val default = control.copy(tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT)
+            .informationEvaluator() as MonoRedTacticalEvaluator
+        val reduced = control.copy(tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE)
+            .informationEvaluator() as MonoRedTacticalEvaluator
+        assertEquals(MonoRedTacticalEvaluatorWeights(), default.settings.weights)
+        assertEquals(default.settings.weights.copy(attack = 0.0, initiative = 0.0), reduced.settings.weights)
+        assertNotEquals(default.configurationId, reduced.configurationId)
     }
 
     @Test

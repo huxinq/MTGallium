@@ -32,6 +32,9 @@ class InformationSetSearch(
         require(config.wallClockBudgetMillis == null || !reuseConfig.enabled) {
             "Wall-clock experiments must disable trace reuse so the measured budget is identifiable"
         }
+        require(config.rolloutTurnHorizon == null || !reuseConfig.enabled) {
+            "Completed-turn horizons do not support retained trace reuse"
+        }
         require(leafEvaluationStrategy.supportsTraceReuse || !reuseConfig.enabled) {
             "The configured leaf evaluator has not passed reuse-specific validation"
         }
@@ -50,12 +53,14 @@ class InformationSetSearch(
      * rollout seed derivation that [search] uses at `edge.visits == 0`. It does not create a tree,
      * allocate visits, or expose a complete world outside its caller's existing trusted boundary.
      */
+    @JvmOverloads
     fun settleFirstUnvisitedEdge(
         childWorld: SearchWorld,
         rootPlayer: String,
         searchSeed: Long,
         simulationIndex: Int,
         childDepth: Int = 1,
+        rootTurnNumber: Int? = null,
     ): SearchSettlement {
         require(childDepth > 0)
         return leafValue(
@@ -70,6 +75,7 @@ class InformationSetSearch(
             rolloutAudit = RolloutPolicyAudit(),
             quiescenceAudit = QuiescenceAudit(),
             workAudit = SearchWorkAudit(),
+            rolloutTargetTurn = rolloutTargetTurn(rootTurnNumber),
         )
     }
 
@@ -178,6 +184,9 @@ class InformationSetSearch(
             "A fixed simulation-world schedule must contain exactly ${config.simulations} worlds"
         }
         requireConformantRoot(rootPlayer, belief)
+        val rolloutTargetTurn = rolloutTargetTurn(config.rolloutTurnHorizon?.let {
+            belief.particles.first().value.informationState(rootPlayer).observation.turnNumber
+        })
         simulationWorldSchedule?.let { requireConformantRoot(rootPlayer, it.worlds, "Scheduled root world") }
         val rootParticleIndices = productionRootParticleIndices(
             belief.particles.map { it.weight },
@@ -265,6 +274,7 @@ class InformationSetSearch(
                 ),
                 quiescenceMode = false,
                 quiescenceDepth = 0,
+                rolloutTargetTurn = rolloutTargetTurn,
             )
             require(outcome.backedValue.isFinite()) { "Search produced a non-finite value" }
             recorder?.build(outcome)?.let(nextTraces::add)
@@ -371,11 +381,18 @@ class InformationSetSearch(
         transitionNode: SimulationTransitionNode?,
         quiescenceMode: Boolean,
         quiescenceDepth: Int,
+        rolloutTargetTurn: Int?,
     ): SearchSettlement {
         onDepth(depth)
         world.terminalPayoff(rootPlayer)?.let {
             recorder?.finish(TraceCutoff.TERMINAL, world, depth, transitionNode?.snapshot)
             return SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF)
+        }
+        if (rolloutTargetTurn != null &&
+            world.informationState(rootPlayer).observation.turnNumber >= rolloutTargetTurn
+        ) {
+            recorder?.finish(TraceCutoff.HORIZON, world, depth, transitionNode?.snapshot)
+            return staticLeafValue(world, rootPlayer, workAudit)
         }
         if (quiescenceMode) {
             when (val settled = settleStaticLeaf(world, rootPlayer, quiescenceAudit, workAudit)) {
@@ -399,6 +416,7 @@ class InformationSetSearch(
                 rolloutAudit,
                 quiescenceAudit,
                 workAudit,
+                rolloutTargetTurn,
             )
             recorder?.finish(TraceCutoff.HORIZON, world, depth, transitionNode?.snapshot)
             return value
@@ -414,7 +432,7 @@ class InformationSetSearch(
             } else {
                 leafValue(
                     world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
-                    rolloutAudit, quiescenceAudit, workAudit,
+                    rolloutAudit, quiescenceAudit, workAudit, rolloutTargetTurn,
                 )
             }
         }
@@ -427,7 +445,7 @@ class InformationSetSearch(
                 } else {
                     leafValue(
                         world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
-                        rolloutAudit, quiescenceAudit, workAudit,
+                        rolloutAudit, quiescenceAudit, workAudit, rolloutTargetTurn,
                     )
                 }
             }
@@ -443,7 +461,7 @@ class InformationSetSearch(
                 return simulate(
                     advanced.world, rootPlayer, tree, searchSeed, simulationIndex, depth + 1,
                     onDepth, onWiden, rolloutAudit, quiescenceAudit, recorder, workAudit,
-                    transitionCache, advanced.node, quiescenceMode, quiescenceDepth,
+                    transitionCache, advanced.node, quiescenceMode, quiescenceDepth, rolloutTargetTurn,
                 )
             }
         }
@@ -514,6 +532,7 @@ class InformationSetSearch(
                 advanced.node,
                 quiescenceMode,
                 if (quiescenceMode) quiescenceDepth + 1 else quiescenceDepth,
+                rolloutTargetTurn,
             )
         }
 
@@ -576,6 +595,7 @@ class InformationSetSearch(
                 transitionNode = null,
                 quiescenceMode = true,
                 quiescenceDepth = quiescenceDepth + 1,
+                rolloutTargetTurn = rolloutTargetTurn,
             )
         } else if (edge.visits == 0) {
             leafValue(
@@ -590,6 +610,7 @@ class InformationSetSearch(
                 rolloutAudit,
                 quiescenceAudit,
                 workAudit,
+                rolloutTargetTurn,
             )
         } else {
             simulate(
@@ -609,6 +630,7 @@ class InformationSetSearch(
                 advanced.node,
                 quiescenceMode = false,
                 quiescenceDepth = 0,
+                rolloutTargetTurn = rolloutTargetTurn,
             )
         }
         if (edge.visits == 0) {
@@ -637,6 +659,7 @@ class InformationSetSearch(
         rolloutAudit: RolloutPolicyAudit,
         quiescenceAudit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
+        rolloutTargetTurn: Int?,
     ): SearchSettlement = when (config.leaf.stateSource) {
         LeafStateSource.CURRENT_INFORMATION_STATE,
         LeafStateSource.CURRENT_SAMPLED_WORLD -> simulate(
@@ -656,6 +679,7 @@ class InformationSetSearch(
             transitionNode = null,
             quiescenceMode = true,
             quiescenceDepth = 0,
+            rolloutTargetTurn = rolloutTargetTurn,
         )
         LeafStateSource.BOUNDED_ROLLOUT -> rollout(
             world,
@@ -666,7 +690,14 @@ class InformationSetSearch(
             rolloutAudit,
             quiescenceAudit,
             workAudit,
+            rolloutTargetTurn,
         )
+    }
+
+    private fun rolloutTargetTurn(rootTurnNumber: Int?): Int? = config.rolloutTurnHorizon?.let { horizon ->
+        Math.addExact(requireNotNull(rootTurnNumber) {
+            "A completed-turn diagnostic requires the original root turn number"
+        }, horizon.completedTurns)
     }
 
     /**
@@ -778,13 +809,28 @@ class InformationSetSearch(
         audit: RolloutPolicyAudit,
         quiescenceAudit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
+        rolloutTargetTurn: Int? = null,
     ): SearchSettlement {
+        require((rolloutTargetTurn != null) == (config.rolloutTurnHorizon != null))
         workAudit.forks++
         val world = startingWorld.fork()
         var depth = startingDepth
-        while (depth < config.maxPolicyDecisions) {
+        var rolloutDecisions = 0
+        while (rolloutTargetTurn != null || depth < config.maxPolicyDecisions) {
             world.terminalPayoff(rootPlayer)?.let {
                 return SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF)
+            }
+            if (rolloutTargetTurn != null) {
+                if (world.informationState(rootPlayer).observation.turnNumber >= rolloutTargetTurn) {
+                    // The old turn's cleanup is complete. Leave the new turn's first genuine
+                    // choice untouched, including any upkeep trigger/response it presents.
+                    return staticLeafValue(world, rootPlayer, workAudit)
+                }
+                if (rolloutDecisions >= requireNotNull(config.rolloutTurnHorizon).maxPolicyDecisions) {
+                    throw RolloutTurnHorizonException(
+                        RolloutTurnHorizonFailure.DECISION_LIMIT, rolloutTargetTurn, rolloutDecisions,
+                    )
+                }
             }
             workAudit.expansions++
             val expansion = initialExpansion(world)
@@ -826,9 +872,15 @@ class InformationSetSearch(
             }
             if (singleton != null) workAudit.compressedPolicySingletonPasses++
             depth++
+            rolloutDecisions++
         }
         world.terminalPayoff(rootPlayer)?.let {
             return SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF)
+        }
+        if (rolloutTargetTurn != null) {
+            throw RolloutTurnHorizonException(
+                RolloutTurnHorizonFailure.MISSING_DECISION, rolloutTargetTurn, rolloutDecisions,
+            )
         }
         if (!leafEvaluationStrategy.settleAtRolloutHorizon) {
             return staticLeafValue(world, rootPlayer, workAudit)

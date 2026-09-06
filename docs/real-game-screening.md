@@ -161,3 +161,28 @@ The existing `QUIESCENCE_WITH_EVALUATION_FALLBACK` remains pass-only. Neither
 option changes the default policy or justifies promoting a treatment based on
 selected decision probes. Record the exact source, configuration and heuristic
 versus terminal settlement populations when comparing these treatments.
+
+### Completed-turn endpoints
+
+`rolloutTurnHorizon: {"completedTurns": 3, "maxPolicyDecisions": 512}` replaces
+rollout's fixed decision endpoint with the first genuine player decision after
+three player turns finish. Count every player's turn, beginning with the current
+root turn; the absolute endpoint is fixed at the original search root and is
+shared across its siblings and tree depths. Turn completion includes cleanup and
+expiration of until-end-of-turn effects. The engine may already have untapped
+permanents or put new-turn triggers on the stack when it exposes that next
+choice; the option does not claim all such states are tactically quiet.
+
+The endpoint is evaluated directly with V2 or V3. It cannot be combined with a
+quiescence override that moves beyond that boundary. `maxPolicyDecisions` inside
+the horizon object is a rollout safety cap: failing to reach the boundary stops
+search with a typed non-game failure, rather than scoring an earlier leaf.
+The ordinary top-level decision budget still bounds tree depth, and simulation
+counts remain independent of rollout length. Defaults and retained identities
+without the optional horizon field are unchanged.
+
+For a separate formula ablation, `tacticalEvaluator:
+"V3_WITHOUT_ATTACK_AND_INITIATIVE"` zeros only the attack-capacity and
+priority/attack-window initiative weights. All life, body, block, reach, hand and
+mana terms retain the default formula; the effective weights identify the
+ablation. It is not an automatically promoted successor to `V3_DEFAULT`.
