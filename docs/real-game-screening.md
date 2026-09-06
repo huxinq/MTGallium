@@ -43,6 +43,9 @@ configuration identity distinguishes overrides. Formula changes, learned labels,
 automated parameter optimization and tactical certification are separate work.
 Search disagreement can nominate positions for investigation but is not an
 accuracy score. Accessing validation roots must be disclosed in later claims.
+Repeated searches at one unchanged root/policy reconstruct the session once, with
+tree reuse and wall-clock budgets disabled. Later repetitions record zero added
+reconstruction time explicitly; they still run fresh search at their assigned seeds.
 
 ## Sequential gameplay
 
@@ -69,3 +72,37 @@ explicit allocation across tests.
 The original fixed-size calibration suite remains available. Existing source
 plans omit the new optional evaluator and stopping-rule fields, preserving
 their research identities.
+
+## Matched terminal-continuation diagnostics
+
+`--suite position-bank-terminal-continuations` accepts explicit development root
+IDs, a bank identity, one reconstruction/rollout policy composition, sample count,
+candidate cap, continuation decision cap and seed. The bank's authenticated replay
+and sequential-belief reconstruction are shared with search screening.
+
+Each replicate samples a belief particle by its weight, then applies every current
+profile candidate to a separate fork with matched future-chance and continuation
+seeds. The candidate cap refuses the entire root rather than dropping actions.
+The actual replayed hidden world is never used as a belief particle. Both sides
+then use the declared rollout policies through genuine player decisions until an
+actual terminal state. This continuation invokes no leaf evaluator and does not
+run the full Search Teacher at later decisions.
+
+The report retains particle weights, coordinates, policy identities, terminal
+payoffs and available policy-decision diagnostics. Reconstruction, candidate
+rebinding, rejection and continuation failures stay explicit. A decision cap
+supplies no payoff. Candidate means and paired gaps are emitted only for roots
+whose entire assigned candidate/sample population reached valid terminals.
+Root-player features immediately after the assigned first action are cached as
+hypothetical observations, with their information digest and immediate-terminal
+flag. They are action-specific inputs for later diagnostics, not authoritative
+facts at the bank root or samples of the production leaf-settlement distribution.
+
+These are descriptive finite-sample, rollout-policy-conditioned payoff gaps for
+hypothetical continuations. They are not observed game results, exact information-
+state values, correct-action labels, tactical proofs or evidence of stronger play.
+Source-position policies, belief construction and continuation policies have
+separate meanings. The descriptor retains its full composition, but fields used
+only by ordinary search or leaf evaluation do not control this terminal API.
+Adaptive tuning and any eventual strength claim still need an appropriate target,
+validation discipline and gameplay evidence.
