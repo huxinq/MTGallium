@@ -13,6 +13,7 @@ import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.PolicySourceTreeState
+import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.research.run.ResearchRunCheckpoints
@@ -72,7 +73,11 @@ class SearchTeacherCalibrationTest {
             plan.copy(control = control.copy(particles = 4))) + listOf(
             candidate.copy(particles = 4), candidate.copy(simulations = 16), candidate.copy(maxPolicyDecisions = 16),
             candidate.copy(explorationConstant = 0.7), candidate.copy(singletonSelection = true),
-            candidate.copy(rolloutHeuristicProbability = 0.9)).map { plan.copy(candidates = listOf(it)) }
+            candidate.copy(rolloutHeuristicProbability = 0.9),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(2, 96)),
+            candidate.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM),
+            candidate.copy(opponentRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.SEMANTIC_HEURISTIC),
+        ).map { plan.copy(candidates = listOf(it)) }
         variations.forEach { assertNotEquals(baseline, identity(it)) }
         assertNotEquals(baseline, identity(s = source.copy(outer = tree.copy(revision = "later"))))
         assertNotEquals(baseline, identity(policies = mapOf("control" to "c", "candidate" to "changed")))
@@ -99,6 +104,26 @@ class SearchTeacherCalibrationTest {
         val blend = candidate.copy(rolloutHeuristicProbability = 0.9).policy(71)
         assertEquals(candidate.parameters(71), blend.parameters)
         assertEquals(listOf(0.9, 1.0 - 0.9), blend.effectiveRootRolloutPolicy().behaviorSpecification.components.map { it.weight })
+    }
+
+    @Test
+    fun `root and opponent rollout policies are independently configurable without changing defaults`() {
+        val defaults = control.policy(71)
+        assertNull(defaults.rootRolloutPolicy)
+        assertNull(defaults.opponentRolloutPolicy)
+
+        val rootOnly = control.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM).policy(71)
+        assertEquals("uniform-v1", rootOnly.effectiveRootRolloutPolicy().id)
+        assertNull(rootOnly.opponentRolloutPolicy)
+        assertEquals(defaults.effectiveOpponentRolloutPolicy().id, rootOnly.effectiveOpponentRolloutPolicy().id)
+
+        val independent = control.copy(
+            rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM,
+            opponentRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.SEMANTIC_HEURISTIC,
+        ).policy(71)
+        assertEquals("uniform-v1", independent.effectiveRootRolloutPolicy().id)
+        assertEquals("semantic-argentum-heuristic-v2", independent.effectiveOpponentRolloutPolicy().id)
+        assertEquals(control.parameters(71), independent.parameters)
     }
 
     @Test

@@ -23,6 +23,7 @@ import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementEvidenceDisposi
 import org.mtgallium.agent.infoset.core.PolicyInformationState
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.ProbabilityDistribution
+import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
@@ -48,6 +49,7 @@ class SearchTeacherPolicyIdentityTest {
             "transition cache" to base.copy(cacheSimulationTransitions = false),
             "wall-clock budget" to base.copy(wallClockBudgetMillis = 250),
             "minimum simulations" to base.copy(minimumSimulations = 2),
+            "rollout turn horizon" to base.copy(rolloutTurnHorizon = RolloutTurnHorizon(2, 96)),
             "base seed" to base.copy(baseSeed = base.baseSeed + 1),
             "belief mode" to base.copy(beliefMode = BeliefMode.POLICY_CONDITIONED_V1),
             "belief architecture" to base.copy(beliefArchitecture = BeliefArchitecture.HYBRID_C_V1),
@@ -82,6 +84,7 @@ class SearchTeacherPolicyIdentityTest {
         )
         val encoded = PolicyJson.format.encodeToJsonElement(specification) as JsonObject
         assertFalse("singletonSelection" in encoded)
+        assertFalse("rolloutTurnHorizon" in (encoded.getValue("search") as JsonObject))
         val decoded = PolicyJson.format.decodeFromJsonElement<SearchTeacherBehaviorSpecification>(encoded)
         assertFalse(decoded.singletonSelection.enabled)
         assertEquals(encoded, PolicyJson.format.encodeToJsonElement(decoded))

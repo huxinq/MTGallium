@@ -1,5 +1,7 @@
 package org.mtgallium.agent.infoset.core
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -21,6 +23,29 @@ data class LeafEvaluationConfig(
 )
 
 @Serializable
+data class RolloutTurnHorizon(
+    val completedTurns: Int,
+    /** Safety limit, not a substitute evaluation horizon. Exhaustion stops the search. */
+    val maxPolicyDecisions: Int = 512,
+) {
+    init {
+        require(completedTurns > 0)
+        require(maxPolicyDecisions > 0)
+    }
+}
+
+enum class RolloutTurnHorizonFailure { DECISION_LIMIT, MISSING_DECISION }
+
+/** A requested turn boundary was not reached; no heuristic or terminal value is supplied. */
+class RolloutTurnHorizonException(
+    val failure: RolloutTurnHorizonFailure,
+    val targetTurnNumber: Int,
+    val policyDecisions: Int,
+) : IllegalStateException(
+    "Rollout turn horizon $targetTurnNumber not reached: $failure after $policyDecisions decisions"
+)
+
+@Serializable
 data class InformationSetSearchConfig(
     val simulations: Int,
     val explorationConstant: Double = 1.4,
@@ -37,6 +62,10 @@ data class InformationSetSearchConfig(
     /** Optional deployment-style budget. Null preserves exact fixed-simulation behavior. */
     val wallClockBudgetMillis: Long? = null,
     val minimumSimulations: Int = 1,
+    /** Evaluate at the first player decision after N complete turns, anchored to the search root. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutTurnHorizon: RolloutTurnHorizon? = null,
 ) {
     init {
         require(simulations > 0)
@@ -47,6 +76,9 @@ data class InformationSetSearchConfig(
         require(maxQuiescenceForcedPasses > 0)
         require(wallClockBudgetMillis == null || wallClockBudgetMillis > 0)
         require(minimumSimulations in 1..simulations)
+        require(rolloutTurnHorizon == null || leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
+            "Completed-turn horizons require bounded rollout"
+        }
         require(wideningThresholds.size == wideningLimits.size)
         require(wideningThresholds.zipWithNext().all { (a, b) -> a < b })
         require(wideningLimits.zipWithNext().all { (a, b) -> a < b })

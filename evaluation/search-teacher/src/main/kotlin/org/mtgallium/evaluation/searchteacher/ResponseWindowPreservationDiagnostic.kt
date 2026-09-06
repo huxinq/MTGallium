@@ -1104,6 +1104,14 @@ internal class M01DiagnosticNoResponseWorld(
     override fun expandChoices(limit: Int): PolicyExpansion =
         (delegate as? ProgressiveSearchWorld)?.expandChoices(limit) ?: delegate.expandChoices()
 
+    override fun expandChoicesForPolicyAdmission(): PolicyExpansion =
+        (delegate as? PolicyAnnotatedSearchWorld)?.expandChoicesForPolicyAdmission()
+            ?: delegate.expandChoices()
+
+    override fun expandChoicesForPolicyAdmission(limit: Int): PolicyExpansion =
+        (delegate as? PolicyAnnotatedSearchWorld)?.expandChoicesForPolicyAdmission(limit)
+            ?: expandChoices(limit)
+
     override fun expandChoicesWithPolicyAnnotations(): PolicyExpansion =
         (delegate as? PolicyAnnotatedSearchWorld)?.expandChoicesWithPolicyAnnotations()
             ?: delegate.expandChoices()

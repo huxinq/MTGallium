@@ -13,6 +13,9 @@ class MixtureOpponentPolicy(
     override val id: String,
     private val components: List<OpponentPolicyMixtureEntry>,
 ) : OpponentPolicy {
+    override val requiresPolicyAnnotations: Boolean = components.any {
+        it.weight > 0.0 && it.policy.requiresPolicyAnnotations
+    }
     override val distributionIsSeedInvariant: Boolean = components.all {
         it.policy.distributionIsSeedInvariant
     }

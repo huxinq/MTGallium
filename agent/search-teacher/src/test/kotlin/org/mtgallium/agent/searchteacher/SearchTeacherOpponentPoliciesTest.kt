@@ -2,12 +2,15 @@ package org.mtgallium.agent.searchteacher
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import org.mtgallium.agent.infoset.core.MixtureOpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionCounter
+import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementEvidenceDisposition
 import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
 import org.mtgallium.agent.infoset.core.PolicyInformationState
@@ -22,8 +25,25 @@ import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticChoiceDisplay
 import org.mtgallium.agent.infoset.core.SemanticChoiceKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
+import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 
 class SearchTeacherOpponentPoliciesTest {
+    @Test
+    fun `only policies that consume Argentum tags declare annotation requirements`() {
+        assertFalse(SemanticHeuristicOpponentPolicy().requiresPolicyAnnotations)
+        assertTrue(DeterminizedArgentumHeuristicOpponentPolicy().requiresPolicyAnnotations)
+        assertTrue(defaultMonoRedOpponentPolicy().requiresPolicyAnnotations)
+        assertFalse(FaceBurnOpponentPolicy().requiresPolicyAnnotations)
+        assertFalse(HoldBurnOpponentPolicy().requiresPolicyAnnotations)
+        assertFalse(MixtureOpponentPolicy(
+            "zero-weight-annotation-component",
+            listOf(
+                OpponentPolicyMixtureEntry(DeterminizedArgentumHeuristicOpponentPolicy(), 0.0),
+                OpponentPolicyMixtureEntry(UniformOpponentPolicy, 1.0),
+            ),
+        ).requiresPolicyAnnotations)
+    }
+
     @Test
     fun `renaming every display label leaves every scripted distribution and component attribution unchanged`() {
         val candidates = candidates()

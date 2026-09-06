@@ -17,9 +17,11 @@ import org.mtgallium.agent.infoset.core.OpponentPolicyBehaviorSpecification
 import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 import org.mtgallium.agent.searchteacher.SearchTeacherSearchFactory
+import org.mtgallium.agent.searchteacher.SemanticHeuristicOpponentPolicy
 import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
 import org.mtgallium.agent.infoset.core.PolicyBehaviorBinding
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
+import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
 import org.mtgallium.agent.searchteacher.PolicySingletonSelectionConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicyParameters
 import org.mtgallium.agent.searchteacher.SearchTeacherRuntimeConfig
@@ -38,6 +40,14 @@ private const val CALIBRATION_SCHEDULE = "search-teacher-calibration-library-ord
 @Serializable
 internal enum class SearchTeacherCalibrationPhase { PREFLIGHT, DEVELOPMENT, CONFIRMATION }
 
+/** Existing rollout implementations exposed to plan configuration; this is not a plugin registry. */
+@Serializable
+internal enum class SearchTeacherCalibrationRolloutPolicy {
+    PRODUCTION_ARGENTUM,
+    SEMANTIC_HEURISTIC,
+    UNIFORM,
+}
+
 /** Budget/rollout interventions are explicit; absent evaluator configuration preserves the historical production evaluator. */
 @Serializable
 internal data class SearchTeacherCalibrationPolicy(
@@ -51,6 +61,15 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val evaluator: MonoRedVisibleEvaluatorConfig? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootRolloutPolicy: SearchTeacherCalibrationRolloutPolicy? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val opponentRolloutPolicy: SearchTeacherCalibrationRolloutPolicy? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutTurnHorizon: RolloutTurnHorizon? = null,
 ) {
     init {
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
@@ -63,12 +82,29 @@ internal data class SearchTeacherCalibrationPolicy(
         baseSeed = baseSeed, particles = particles, simulations = simulations,
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
+        rolloutTurnHorizon = rolloutTurnHorizon,
     )
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
-        rootRolloutPolicy = mixture("root", SearchTeacherSearchFactory.rootRolloutPolicy()),
-        opponentRolloutPolicy = mixture("opponent", SearchTeacherSearchFactory.opponentRolloutPolicy()))
+        rootRolloutPolicy = configuredRolloutPolicy(
+            "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),
+        ),
+        opponentRolloutPolicy = configuredRolloutPolicy(
+            "opponent", opponentRolloutPolicy, SearchTeacherSearchFactory.opponentRolloutPolicy(),
+        ))
+
+    private fun configuredRolloutPolicy(
+        role: String,
+        configured: SearchTeacherCalibrationRolloutPolicy?,
+        production: OpponentPolicy,
+    ): OpponentPolicy? = configured?.let { selected ->
+        when (selected) {
+            SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM -> production
+            SearchTeacherCalibrationRolloutPolicy.SEMANTIC_HEURISTIC -> SemanticHeuristicOpponentPolicy()
+            SearchTeacherCalibrationRolloutPolicy.UNIFORM -> UniformOpponentPolicy
+        }
+    } ?: mixture(role, production)
 
     private fun mixture(role: String, heuristic: OpponentPolicy): OpponentPolicy? =
         if (rolloutHeuristicProbability == 1.0) null else MixtureOpponentPolicy(

@@ -1044,6 +1044,7 @@ class InformationSetSearchTest {
         val belief = ParticleBelief.from(batch(roots), BeliefMode.POLICY_CONDITIONED_V1)
         val requiresAnnotation = object : OpponentPolicy {
             override val id: String = "requires-private-choice-annotation"
+            override val requiresPolicyAnnotations: Boolean = true
 
             override fun distribution(
                 opponentInformation: PolicyInformationState,

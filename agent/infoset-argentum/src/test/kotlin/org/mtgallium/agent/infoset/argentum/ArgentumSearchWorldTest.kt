@@ -605,6 +605,7 @@ class ArgentumSearchWorldTest {
                 action.action is DeclareAttackers && action.validAttackers.orEmpty().size >= 2
             }
             if (declaration != null) {
+                val resolutions = mutableListOf<ArgentumHeuristicResolution>()
                 val diagnosticWorld = ArgentumSearchWorld.create(
                     environment = env.fork(),
                     gameId = "attack-anchor",
@@ -614,16 +615,27 @@ class ArgentumSearchWorldTest {
                     ),
                     effectiveSetupSeed = 811L,
                     knownDecks = knownDecks,
+                    heuristicResolutionSink = resolutions::add,
                 )
-                val diagnosis = diagnosticWorld.determinizedHeuristicChoiceDiagnosis(maxCandidates = 1)
-                if (diagnosis.resolution == ArgentumHeuristicResolution.VALIDATED_ATTACK_ANCHOR) {
-                    val choice = assertNotNull(diagnosis.choice)
-                    assertEquals(true, diagnosis.selectedAcceptedBySampledState)
-                    assertEquals(true, diagnosis.selectedAcceptedByAuthoritativeState)
-                    assertEquals(1, diagnosticWorld.expandChoicesWithPolicyAnnotations(1).candidates.count {
+                val base = diagnosticWorld.expandChoices(1)
+                val admitted = diagnosticWorld.expandChoicesForPolicyAdmission(1)
+                assertTrue(resolutions.isEmpty())
+                if (base.candidates.map { it.signature } != admitted.candidates.map { it.signature }) {
+                    assertEquals(base.candidates.size, admitted.candidates.size)
+                    assertEquals(0, admitted.candidates.count {
                         ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags
                     })
-                    assertTrue(diagnosticWorld.step(choice).accepted)
+                    val annotated = diagnosticWorld.expandChoicesWithPolicyAnnotations(1)
+                    assertEquals(listOf(ArgentumHeuristicResolution.VALIDATED_ATTACK_ANCHOR), resolutions)
+                    assertEquals(admitted.candidates.map { it.signature }, annotated.candidates.map { it.signature })
+                    assertEquals(1, annotated.candidates.count {
+                        ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags
+                    })
+                    val diagnosis = diagnosticWorld.determinizedHeuristicChoiceDiagnosis(maxCandidates = 1)
+                    assertNotNull(diagnosis.choice)
+                    assertEquals(true, diagnosis.selectedAcceptedBySampledState)
+                    assertEquals(true, diagnosis.selectedAcceptedByAuthoritativeState)
+                    assertTrue(diagnosticWorld.step(admitted.candidates.first()).accepted)
                     anchored = diagnosis
                     return@repeat
                 }

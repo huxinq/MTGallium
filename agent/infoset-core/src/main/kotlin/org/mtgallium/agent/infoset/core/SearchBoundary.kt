@@ -57,6 +57,15 @@ interface ProgressiveSearchWorld : SearchWorld {
  * consumes annotations; forced-pass and UCT expansion paths use the cheaper semantic family.
  */
 interface PolicyAnnotatedSearchWorld : SearchWorld {
+    /**
+     * Candidate family supplied to a stochastic policy before optional annotations are attached.
+     * Implementations may override this when candidate admission was historically coupled to
+     * annotation production; membership must match the annotated path apart from annotation data.
+     */
+    fun expandChoicesForPolicyAdmission(): PolicyExpansion = expandChoices()
+    fun expandChoicesForPolicyAdmission(limit: Int): PolicyExpansion =
+        (this as? ProgressiveSearchWorld)?.expandChoices(limit) ?: expandChoices()
+
     fun expandChoicesWithPolicyAnnotations(): PolicyExpansion
     fun expandChoicesWithPolicyAnnotations(limit: Int): PolicyExpansion
 }
@@ -166,6 +175,8 @@ enum class BeliefMode { CONSISTENCY_ONLY_V1, POLICY_CONDITIONED_V1 }
 
 interface OpponentPolicy {
     val id: String
+    /** True only when [distribution] or diagnostics consume optional policy annotations. */
+    val requiresPolicyAnnotations: Boolean get() = false
     /** Enables exact per-state distribution memoization; sampling remains independently seeded. */
     val distributionIsSeedInvariant: Boolean get() = false
 

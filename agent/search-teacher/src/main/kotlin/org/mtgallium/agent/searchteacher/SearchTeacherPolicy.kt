@@ -13,6 +13,7 @@ import org.mtgallium.agent.infoset.core.InformationStateEvaluator
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.PolicyExpansion
+import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
@@ -98,6 +99,7 @@ data class SearchTeacherPolicyParameters(
     val wallClockBudgetMillis: Long? = null,
     val minimumSimulations: Int = 1,
     val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
+    val rolloutTurnHorizon: RolloutTurnHorizon? = null,
 ) {
     init {
         require(particles > 0)
@@ -124,6 +126,7 @@ data class SearchTeacherPolicyParameters(
         cacheSimulationTransitions = cacheSimulationTransitions,
         wallClockBudgetMillis = wallClockBudgetMillis,
         minimumSimulations = minimumSimulations,
+        rolloutTurnHorizon = rolloutTurnHorizon,
     )
 
     fun behaviorSpecification(

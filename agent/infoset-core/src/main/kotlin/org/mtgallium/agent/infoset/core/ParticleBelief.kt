@@ -131,14 +131,16 @@ class ParticleBelief private constructor(
         val opponentDecisionCounter = OpponentPolicyDecisionCounter()
         var rejected = 0
         entries.forEachIndexed { index, entry ->
-            // A declared opponent policy may require trusted adapter annotations (for example the
-            // determinized production-heuristic tag). Private choices are still sampled from the
-            // actor's own safe information, but they must use the same annotated candidate
-            // contract as ordinary opponent decisions rather than silently invoking a replacement.
-            val candidates = (entry.world as? PolicyAnnotatedSearchWorld)
-                ?.expandChoicesWithPolicyAnnotations()
-                ?.candidates
-                ?: entry.world.expandChoices().candidates
+            // Private choices are still sampled from the actor's own safe information. Preserve
+            // the policy-admitted family even when annotations are not consumed, and materialize
+            // annotations only for policies that declare that requirement.
+            val candidates = (entry.world as? PolicyAnnotatedSearchWorld)?.let { world ->
+                if (opponentPolicy.requiresPolicyAnnotations) {
+                    world.expandChoicesWithPolicyAnnotations().candidates
+                } else {
+                    world.expandChoicesForPolicyAdmission().candidates
+                }
+            } ?: entry.world.expandChoices().candidates
             if (candidates.isEmpty()) {
                 rejected++
                 return@forEachIndexed

@@ -201,11 +201,17 @@ class ArgentumSearchWorld private constructor(
 
     override fun expandChoices(limit: Int): PolicyExpansion = expansionResult(limit).policy
 
+    override fun expandChoicesForPolicyAdmission(): PolicyExpansion =
+        expansionResult(includePolicyAdmission = true).policy
+
+    override fun expandChoicesForPolicyAdmission(limit: Int): PolicyExpansion =
+        expansionResult(limit, includePolicyAdmission = true).policy
+
     override fun expandChoicesWithPolicyAnnotations(): PolicyExpansion =
-        expansionResult(includePolicyAnnotations = true).policy
+        expansionResult(includePolicyAdmission = true, includePolicyAnnotations = true).policy
 
     override fun expandChoicesWithPolicyAnnotations(limit: Int): PolicyExpansion =
-        expansionResult(limit, includePolicyAnnotations = true).policy
+        expansionResult(limit, includePolicyAdmission = true, includePolicyAnnotations = true).policy
 
     /**
      * Resolve a semantic choice against the current authoritative expansion without advancing this
@@ -559,8 +565,10 @@ class ArgentumSearchWorld private constructor(
 
     private fun expansionResult(
         limit: Int = cachedExpansion?.limit ?: DEFAULT_EXPANSION_LIMIT,
+        includePolicyAdmission: Boolean = false,
         includePolicyAnnotations: Boolean = false,
     ): UnifiedExpansionResult {
+        require(!includePolicyAnnotations || includePolicyAdmission)
         val actor = requireNotNull(policyActor(environment)) { "No actor in non-terminal world" }
         val seed = proposalSeed()
         val key = "${aliases.getValue(actor)}:$decisionIndex:$seed"
@@ -578,7 +586,7 @@ class ArgentumSearchWorld private constructor(
                 .also { expansion ->
                     val priorAnchor = cachedExpansion
                         ?.takeIf { it.key == key }
-                        ?.annotated
+                        ?.admitted
                         ?.diagnosis
                         ?.takeIf {
                             it.resolution == ArgentumHeuristicResolution.VALIDATED_ATTACK_ANCHOR ||
@@ -588,10 +596,10 @@ class ArgentumSearchWorld private constructor(
                         ?.signature
                     cachedExpansion = CachedExpansion(key, limit, expansion, priorAnchorSignature = priorAnchor)
                 }
-        if (!includePolicyAnnotations || heuristicAnnotator == null) return base
+        if (!includePolicyAdmission || heuristicAnnotator == null) return base
         val current = requireNotNull(cachedExpansion).takeIf { it.key == key && it.limit == limit }
             ?: CachedExpansion(key, limit, base).also { cachedExpansion = it }
-        val annotation = current.annotated ?: heuristicAnnotator.annotate(
+        val admission = current.admitted ?: heuristicAnnotator.admit(
             environment,
             aliases,
             base,
@@ -603,6 +611,10 @@ class ArgentumSearchWorld private constructor(
             encodeSemanticChoice = { choice -> expander.encodePreparedChoice(choice, preparedProjection(actor)) },
             priorAnchorSignature = current.priorAnchorSignature,
         ).also { resolved ->
+            current.admitted = resolved
+        }
+        if (!includePolicyAnnotations) return admission.expansion
+        val annotation = current.annotated ?: heuristicAnnotator.annotate(admission).also { resolved ->
             current.annotated = resolved
             resolved.diagnosis.resolution?.let(heuristicResolutionSink)
         }
@@ -612,6 +624,9 @@ class ArgentumSearchWorld private constructor(
     private fun expansionContaining(choice: SemanticChoice): UnifiedExpansionResult {
         cachedExpansion?.annotated?.expansion?.takeIf { annotated ->
             annotated.policy.candidates.any { it.signature == choice.signature }
+        }?.let { return it }
+        cachedExpansion?.admitted?.expansion?.takeIf { admitted ->
+            admitted.policy.candidates.any { it.signature == choice.signature }
         }?.let { return it }
         var expansion = expansionResult(cachedExpansion?.limit ?: DEFAULT_EXPANSION_LIMIT)
         if (expansion.policy.candidates.any { it.signature == choice.signature } || expansion.policy.isExhaustive) {
@@ -730,7 +745,7 @@ class ArgentumSearchWorld private constructor(
         val key = "${aliases.getValue(actor)}:$decisionIndex:$seed"
         val current = requireNotNull(cachedExpansion).takeIf { it.key == key && it.limit == maxCandidates }
             ?: CachedExpansion(key, maxCandidates, base).also { cachedExpansion = it }
-        val annotation = current.annotated ?: annotator.annotate(
+        val admission = current.admitted ?: annotator.admit(
             environment,
             aliases,
             base,
@@ -742,6 +757,9 @@ class ArgentumSearchWorld private constructor(
             encodeSemanticChoice = { choice -> expander.encodePreparedChoice(choice, preparedProjection(actor)) },
             priorAnchorSignature = current.priorAnchorSignature,
         ).also { resolved ->
+            current.admitted = resolved
+        }
+        val annotation = current.annotated ?: annotator.annotate(admission).also { resolved ->
             current.annotated = resolved
             resolved.diagnosis.resolution?.let(heuristicResolutionSink)
         }
@@ -835,6 +853,7 @@ class ArgentumSearchWorld private constructor(
         val limit: Int,
         val base: UnifiedExpansionResult,
         val priorAnchorSignature: String? = null,
+        var admitted: ArgentumHeuristicAdmission? = null,
         var annotated: ArgentumHeuristicAnnotation? = null,
     )
     private data class StateCache<T>(val state: GameState, val decisionIndex: Int, val value: T)
@@ -979,6 +998,11 @@ data class ArgentumHeuristicChoiceDiagnosis(
     val semanticEquivalentCandidateSignatures: List<String> = emptyList(),
 )
 
+private data class ArgentumHeuristicAdmission(
+    val expansion: UnifiedExpansionResult,
+    val diagnosis: ArgentumHeuristicChoiceDiagnosis,
+)
+
 private data class ArgentumHeuristicAnnotation(
     val expansion: UnifiedExpansionResult,
     val diagnosis: ArgentumHeuristicChoiceDiagnosis,
@@ -1062,7 +1086,7 @@ private class ArgentumHeuristicAnnotator(
     // Share engine services for this annotator; every selection still gets fresh AI memory.
     private val playerFactory by lazy { AIPlayer.Factory(cardRegistry) }
 
-    fun annotate(
+    fun admit(
         environment: GameEnvironment,
         aliases: Map<EntityId, String>,
         expansion: UnifiedExpansionResult,
@@ -1070,7 +1094,7 @@ private class ArgentumHeuristicAnnotator(
         rememberedObjectIds: Set<EntityId>,
         encodeSemanticChoice: (ArgentumEngineChoice) -> SemanticChoice,
         priorAnchorSignature: String? = null,
-    ): ArgentumHeuristicAnnotation {
+    ): ArgentumHeuristicAdmission {
         val actor = policyActor(environment) ?: return unavailable(
             expansion,
             ArgentumHeuristicUnavailableReason.NO_POLICY_ACTOR,
@@ -1180,22 +1204,14 @@ private class ArgentumHeuristicAnnotator(
         promoteFirst: Boolean = false,
         selectedAcceptedBySampledState: Boolean? = null,
         selectedAcceptedByAuthoritativeState: Boolean? = null,
-    ): ArgentumHeuristicAnnotation {
-        val tagged = selected.copy(
-            display = selected.display.copy(
-                policyTags = selected.display.policyTags +
-                    ARGENTUM_HEURISTIC_CHOICE_TAG_V1
-            )
-        )
+    ): ArgentumHeuristicAdmission {
         val ordinary = expansion.policy.candidates.filterNot { it.signature == selected.signature }
         val candidates = when {
-            anchorEngineChoice != null -> listOf(tagged) + ordinary.take(
+            anchorEngineChoice != null -> listOf(selected) + ordinary.take(
                 (expansion.policy.candidates.size - 1).coerceAtLeast(0)
             )
-            promoteFirst -> listOf(tagged) + ordinary
-            else -> expansion.policy.candidates.map { choice ->
-                if (choice.signature == selected.signature) tagged else choice
-            }
+            promoteFirst -> listOf(selected) + ordinary
+            else -> expansion.policy.candidates
         }
         val retainedSignatures = candidates.mapTo(linkedSetOf(), SemanticChoice::signature)
         val engineChoices = linkedMapOf<String, ArgentumEngineChoice>()
@@ -1207,25 +1223,50 @@ private class ArgentumHeuristicAnnotator(
             }
         }
         check(engineChoices.keys == retainedSignatures)
-        val annotated = UnifiedExpansionResult(
+        val admitted = UnifiedExpansionResult(
             policy = expansion.policy.copy(candidates = candidates),
             engineChoices = engineChoices,
             attemptedCandidates = expansion.attemptedCandidates,
             rejectedCandidates = expansion.rejectedCandidates,
             rejectedSignatures = expansion.rejectedSignatures,
         )
-        return ArgentumHeuristicAnnotation(
-            expansion = annotated,
+        return ArgentumHeuristicAdmission(
+            expansion = admitted,
             diagnosis = ArgentumHeuristicChoiceDiagnosis(
-                choice = tagged,
+                choice = selected,
                 resolution = resolution,
                 selectedAcceptedBySampledState = selectedAcceptedBySampledState,
                 selectedAcceptedByAuthoritativeState = selectedAcceptedByAuthoritativeState,
-                selectedSemanticSignature = tagged.signature,
-                semanticEquivalentCandidateSignatures = listOf(tagged.signature)
+                selectedSemanticSignature = selected.signature,
+                semanticEquivalentCandidateSignatures = listOf(selected.signature)
                     .takeIf { resolution == ArgentumHeuristicResolution.SEMANTIC_EQUIVALENT }
                     .orEmpty(),
             ),
+        )
+    }
+
+    fun annotate(admission: ArgentumHeuristicAdmission): ArgentumHeuristicAnnotation {
+        val selected = admission.diagnosis.choice ?: return ArgentumHeuristicAnnotation(
+            admission.expansion,
+            admission.diagnosis,
+        )
+        val tagged = selected.copy(
+            display = selected.display.copy(
+                policyTags = selected.display.policyTags + ARGENTUM_HEURISTIC_CHOICE_TAG_V1
+            )
+        )
+        val candidates = admission.expansion.policy.candidates.map { choice ->
+            if (choice.signature == selected.signature) tagged else choice
+        }
+        return ArgentumHeuristicAnnotation(
+            expansion = UnifiedExpansionResult(
+                policy = admission.expansion.policy.copy(candidates = candidates),
+                engineChoices = admission.expansion.engineChoices,
+                attemptedCandidates = admission.expansion.attemptedCandidates,
+                rejectedCandidates = admission.expansion.rejectedCandidates,
+                rejectedSignatures = admission.expansion.rejectedSignatures,
+            ),
+            diagnosis = admission.diagnosis.copy(choice = tagged),
         )
     }
 
@@ -1276,7 +1317,7 @@ private class ArgentumHeuristicAnnotator(
         closestCandidateEngineChoices: List<String> = emptyList(),
         selectedSemanticSignature: String? = null,
         semanticEquivalentCandidateSignatures: List<String> = emptyList(),
-    ): ArgentumHeuristicAnnotation = ArgentumHeuristicAnnotation(
+    ): ArgentumHeuristicAdmission = ArgentumHeuristicAdmission(
         expansion = expansion,
         diagnosis = ArgentumHeuristicChoiceDiagnosis(
             unavailableReason = reason,

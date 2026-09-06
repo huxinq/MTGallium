@@ -64,6 +64,7 @@ class DeterminizedArgentumHeuristicOpponentPolicy(
     private val replacementEvidenceDisposition: OpponentPolicyReplacementEvidenceDisposition =
         OpponentPolicyReplacementEvidenceDisposition.INVALIDATES_EVIDENCE,
 ) : OpponentPolicy {
+    override val requiresPolicyAnnotations: Boolean = true
     override val distributionIsSeedInvariant: Boolean = fallback.distributionIsSeedInvariant
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(

@@ -17,6 +17,7 @@ import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.searchteacher.SearchTeacherRuntimeConfig
+import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
 
 @Tag("public-source")
 class ArenaRolloutSeamTest {
@@ -50,6 +51,10 @@ class ArenaRolloutSeamTest {
         val binding = arena.evidenceBinding(treatment, 1, source)
         assertNotEquals(arena.evidenceBinding(control, 1, source).identity, binding.identity)
         assertNotEquals(
+            arena.evidenceBinding(treatment.copy(rootRolloutPolicy = null), 1, source).identity,
+            binding.identity,
+        )
+        assertNotEquals(
             arena.evidenceBinding(treatment.copy(opponentRolloutPolicy = null), 1, source).identity,
             binding.identity,
         )
@@ -59,6 +64,7 @@ class ArenaRolloutSeamTest {
         )
         assertEquals(GameRunDisposition.STOPPED_LIMIT, game.disposition, game.exception)
         val search = game.seatDiagnostics.getValue("p0").searchDecisionsDetail.single().searchDiagnostics
+        assertEquals(defaultMonoRedOpponentPolicy().id, search.opponentModelId)
         assertEquals(rootPolicy.id, search.rootRolloutPolicyId)
         assertEquals(opponentPolicy.id, search.opponentRolloutPolicyId)
         assertTrue(rootPolicy.calls + opponentPolicy.calls > 0, "The declared policies must execute")
