@@ -7,9 +7,14 @@ import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.research.run.*
 
 @Serializable
-internal data class RootActionKernelPlan(val referenceExperiment: CloningComparisonInput, val ridge: Double = .001) {
+internal data class RootActionKernelPlan(val referenceExperiment: CloningComparisonInput, val ridge: Double = .001,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val developmentExtension: RootActionKernelExtension? = null) {
     init { require(ridge.isFinite() && ridge > 0) }
 }
+
+@Serializable
+internal data class RootActionKernelExtension(val bankDirectory: String, val bankIdentity: String, val reference: SavedRootPolicyInput)
 
 @Serializable
 internal data class RootActionKernelFitMetrics(val roots: Int, val seedGroups: Int, val actions: Int,
@@ -36,7 +41,12 @@ internal fun runRootActionKernelExperiment(repository: Path, plan: RootActionKer
     require(previous.researchRunIdentity == plan.referenceExperiment.researchRunIdentity && previousBindings.identity == previous.researchRunIdentity)
     require(previousBindings.protocol == "visible-v2-calibration-experiment-v1")
     val bank = loadVerifiedRealGamePositionBank(Path.of(previous.plan.bankDirectory), previous.plan.bankIdentity)
-    val bankRoots = bank.roots.associateBy { it.rootId }
+    val extensionBank = plan.developmentExtension?.let { loadVerifiedRealGamePositionBank(Path.of(it.bankDirectory), it.bankIdentity) }
+    val bankRoots = bank.roots.associateBy { it.rootId }.toMutableMap()
+    extensionBank?.roots?.forEach { root ->
+        bankRoots[root.rootId]?.let { require(it == root) { "Overlapping root projection differs from original bank" } }
+        bankRoots[root.rootId] = root
+    }
     fun encode(targets: List<VisibleV2Target>) = targets.map { target ->
         val root = bankRoots.getValue(target.rootId)
         require(root.reconstructedCandidates.map { it.signature }.toSet() == target.actionMeans.keys)
@@ -46,13 +56,19 @@ internal fun runRootActionKernelExperiment(repository: Path, plan: RootActionKer
     }
     val developmentInput = SavedRootPolicyInput(previousPath.resolve("development-reference").toString(), previous.developmentReferenceIdentity, previous.plan.reference.id)
     val developmentTargets = visibleV2ReferenceTargets(bank, developmentInput, PositionBankScreenPartition.DEVELOPMENT, previous.plan.hand)
-    val development = encode(developmentTargets)
+    val extensionTargets = plan.developmentExtension?.let {
+        visibleV2ReferenceTargets(requireNotNull(extensionBank), it.reference, PositionBankScreenPartition.DEVELOPMENT, previous.plan.hand)
+    }.orEmpty()
+    require(extensionTargets.none { added -> developmentTargets.any { it.rootId == added.rootId } })
+    val development = encode(developmentTargets + extensionTargets)
     val heldOutGroups = bank.roots.filter { it.partition == RealGamePositionPartition.VALIDATION }.map { it.seedGroupId }.toSet()
     require(development.map { it.seedGroupId }.distinct().size >= 2 && heldOutGroups.isNotEmpty() && development.none { it.seedGroupId in heldOutGroups })
     val bindings = ResearchRunBindings(protocol = "root-action-kernel-fit-v1", material = mapOf(
         "source" to sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), source)),
         "plan" to sha256(evidenceJson.encodeToString(RootActionKernelPlan.serializer(), plan)),
         "reference-manifest" to researchSha256File(previousPath.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+        "extension-reference-manifest" to (plan.developmentExtension?.let { researchSha256File(Path.of(it.reference.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)) } ?: "none"),
+        "extension-bank-manifest" to (plan.developmentExtension?.let { researchSha256File(Path.of(it.bankDirectory).resolve(ResearchRunArtifacts.MANIFEST_FILE)) } ?: "none"),
         "feature-schema" to NEURAL_BC_FEATURE_SCHEMA,
         "kernel" to "l2-state-l2-candidate-root-centered-candidate-plus-state-tensor-candidate-v1",
         "fit" to "equal-group-root-action-centered-mse-plus-ridge-kernel-norm-cholesky-v1",

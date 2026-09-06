@@ -134,7 +134,7 @@ internal fun visibleV2ReferenceTargets(
     require(report.plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL)
     val policy = report.plan.policies.single { it.search.id == input.policyId }
     require(policy.evaluator == expectedHand && policy.search.rootCloningFit == null && policy.search.tacticalEvaluator == null)
-    val roots = bank.roots.filter { it.partition.name == partition.name }.sortedBy { it.rootId }.take(report.plan.rootLimit)
+    val roots = selectPositionScreenRoots(report.plan, bank.roots.filter { it.partition.name == partition.name })
     require(report.selectedRootIds == roots.map { it.rootId })
     require(report.rows.count { it.policyId == input.policyId } == roots.size * report.plan.repetitions)
     return roots.map { root ->

@@ -63,11 +63,14 @@ internal data class PositionBankScreenPlan(
     val policies: List<PositionBankScreenPolicy>,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val searchSeedDomain: String = "position-bank-screen-v1",
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootIds: List<String> = emptyList(),
 ) {
     init {
         require(schemaVersion == 1 && bankDirectory.isNotBlank() && expectedBankIdentity.isNotBlank())
         require(rootLimit > 0 && repetitions > 0 && policies.isNotEmpty())
         require(searchSeedDomain.isNotBlank())
+        require(rootIds.isEmpty() || (rootIds.size == rootLimit && rootIds == rootIds.distinct().sorted()))
         require(policies.map { it.search.id }.distinct().size == policies.size)
         require(mode != PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES || policies.all { it.search.tacticalEvaluator == null })
         require(mode != PositionBankScreenMode.FEATURES || repetitions == 1) {
@@ -145,7 +148,7 @@ internal class PositionBankScreenRunner(
         val bankDirectory = Path.of(plan.bankDirectory)
         val bank = loadVerifiedRealGamePositionBank(bankDirectory, plan.expectedBankIdentity)
         val eligible = bank.roots.filter { it.partition.name == plan.partition.name }.sortedBy { it.rootId }
-        val selected = eligible.take(plan.rootLimit)
+        val selected = selectPositionScreenRoots(plan, eligible)
         require(selected.isNotEmpty()) { "The requested bank partition has no roots" }
         val bindings = ResearchRunBindings(protocol = "real-game-position-screen-v1", material = mapOf(
             "plan" to sha256(evidenceJson.encodeToString(plan)),
@@ -320,4 +323,13 @@ internal fun screenPositionBankRepetition(
         accounted.copy(disposition = PositionBankScreenDisposition.REFUSED,
             diagnostic = "${failure::class.simpleName}: ${failure.message}")
     }
+}
+
+/** Explicit roots permit reuse of prior reference rows without recomputing overlapping positions. */
+internal fun selectPositionScreenRoots(plan: PositionBankScreenPlan, eligible: List<RealGamePositionBankRoot>): List<RealGamePositionBankRoot> {
+    val sorted = eligible.sortedBy { it.rootId }
+    require(sorted.map { it.rootId }.distinct().size == sorted.size && sorted.all { it.partition.name == plan.partition.name })
+    if (plan.rootIds.isEmpty()) return sorted.take(plan.rootLimit)
+    val byId = sorted.associateBy { it.rootId }
+    return plan.rootIds.map { requireNotNull(byId[it]) { "Explicit screen root is absent from the requested partition: $it" } }
 }

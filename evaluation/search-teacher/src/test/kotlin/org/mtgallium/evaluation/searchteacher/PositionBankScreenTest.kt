@@ -11,6 +11,20 @@ import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 @Tag("public-source")
 class PositionBankScreenTest {
     @Test
+    fun `explicit roots are exact sorted unique selections and historical default remains omitted`() {
+        val policy = PositionBankScreenPolicy(SearchTeacherCalibrationPolicy("reference", 8, 64, 32, 1.4, true, 1.0), MonoRedVisibleEvaluatorConfig())
+        val plan = PositionBankScreenPlan(bankDirectory = "/tmp/bank", expectedBankIdentity = "bank", partition = PositionBankScreenPartition.DEVELOPMENT,
+            mode = PositionBankScreenMode.ACTION_CONDITIONAL, rootLimit = 2, repetitions = 2, policies = listOf(policy))
+        assertFalse("rootIds" in evidenceJson.encodeToString(plan))
+        val explicit = plan.copy(rootIds = listOf("a", "b"))
+        assertEquals(explicit, evidenceJson.decodeFromString<PositionBankScreenPlan>(evidenceJson.encodeToString(explicit)))
+        assertFailsWith<IllegalArgumentException> { plan.copy(rootIds = listOf("a")) }
+        assertFailsWith<IllegalArgumentException> { plan.copy(rootIds = listOf("b", "a")) }
+        assertFailsWith<IllegalArgumentException> { plan.copy(rootIds = listOf("a", "a")) }
+        assertFailsWith<IllegalArgumentException> { selectPositionScreenRoots(explicit, emptyList()) }
+    }
+
+    @Test
     fun `independent reference seed domain is explicit while historical plan bytes omit the default`() {
         val policy = PositionBankScreenPolicy(SearchTeacherCalibrationPolicy("reference", 8, 64, 32, 1.4, true, 1.0),
             MonoRedVisibleEvaluatorConfig())

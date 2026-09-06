@@ -42,6 +42,8 @@ internal data class RealGamePositionBankPlan(
     val maxRootsPerGame: Int,
     val validationFraction: Double,
     val selectionSeed: Long,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val selectionPartition: RealGamePositionPartition? = null,
 ) {
     init {
         require(schemaVersion == 1 && sources.isNotEmpty())
@@ -205,7 +207,11 @@ internal fun realGamePositionFamily(candidates: List<SemanticChoice>): RealGameP
 internal fun selectRealGamePositionAssignments(plan: RealGamePositionBankPlan,
     assignments: List<RealGamePositionBankAssignment>): List<RealGamePositionBankAssignment> {
     require(assignments.map { it.rootId }.distinct().size == assignments.size)
-    val queues = assignments.filter { it.reasons.isEmpty() }.groupBy { it.decisionFamily }.toSortedMap()
+    val admitted = assignments.map { row ->
+        if (row.reasons.isEmpty() && plan.selectionPartition != null && row.partition != plan.selectionPartition)
+            row.copy(status = RealGamePositionAssignmentStatus.EXCLUDED, reasons = listOf("unselected-partition")) else row
+    }
+    val queues = admitted.filter { it.reasons.isEmpty() }.groupBy { it.decisionFamily }.toSortedMap()
         .mapValues { (_, rows) -> ArrayDeque(rows.sortedBy { sha256("real-game-position-selection-v1:${plan.selectionSeed}:${it.rootId}") }) }
     val selected = mutableSetOf<String>()
     val capped = mutableSetOf<String>()
@@ -223,7 +229,7 @@ internal fun selectRealGamePositionAssignments(plan: RealGamePositionBankPlan,
             }
         }
     }
-    return assignments.map { row -> when {
+    return admitted.map { row -> when {
         row.reasons.isNotEmpty() -> row
         row.rootId in selected -> row.copy(status = RealGamePositionAssignmentStatus.SELECTED)
         else -> row.copy(status = RealGamePositionAssignmentStatus.EXCLUDED,
@@ -389,6 +395,7 @@ internal fun loadVerifiedRealGamePositionBank(directory: Path, expectedIdentity:
         }).descriptor)
         require(row.seedGroupId == realGamePositionSeedGroup(source.deckHash, source.cardPoolHash, row.gameSeed))
         require(row.partition == realGamePositionPartition(row.seedGroupId, report.plan.validationFraction))
+        require(report.plan.selectionPartition == null || row.partition == report.plan.selectionPartition)
     }
     require(report.accounting.reconstructedRoots == report.roots.size && report.accounting.refusedRoots == 0)
     return report

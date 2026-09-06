@@ -25,6 +25,17 @@ class RealGamePositionBankTest {
         rootLimit = 6, maxRootsPerGame = 1, validationFraction = .25, selectionSeed = 17)
 
     @Test
+    fun `development-only selection preserves inventory and original partition assignments`() {
+        val development = row("dev", "g1", RealGamePositionDecisionFamily.PRIORITY).copy(partition = RealGamePositionPartition.DEVELOPMENT)
+        val validation = row("val", "g2", RealGamePositionDecisionFamily.PRIORITY).copy(partition = RealGamePositionPartition.VALIDATION)
+        val selected = selectRealGamePositionAssignments(plan.copy(selectionPartition = RealGamePositionPartition.DEVELOPMENT), listOf(development, validation))
+        assertEquals(RealGamePositionAssignmentStatus.SELECTED, selected.first().status)
+        assertEquals(listOf("unselected-partition"), selected.last().reasons)
+        assertEquals(validation.partition, selected.last().partition)
+        assertTrue(!evidenceJson.encodeToString(RealGamePositionBankPlan.serializer(), plan).contains("selectionPartition"))
+    }
+
+    @Test
     fun `library seed groups keep all comparisons seats and roots in the same split`() {
         val group = realGamePositionSeedGroup("deck", "pool", 72)
         val partition = realGamePositionPartition(group, .25)
