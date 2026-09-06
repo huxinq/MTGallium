@@ -136,6 +136,14 @@ internal fun deriveReplayReferenceCloning(
     require(arena.evidenceBinding(policy, null, report.sourceProvenance) == teacher.binding)
     require(describeTournamentPolicy(policy) == teacher.policy && policy.effectiveParameters(baseSeed).searchConfig() == teacher.search)
     val profile = teacher.descriptor.parameters(baseSeed).actionSpaceProfile
+    val parentHash = researchSha256File(parent.resolve(ResearchRunArtifacts.MANIFEST_FILE))
+    val binding = ResearchRunBindings(protocol = REPLAY_REFERENCE_CLONING_PROTOCOL, material = mapOf(
+        "projection-source" to sha256(evidenceJson.encodeToString(provenance)), "parent-run" to expectedParentIdentity,
+        "parent-manifest" to parentHash, "teacher" to teacher.binding.identity,
+        "selected-pairs" to selectedPairIndices.joinToString(","),
+        "input-config" to evidenceJson.encodeToString(BoundedPolicyInputConfig()),
+        "action-profile" to profile.name,
+    ))
     val groups = mutableListOf<ReplayReferenceCloningGame>()
     val examples = mutableListOf<ReplayReferenceCloningExample>()
     report.comparisons.forEach { comparison ->
@@ -203,14 +211,6 @@ internal fun deriveReplayReferenceCloning(
         }
     }
     require(groups.map { it.gameId }.distinct().size == groups.size && examples.isNotEmpty())
-    val parentHash = researchSha256File(parent.resolve(ResearchRunArtifacts.MANIFEST_FILE))
-    val binding = ResearchRunBindings(protocol = REPLAY_REFERENCE_CLONING_PROTOCOL, material = mapOf(
-        "projection-source" to sha256(evidenceJson.encodeToString(provenance)), "parent-run" to expectedParentIdentity,
-        "parent-manifest" to parentHash, "teacher" to teacher.binding.identity,
-        "selected-pairs" to selectedPairIndices.joinToString(","),
-        "input-config" to evidenceJson.encodeToString(BoundedPolicyInputConfig()),
-        "action-profile" to profile.name,
-    ))
     val result = ReplayReferenceCloningReport(researchRunIdentity = binding.identity, generatedAtUtc = Instant.now().toString(),
         projectionProvenance = provenance, parentRunIdentity = expectedParentIdentity, parentManifestSha256 = parentHash,
         historicalSource = report.sourceProvenance, teacher = teacher, deckHash = report.deckHash, cardPoolHash = report.cardPoolHash,

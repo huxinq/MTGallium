@@ -160,6 +160,7 @@ data class BoundedPolicyInput(
     )
 }
 
+@Serializable
 data class BoundedPolicyInputConfig(
     val recentEventLimit: Int = 64,
     val recentEventByteLimit: Int = 64 * 1024,

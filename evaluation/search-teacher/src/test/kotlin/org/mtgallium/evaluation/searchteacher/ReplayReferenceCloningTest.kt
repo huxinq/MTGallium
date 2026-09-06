@@ -1,6 +1,7 @@
 package org.mtgallium.evaluation.searchteacher
 
 import kotlin.test.*
+import kotlinx.serialization.encodeToString
 import org.junit.jupiter.api.Tag
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
@@ -8,6 +9,12 @@ import org.mtgallium.evaluation.searchteacher.replay.*
 
 @Tag("public-source")
 class ReplayReferenceCloningTest {
+    @Test
+    fun `bounded input limits can be retained exactly in experiment identity`() {
+        val config = BoundedPolicyInputConfig(recentEventLimit = 7, candidateLimit = 13)
+        assertEquals(config, evidenceJson.decodeFromString<BoundedPolicyInputConfig>(evidenceJson.encodeToString(config)))
+    }
+
     private val deck = SearchTeacherDeckManifest("synthetic", "Synthetic", "synthetic", "2026-09-07",
         "public replay projection fixture", mapOf("Mountain" to 40, "Burst Lightning" to 20), emptyMap())
     private fun world() = createSemanticReplayWorld(buildRegistry(), deck, "derived-fixture", 17, 99, 0,
