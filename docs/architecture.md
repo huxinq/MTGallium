@@ -78,3 +78,10 @@ Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout
 settlement have different meanings.
+
+Terminal root-continuation evidence is separate from adaptive search estimates:
+it forces an admitted root action in a support-checked hypothesis and follows
+the declared rollout policies to terminal payoff, without leaf evaluation.
+Records retain posterior weights, paired sampling coordinates, completed
+outcomes, non-game failures and unexecuted work. Incomplete actions have no
+value target, and terminal samples never create search visits or backups.

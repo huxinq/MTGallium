@@ -31,7 +31,7 @@ import org.mtgallium.research.run.ResearchRunBindings
 import org.mtgallium.research.run.ResearchRunFiles
 
 @Serializable
-internal enum class PositionBankScreenMode { FEATURES, SEARCH, ACTION_CONDITIONAL, ACTION_CONDITIONAL_V2_TRACES }
+internal enum class PositionBankScreenMode { FEATURES, SEARCH, ACTION_CONDITIONAL, ACTION_CONDITIONAL_V2_TRACES, TERMINAL_CONTINUATIONS }
 
 @Serializable
 internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
@@ -67,8 +67,11 @@ internal data class PositionBankScreenPlan(
     val searchSeedDomain: String = "position-bank-screen-v1",
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rootIds: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val terminalContinuation: TerminalRootContinuationConfig? = null,
 ) {
     init {
+        require((mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS) == (terminalContinuation != null))
         require(schemaVersion == 1 && bankDirectory.isNotBlank() && expectedBankIdentity.isNotBlank())
         require(rootLimit > 0 && repetitions > 0 && policies.isNotEmpty())
         require(searchSeedDomain.isNotBlank())
@@ -85,7 +88,7 @@ internal data class PositionBankScreenPlan(
 }
 
 @Serializable
-internal enum class PositionBankScreenDisposition { SCORED, SEARCHED, AUTOMATIC_SELECTION, ACTION_CONDITIONAL, REFUSED }
+internal enum class PositionBankScreenDisposition { SCORED, SEARCHED, AUTOMATIC_SELECTION, ACTION_CONDITIONAL, TERMINAL_CONTINUATIONS, REFUSED }
 
 @Serializable
 internal data class PositionBankScreenRow(
@@ -113,6 +116,10 @@ internal data class PositionBankScreenRow(
     val rootActionEstimates: List<RootActionSearchEstimate> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val visibleV2ActionTraces: List<VisibleV2ActionTrace> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val terminalRootActions: List<TerminalRootActionSamples> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val terminalBeliefWeights: List<Double> = emptyList(),
 )
 
 @Serializable
@@ -155,6 +162,10 @@ internal class PositionBankScreenRunner(
         val eligible = bank.roots.filter { it.partition.name == plan.partition.name }.sortedBy { it.rootId }
         val selected = selectPositionScreenRoots(plan, eligible)
         require(selected.isNotEmpty()) { "The requested bank partition has no roots" }
+        plan.terminalContinuation?.let { config ->
+            require(selected.all { it.profileExpansionExhaustive }) { "Terminal targets require complete declared-profile menus" }
+            terminalRootWorkload(config, selected.map { it.reconstructedCandidates.size }, plan.repetitions, plan.policies.size)
+        }
         // Load and verify each frozen model once before any reconstruction or search.
         val rootPolicies = plan.policies.mapNotNull { policy -> policy.rootKernel?.let { policy.search.id to it.load() } }.toMap()
         val bindings = ResearchRunBindings(protocol = "real-game-position-screen-v1", material = mapOf(
@@ -233,7 +244,19 @@ internal class PositionBankScreenRunner(
                     val searchSeed = ComponentSeeds.derive(position.sourceGameId, position.decisionIndex,
                         position.baseSeed, plan.searchSeedDomain, repetition)
                     val selectionStarted = System.nanoTime()
-                    if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL || plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES) {
+                    if (plan.mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS) {
+                        val search = SearchTeacherSearchFactory.create(parameters.searchConfig(), defaultMonoRedOpponentPolicy(),
+                            arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator,
+                            InformationSetSearchReuseConfig.DISABLED)
+                        val terminalBelief = session.beliefBatch(actual)
+                        val actions = sampleTerminalRootActions(terminalBelief, actual.informationState(position.actor),
+                            candidates, search, requireNotNull(plan.terminalContinuation), searchSeed)
+                        val failed = actions.firstOrNull { it.disposition == TerminalRootActionDisposition.NON_GAME_FAILURE }
+                        accounted.copy(disposition = if (failed == null) PositionBankScreenDisposition.TERMINAL_CONTINUATIONS else PositionBankScreenDisposition.REFUSED,
+                            policyIdentity = session.policyIdentity, searchSeed = searchSeed, terminalRootActions = actions,
+                            terminalBeliefWeights = terminalBelief.particles.map { it.weight },
+                            diagnostic = failed?.diagnostic, selectionMillis = (System.nanoTime() - selectionStarted) / 1_000_000.0)
+                    } else if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL || plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES) {
                         val belief = session.beliefBatch(actual)
                         val recorder = if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES)
                             RecordingVisibleV2Evaluator(policy.evaluator) else null
@@ -275,7 +298,13 @@ internal class PositionBankScreenRunner(
         val report = PositionBankScreenReport(researchRunIdentity = bindings.identity, sourceProvenance = source,
             generatedAtUtc = Instant.now().toString(), plan = plan, workerThreads = workerThreads,
             eligibleRoots = eligible.size, selectedRootIds = selected.map { it.rootId }, rows = rows,
-            valid = rows.none { it.disposition == PositionBankScreenDisposition.REFUSED })
+            valid = rows.none { it.disposition == PositionBankScreenDisposition.REFUSED }).let { report ->
+            if (plan.mode != PositionBankScreenMode.TERMINAL_CONTINUATIONS) report else report.copy(limitations = report.limitations + listOf(
+                "Terminal-continuation mode forces each admitted root action, then uses the declared root/opponent rollout policies until actual terminal payoff; it never invokes a leaf evaluator or produces search visits/backups.",
+                "Terminal targets are conditional on the fixed sampled posterior and continuation policies, not optimal values or authoritative hidden truth. Siblings share declared posterior draws and future seeds; divergent random-event consumption can weaken coupling.",
+                "A root stops at its first non-game failure. Completed samples are retained, incomplete action means are absent, and remaining continuations are explicitly unexecuted. A refused row cannot become a training target.",
+            ))
+        }
         writeJsonAtomically(directory.resolve("plan.json"), plan)
         writeJsonAtomically(directory.resolve("report.json"), report)
         writeTextAtomically(directory.resolve("report.md"), buildString {

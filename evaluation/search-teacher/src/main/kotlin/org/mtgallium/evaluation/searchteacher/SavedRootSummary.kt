@@ -34,6 +34,9 @@ internal data class PositionScreenAccounting(
 
 /** Operation and settlement accounting stays distinct from regret and terminal game results. */
 internal fun positionScreenAccounting(report: PositionBankScreenReport): Map<String, PositionScreenAccounting> {
+    require(report.plan.mode != PositionBankScreenMode.TERMINAL_CONTINUATIONS) {
+        "Terminal continuation samples require their own outcome accounting, not search-backup accounting"
+    }
     require(report.rows.map { Triple(it.rootId, it.policyId, it.repetition) }.distinct().size == report.rows.size)
     return report.rows.groupBy { it.policyId }.toSortedMap().mapValues { (_, rows) ->
         val diagnostics = rows.flatMap { row -> when (row.disposition) {
