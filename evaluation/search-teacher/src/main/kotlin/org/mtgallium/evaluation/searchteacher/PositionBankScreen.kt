@@ -272,7 +272,7 @@ internal class PositionBankScreenRunner(
     }
 }
 
-private fun requireValidScreenSearch(diagnostics: InformationSetSearchDiagnostics) {
+internal fun requireValidScreenSearch(diagnostics: InformationSetSearchDiagnostics) {
     require(diagnostics.rejectedTransitions == 0 &&
         diagnostics.opponentModelPolicyDecisions.evidenceInvalidatingReplacements == 0 &&
         diagnostics.rootRolloutPolicyDecisions.evidenceInvalidatingReplacements == 0 &&
