@@ -83,7 +83,89 @@ class PairedSequentialTestTest {
         assertFailsWith<IllegalArgumentException> { rule.copy(betFractions = listOf(1.0)) }
         assertFailsWith<IllegalArgumentException> { rule.copy(nullPointRate = Double.NaN) }
         assertFailsWith<IllegalArgumentException> { rule.copy(nullPointRate = Double.MIN_VALUE) }
+        assertFailsWith<IllegalArgumentException> { rule.copy(nullPointRate = .6, targetPointRate = .5) }
         assertFailsWith<IllegalArgumentException> { PairedSequentialScore(0, null) }
+    }
+
+    @Test
+    fun `equal boundaries stop obvious directions by complete pairs and retain one worker-pair overshoot`() {
+        val symmetric = PairedSequentialRule(
+            nullPointRate = .5,
+            targetPointRate = .5,
+            falsePositiveRate = .025,
+            falseNegativeRate = .025,
+            maximumPairs = 12,
+            betFractions = listOf(.8),
+        )
+        listOf(1.0 to PairedSequentialDisposition.ABOVE_NULL, 0.0 to PairedSequentialDisposition.BELOW_TARGET)
+            .forEach { (score, expected) ->
+                val calls = java.util.Collections.synchronizedList(mutableListOf<Int>())
+                val execution = executePairedSequentialSchedule(symmetric, 0, 2) { index ->
+                    calls += index
+                    pair(index, score)
+                }
+                assertEquals((0..7).toList(), calls.sorted())
+                assertEquals(expected, execution.result.disposition)
+                assertEquals(7, execution.result.inspectedPairs)
+                assertEquals(1, execution.result.operationalOvershootPairs)
+                assertEquals(SearchTeacherSequentialPopulation(12, 8, 7, 4, 1, 0, 0), execution.population)
+            }
+    }
+
+    @Test
+    fun `equal boundaries are inconclusive for split pairs and preserve invalid pair semantics`() {
+        val symmetric = PairedSequentialRule(
+            nullPointRate = .5,
+            targetPointRate = .5,
+            falsePositiveRate = .025,
+            falseNegativeRate = .025,
+            maximumPairs = 12,
+            betFractions = listOf(.8),
+        )
+        val split = pairedSequentialTest(symmetric,
+            List(12) { index -> PairedSequentialScore(index, if (index % 2 == 0) 1.0 else 0.0) }, 0)
+        val invalid = pairedSequentialTest(symmetric, listOf(
+            PairedSequentialScore(0, 1.0), PairedSequentialScore(1, null, listOf("stopped"))), 0)
+
+        assertEquals(PairedSequentialDisposition.BUDGET_EXHAUSTED, split.disposition)
+        assertEquals(PairedSequentialDisposition.INVALID_PAIR, invalid.disposition)
+        assertEquals(2, invalid.inspectedPairs)
+        assertEquals(1, invalid.validScoredPairs)
+    }
+
+    @Test
+    fun `equal boundary directional errors respect each rate and their combined bound`() {
+        val horizon = 12
+        val symmetric = PairedSequentialRule(
+            nullPointRate = .5,
+            targetPointRate = .5,
+            falsePositiveRate = .025,
+            falseNegativeRate = .025,
+            maximumPairs = horizon,
+            betFractions = listOf(.8),
+        )
+        var above = 0.0
+        var below = 0.0
+        var either = 0.0
+        for (bits in 0 until (1 shl horizon)) {
+            val result = pairedSequentialTest(symmetric,
+                List(horizon) { index -> PairedSequentialScore(index, ((bits shr index) and 1).toDouble()) }, 0)
+            val probability = .5.pow(horizon)
+            val crossesAbove = result.disposition in setOf(
+                PairedSequentialDisposition.ABOVE_NULL,
+                PairedSequentialDisposition.BOTH_BOUNDARIES_CROSSED,
+            )
+            val crossesBelow = result.disposition in setOf(
+                PairedSequentialDisposition.BELOW_TARGET,
+                PairedSequentialDisposition.BOTH_BOUNDARIES_CROSSED,
+            )
+            if (crossesAbove) above += probability
+            if (crossesBelow) below += probability
+            if (crossesAbove || crossesBelow) either += probability
+        }
+        assertTrue(above <= symmetric.falsePositiveRate + 1e-12)
+        assertTrue(below <= symmetric.falseNegativeRate + 1e-12)
+        assertTrue(either <= symmetric.falsePositiveRate + symmetric.falseNegativeRate + 1e-12)
     }
     @Test
     fun `worker chunks stop after first crossed prefix and retain bounded overshoot`() {
