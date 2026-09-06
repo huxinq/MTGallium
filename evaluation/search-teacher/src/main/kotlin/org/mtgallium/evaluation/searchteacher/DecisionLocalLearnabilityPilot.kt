@@ -82,12 +82,16 @@ internal data class LearnabilityRootResult(
     val modelMinusCheapPairedStandardError: Double,
 )
 
-internal fun evaluateLearnabilityRoot(root: DecisionLocalRootEvidence, model: DecisionLocalModelCheckpoint): LearnabilityRootResult {
+internal fun evaluateLearnabilityRoot(root: DecisionLocalRootEvidence, model: DecisionLocalModelCheckpoint): LearnabilityRootResult =
+    evaluateLearnabilityRoot(root, root.candidates.map { model.score(it) })
+
+/** Scores are model predictions; the retained outcomes remain a separate evaluation target. */
+internal fun evaluateLearnabilityRoot(root: DecisionLocalRootEvidence, predicted: List<Double>): LearnabilityRootResult {
     require(root.primaryReplicates == 32 && root.independentReplicates == 0)
     require(root.candidates.all { it.primaryTerminalPayoffs.size == 32 && it.independentTerminalPayoffs.isEmpty() })
     val candidates = root.candidates
     val actual = candidates.map { it.primaryMean }
-    val predicted = candidates.map { model.score(it) }
+    require(predicted.size == candidates.size)
     val cheap = candidates.map { it.cheapHeuristicScore }
     require((predicted + cheap).all(Double::isFinite))
     val pairs = candidates.indices.flatMap { a -> (a + 1 until candidates.size).map { b -> a to b } }
