@@ -130,9 +130,18 @@ class CloningRootRolloutPolicyTest {
         assertFails { CloningRootRolloutPolicy.fromVerifiedFit(second.first, "wrong-fit") }
     }
 
-    private fun fixture(artifact: NeuralBcInteractionModelArtifact): Pair<Path, String> {
+    @Test
+    fun `completed corpus comparison models load but technical preflight models do not`() {
+        val model = CandidateConditionedInteractionPolicy.initialize(NeuralBcInteractionModelConfig(), 7L)
+        val completed = fixture(model.artifact, CLONING_CORPUS_COMPARISON_PROTOCOL)
+        CloningRootRolloutPolicy.fromVerifiedFit(completed.first, completed.second)
+        val preflight = fixture(model.artifact, "$CLONING_CORPUS_COMPARISON_PROTOCOL-preflight")
+        assertFails { CloningRootRolloutPolicy.fromVerifiedFit(preflight.first, preflight.second) }
+    }
+
+    private fun fixture(artifact: NeuralBcInteractionModelArtifact, protocol: String = "calibration-reference-cloning-fit-v1"): Pair<Path, String> {
         val directory = Files.createTempDirectory("synthetic-cloning-fit-")
-        val bindings = ResearchRunBindings(protocol = "calibration-reference-cloning-fit-v1", material = mapOf(
+        val bindings = ResearchRunBindings(protocol = protocol, material = mapOf(
             "model-config" to sha256(evidenceJson.encodeToString(artifact.config)),
             "synthetic-model" to sha256(evidenceJson.encodeToString(artifact)),
         ))

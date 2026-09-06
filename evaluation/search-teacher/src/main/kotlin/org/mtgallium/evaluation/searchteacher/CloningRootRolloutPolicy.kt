@@ -88,7 +88,7 @@ internal class CloningRootRolloutPolicy private constructor(
                 }
             }
             val bindings = evidenceJson.decodeFromString<ResearchRunBindings>(Files.readString(input("bindings.json")))
-            require(bindings.identity == expectedFitIdentity && bindings.protocol == "calibration-reference-cloning-fit-v1")
+            require(bindings.identity == expectedFitIdentity && bindings.protocol in setOf("calibration-reference-cloning-fit-v1", CLONING_CORPUS_COMPARISON_PROTOCOL))
             val report = evidenceJson.parseToJsonElement(Files.readString(input("report.json"))).jsonObject
             require(report.getValue("researchRunIdentity").jsonPrimitive.content == expectedFitIdentity)
             val path = input("model.json")

@@ -137,13 +137,8 @@ internal fun deriveReplayReferenceCloning(
     require(describeTournamentPolicy(policy) == teacher.policy && policy.effectiveParameters(baseSeed).searchConfig() == teacher.search)
     val profile = teacher.descriptor.parameters(baseSeed).actionSpaceProfile
     val parentHash = researchSha256File(parent.resolve(ResearchRunArtifacts.MANIFEST_FILE))
-    val binding = ResearchRunBindings(protocol = REPLAY_REFERENCE_CLONING_PROTOCOL, material = mapOf(
-        "projection-source" to sha256(evidenceJson.encodeToString(provenance)), "parent-run" to expectedParentIdentity,
-        "parent-manifest" to parentHash, "teacher" to teacher.binding.identity,
-        "selected-pairs" to selectedPairIndices.joinToString(","),
-        "input-config" to evidenceJson.encodeToString(BoundedPolicyInputConfig()),
-        "action-profile" to profile.name,
-    ))
+    val binding = replayReferenceCloningBindings(provenance, expectedParentIdentity, parentHash,
+        teacher.binding.identity, selectedPairIndices, profile)
     val groups = mutableListOf<ReplayReferenceCloningGame>()
     val examples = mutableListOf<ReplayReferenceCloningExample>()
     report.comparisons.forEach { comparison ->
@@ -241,3 +236,19 @@ internal fun requireReplayCloningEncodingParity(expected: EncodedBcDecision, act
         "Current projected features differ from the admitted historical example"
     }
 }
+
+/** Shared identity authority for production and later consumers of the derived dataset. */
+internal fun replayReferenceCloningBindings(
+    provenance: ResearchRunProvenance,
+    parentIdentity: String,
+    parentManifestSha256: String,
+    teacherIdentity: String,
+    selectedPairIndices: List<Int>,
+    profile: SearchActionSpaceProfile,
+): ResearchRunBindings = ResearchRunBindings(protocol = REPLAY_REFERENCE_CLONING_PROTOCOL, material = mapOf(
+    "projection-source" to sha256(evidenceJson.encodeToString(provenance)), "parent-run" to parentIdentity,
+    "parent-manifest" to parentManifestSha256, "teacher" to teacherIdentity,
+    "selected-pairs" to selectedPairIndices.joinToString(","),
+    "input-config" to evidenceJson.encodeToString(BoundedPolicyInputConfig()),
+    "action-profile" to profile.name,
+))
