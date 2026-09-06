@@ -134,6 +134,9 @@ internal fun runLearningPreflight(
         "smoke-epochs" to if (work.learner == PreflightLearner.NONLINEAR) minOf(work.nonlinear.epochs, work.smokeEpochs).toString() else "not-applicable")
 }
 
+internal fun preflightRuntimeHash(runtime: Map<String, String>): String =
+    researchSha256(evidenceJson.encodeToString<Map<String, String>>(runtime.toSortedMap()))
+
 private data class PreflightContext(
     val plan: ResearchPreflightPlan,
     val provenance: ResearchRunProvenance,
@@ -156,7 +159,7 @@ internal class ResearchPreflightRunner(private val root: Path) {
             is ResearchPreflightWork.Learning -> listOf(absolutePreflightPath(work.parentDirectory), absolutePreflightPath(work.precisionDirectory))
         }
         val material = linkedMapOf("profile" to researchSha256(bytes), "source" to researchSha256(evidenceJson.encodeToString(source)),
-            "runtime" to researchSha256(evidenceJson.encodeToString(runtime.toSortedMap())), "target-output" to target.toString())
+            "runtime" to preflightRuntimeHash(runtime), "target-output" to target.toString())
         inputs.forEachIndexed { index, path ->
             require(!path.startsWith(output) && !path.startsWith(target) && !output.startsWith(path) && !target.startsWith(path)) {
                 "Input and output paths overlap: $path"

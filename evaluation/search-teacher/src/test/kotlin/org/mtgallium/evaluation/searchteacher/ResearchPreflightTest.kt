@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertFails
 import kotlin.test.assertTrue
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
@@ -11,6 +12,14 @@ import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
 
 @org.junit.jupiter.api.Tag("public-source")
 class ResearchPreflightTest {
+    @Test
+    fun `runtime fingerprints serialize canonical map content`() {
+        val first = linkedMapOf("java" to "jvm", "classpath-0" to "classes")
+        val reordered = linkedMapOf("classpath-0" to "classes", "java" to "jvm")
+        assertEquals(preflightRuntimeHash(first), preflightRuntimeHash(reordered))
+        assertNotEquals(preflightRuntimeHash(first), preflightRuntimeHash(first + ("classpath-0" to "changed")))
+    }
+
     @Test
     fun `gameplay reductions preserve treatment policies and use a distinct schedule`() {
         val control = SearchTeacherCalibrationPolicy("control", 8, 64, 32, 1.4, false, 1.0)
