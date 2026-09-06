@@ -39,20 +39,22 @@ internal data class RootKernelFitReference(val directory: String, val researchRu
         require(bindings.material["kernel"] == "l2-state-l2-candidate-root-centered-candidate-plus-state-tensor-candidate-v1")
         val model = evidenceJson.decodeFromString<RootActionKernelModel>(input("model.json"))
         require(model.ridge == report.plan.ridge && model.centers.size == report.development.actions)
-        return RootKernelSelectionPolicy(model, "root-kernel-clipped-score-v1:$researchRunIdentity:$manifestSha256:${entries.getValue("model.json").sha256}")
+        return RootKernelSelectionPolicy(model, "root-kernel-clipped-score-v1:$COMPILED_ROOT_ACTION_KERNEL_ID:$researchRunIdentity:$manifestSha256:${entries.getValue("model.json").sha256}")
     }
 }
 
 /** The frozen model sees only actual acting-player information and the caller's admitted menu. */
 internal class RootKernelSelectionPolicy(
-    private val model: RootActionKernelModel,
+    model: RootActionKernelModel,
     override val configurationId: String,
 ) : RootSelectionPolicy {
+    private val scorer = CompiledRootActionKernel(model)
+
     override fun scores(information: PolicyInformationState, candidates: List<SemanticChoice>): Map<String, Double> {
         require(!information.terminated && information.actingPlayerId != null)
         require(information.actingPlayerId == information.observation.perspectivePlayerId)
         require(candidates.isNotEmpty() && candidates.map { it.signature }.distinct().size == candidates.size)
-        val scores = rootActionKernelFeatures(information, candidates).map(model::score)
+        val scores = scorer.scores(rootActionKernelFeatures(information, candidates))
         require(scores.all(Double::isFinite))
         // Fixed saturation bounds the selection bonus; these are preferences, never payoff labels.
         return candidates.indices.associate { candidates[it].signature to scores[it].coerceIn(-1.0, 1.0) }

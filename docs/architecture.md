@@ -74,6 +74,11 @@ initial visits. Policy identity and diagnostics retain the guidance identity;
 zero scores preserve the existing search. The first version refuses tree reuse
 and in-tree decision compression.
 
+The frozen action kernel compiles to a bilinear scorer at load time and shares
+the state projection across each supplied menu. The serialized fit and feature
+meaning remain unchanged; guidance identity also records the scorer version
+because changed floating-point summation order can affect near ties.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout

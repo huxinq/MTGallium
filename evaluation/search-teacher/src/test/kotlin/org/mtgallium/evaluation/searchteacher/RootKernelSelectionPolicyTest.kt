@@ -26,6 +26,7 @@ class RootKernelSelectionPolicyTest {
         val features = rootActionKernelFeatures(info, menu)
         val model = RootActionKernelModel(ridge = .001, centers = features, coefficients = List(menu.size) { if (it == 0) 100.0 else -100.0 })
         val policy = fixture(model).load()
+        assertTrue(COMPILED_ROOT_ACTION_KERNEL_ID in policy.configurationId)
         val expected = features.map { model.score(it).coerceIn(-1.0, 1.0) }
         assertTrue(expected.any { it == 1.0 || it == -1.0 })
         assertEquals(menu.indices.associate { menu[it].signature to expected[it] }, policy.scores(info, menu))
