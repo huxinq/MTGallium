@@ -19,6 +19,8 @@ import org.mtgallium.agent.infoset.core.InformationSetSearchReuseConfig
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.MonoRedVisibleFeatures
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
+import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicySession
 import org.mtgallium.agent.searchteacher.SearchTeacherSearchFactory
 import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
@@ -40,6 +42,9 @@ internal data class PositionBankScreenPolicy(
     val evaluator: MonoRedVisibleEvaluatorConfig,
 ) {
     init {
+        require(search.tacticalEvaluator == null || evaluator == MonoRedVisibleEvaluatorConfig()) {
+            "Tactical screens cannot carry a conflicting visible-v2 configuration"
+        }
         require(search.evaluator == null || search.evaluator == evaluator) {
             "Search and screen evaluator configurations must agree"
         }
@@ -64,6 +69,7 @@ internal data class PositionBankScreenPlan(
         require(rootLimit > 0 && repetitions > 0 && policies.isNotEmpty())
         require(searchSeedDomain.isNotBlank())
         require(policies.map { it.search.id }.distinct().size == policies.size)
+        require(mode != PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES || policies.all { it.search.tacticalEvaluator == null })
         require(mode != PositionBankScreenMode.FEATURES || repetitions == 1) {
             "Deterministic feature rescoring has no stochastic repetitions"
         }
@@ -163,11 +169,13 @@ internal class PositionBankScreenRunner(
         val rows = parallelMapOrdered(groups, workerThreads) { task ->
             val position = selected[task / plan.policies.size]
             val policy = plan.policies[task % plan.policies.size]
-            val evaluator = ConfiguredMonoRedInformationEvaluator(policy.evaluator)
+            val tactical = policy.search.tacticalEvaluator?.let(::MonoRedTacticalEvaluator)
+            val evaluator: ConfiguredInformationStateEvaluator = tactical ?: ConfiguredMonoRedInformationEvaluator(policy.evaluator)
             // The cache is a derived view, not a replacement authority for the represented state.
             require(MonoRedVisibleFeatures.extract(position.information, position.actor) == position.visibleFeatures)
-            val raw = position.visibleFeatures.rawScore(evaluator.config)
-            val bounded = position.visibleFeatures.evaluate(evaluator.config)
+            val detailed = tactical?.evaluateDetailed(position.information, position.actor)
+            val raw = detailed?.rawScore ?: position.visibleFeatures.rawScore(policy.evaluator)
+            val bounded = detailed?.value ?: position.visibleFeatures.evaluate(policy.evaluator)
             val parameters = policy.search.parameters(position.baseSeed)
             require(!parameters.searchReuse.enabled) { "Screen repetitions require fresh search trees" }
             // Lazy so a feature-only screen does not load a model or construct an engine world.

@@ -10,6 +10,11 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSettings
+import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.core.LeafStateSource
+import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.MixtureOpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicy
@@ -73,8 +78,12 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rootCloningFit: CloningFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val tacticalEvaluator: MonoRedTacticalEvaluatorSettings? = null,
 ) {
     init {
+        require(evaluator == null || tacticalEvaluator == null) { "Only one evaluator may be configured" }
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
         require(particles > 0 && simulations > 0 && maxPolicyDecisions > 0)
         require(explorationConstant.isFinite() && explorationConstant >= 0)
@@ -89,10 +98,12 @@ internal data class SearchTeacherCalibrationPolicy(
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
         rolloutTurnHorizon = rolloutTurnHorizon,
+        leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+            if (tacticalEvaluator == null) LeafEvaluator.MTGALLIUM_VISIBLE_V2 else LeafEvaluator.MTGALLIUM_TACTICAL_V3),
     )
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
-        informationEvaluator = evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
+        informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
         rootRolloutPolicy = rootCloningFit?.let {
             it.load()
         } ?: configuredRolloutPolicy(

@@ -83,6 +83,19 @@ class MonoRedTacticalEvaluatorTest {
     }
 
     @Test
+    fun `tactical coefficient features exactly rescore projected detailed components`() {
+        val information = state(rootLife = 13, opponentLife = 8,
+            rootHand = listOf(card("burn", "Shock", zone = "HAND")),
+            rootBattlefield = listOf(card("body", "Creature", zone = "BATTLEFIELD", types = setOf("CREATURE"), power = 3, toughness = 2)))
+        val detailed = evaluator.evaluateDetailed(information, "p0")
+        val features = MonoRedTacticalLinearFeatures.fromComponents(detailed.components)
+        assertEquals(detailed.rawScore, features.rawScore(evaluator.settings.weights))
+        assertEquals(detailed.value, features.evaluate(evaluator.settings))
+        val changed = evaluator.settings.copy(weights = MonoRedTacticalEvaluatorWeights(life = -.7, attack = .3, hand = 1.2))
+        assertEquals(MonoRedTacticalEvaluator(changed).evaluate(information, "p0"), features.evaluate(changed))
+    }
+
+    @Test
     fun `perspective binding fails closed`() {
         val state = state()
         assertFailsWith<IllegalArgumentException> { evaluator.evaluate(state, "p1") }
