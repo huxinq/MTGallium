@@ -9,9 +9,58 @@ import kotlin.test.assertFails
 import kotlin.test.assertTrue
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
 import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
+import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
+import org.mtgallium.agent.infoset.core.*
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @org.junit.jupiter.api.Tag("public-source")
 class ResearchPreflightTest {
+    @Test
+    fun `position completion refuses a substituted root and partial action family`() {
+        val descriptor = SearchTeacherCalibrationPolicy("reference", 8, 4, 32, 1.4, true, 1.0)
+        val plan = PositionBankScreenPlan(bankDirectory = "/tmp/bank", expectedBankIdentity = "bank",
+            partition = PositionBankScreenPartition.VALIDATION, mode = PositionBankScreenMode.ACTION_CONDITIONAL,
+            rootLimit = 1, repetitions = 1, policies = listOf(PositionBankScreenPolicy(descriptor, MonoRedVisibleEvaluatorConfig())))
+        val actions = (0..2).map { index -> SemanticChoice.create(kind = SemanticChoiceKind.ACTION,
+            operationFamily = SemanticOperationFamily.OTHER, display = SemanticChoiceDisplay("Action $index"),
+            canonicalPayload = buildJsonObject { put("action", index) }) }
+        val diagnostics = InformationSetSearchDiagnostics(4, 8, 1, 1, 1, 0, 0, "synthetic",
+            LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_VISIBLE_V2))
+        val estimates = actions.map { RootActionSearchEstimate(it, .25, 4,
+            SearchSettlementCounts(heuristicSettlementBackups = 4), diagnostics) }
+        val row = PositionBankScreenRow("root-a", descriptor.id, "synthetic", 0,
+            PositionBankScreenDisposition.ACTION_CONDITIONAL, 0.0, 0.0, rootActionEstimates = estimates)
+        val tree = PolicySourceTreeState("synthetic", "a".repeat(64), "b".repeat(64), "c".repeat(64))
+        val source = PolicySourceProvenance(expectedArgentumRevision = "synthetic", outer = tree, argentum = tree)
+        val report = PositionBankScreenReport(researchRunIdentity = "synthetic", sourceProvenance = source,
+            generatedAtUtc = "synthetic", plan = plan, workerThreads = 1, eligibleRoots = 2,
+            selectedRootIds = listOf("root-a"), rows = listOf(row), valid = true)
+        val expected = linkedMapOf("root-a" to actions)
+        requirePositionScreenPreflightComplete(report, plan, expected)
+        assertFails { requirePositionScreenPreflightComplete(report.copy(rows = listOf(row.copy(rootActionEstimates = estimates.take(2)))), plan, expected) }
+        assertFails { requirePositionScreenPreflightComplete(report.copy(selectedRootIds = listOf("root-b"), rows = listOf(row.copy(rootId = "root-b"))), plan, expected) }
+        assertFails { requirePositionScreenPreflightComplete(report.copy(rows = listOf(row.copy(disposition = PositionBankScreenDisposition.REFUSED))), plan, expected) }
+    }
+
+    @Test
+    fun `position smoke preserves bank partition reference budgets and learned artifact pins`() {
+        val control = SearchTeacherCalibrationPolicy("control", 32, 256, 32, 1.4, true, 1.0)
+        val fit = CloningFitReference("/tmp/model", "research-run-v1-sha256:" + "1".repeat(64), "2".repeat(64))
+        val candidate = control.copy(id = "candidate", particles = 8, simulations = 2, rootCloningFit = fit)
+        val plan = PositionBankScreenPlan(bankDirectory = "/tmp/bank", expectedBankIdentity = "bank-id",
+            partition = PositionBankScreenPartition.VALIDATION, mode = PositionBankScreenMode.ACTION_CONDITIONAL,
+            rootLimit = 8, repetitions = 4, policies = listOf(control, candidate).map {
+                PositionBankScreenPolicy(it, MonoRedVisibleEvaluatorConfig()) })
+        val work = ResearchPreflightWork.PositionScreen("/tmp/plan.json", "/tmp/deck.json", 2)
+        val expected = plan.copy(rootLimit = 1, repetitions = 1, policies = listOf(
+            plan.policies[0].copy(search = control.copy(simulations = 4)), plan.policies[1]))
+        assertEquals(expected, positionScreenPreflightPlan(plan, work))
+        val wrapped = ResearchPreflightPlan(targetOutput = "/tmp/primary", work = work)
+        assertEquals(wrapped, evidenceJson.decodeFromString<ResearchPreflightPlan>(evidenceJson.encodeToString(wrapped)))
+        assertFails { positionScreenPreflightPlan(plan.copy(mode = PositionBankScreenMode.FEATURES, repetitions = 1), work) }
+    }
+
     @Test
     fun `runtime fingerprints serialize canonical map content`() {
         val first = linkedMapOf("java" to "jvm", "classpath-0" to "classes")

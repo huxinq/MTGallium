@@ -175,6 +175,40 @@ class InformationSetSearch(
         searchSeed: Long,
         beliefContinuityEpoch: Long = 0L,
         simulationWorldSchedule: SimulationWorldSchedule? = null,
+    ): InformationSetSearchResult = searchInternal(
+        rootPlayer, belief, searchSeed, beliefContinuityEpoch, simulationWorldSchedule, null,
+    )
+
+    /**
+     * Diagnostic search conditioned on an initially admitted root action. Every simulation takes
+     * that first edge, then uses normal information-set tree/rollout policies and settlement.
+     * The mean is an adaptive search estimate, not an observed game payoff or an uncertainty bound.
+     */
+    fun estimateRootAction(
+        rootPlayer: String,
+        belief: BeliefBatch<Weighted<SearchWorld>>,
+        rootActionSignature: String,
+        searchSeed: Long,
+        simulationWorldSchedule: SimulationWorldSchedule? = null,
+    ): RootActionSearchEstimate {
+        require(rootActionSignature.isNotBlank())
+        require(!reuseConfig.enabled) { "Action-conditional estimates cannot reuse ordinary search traces" }
+        require(!config.compressPolicySingletonPasses) { "Action-conditional estimates require uncompressed root-edge accounting" }
+        require(config.wallClockBudgetMillis == null) { "Action-conditional estimates require a fixed simulation budget" }
+        val result = searchInternal(rootPlayer, belief, searchSeed, 0L, simulationWorldSchedule, rootActionSignature)
+        val action = result.candidates.single { it.choice.signature == rootActionSignature }
+        check(action.visits == config.simulations && result.candidates.filterNot { it == action }.all { it.visits == 0 })
+        return RootActionSearchEstimate(action.choice, action.meanValue, action.visits,
+            result.settlementCountsFor(action.choice), result.diagnostics)
+    }
+
+    private fun searchInternal(
+        rootPlayer: String,
+        belief: BeliefBatch<Weighted<SearchWorld>>,
+        searchSeed: Long,
+        beliefContinuityEpoch: Long,
+        simulationWorldSchedule: SimulationWorldSchedule?,
+        rootActionSignature: String?,
     ): InformationSetSearchResult {
         require(belief.particles.isNotEmpty())
         require(simulationWorldSchedule == null || !reuseConfig.enabled) {
@@ -184,6 +218,11 @@ class InformationSetSearch(
             "A fixed simulation-world schedule must contain exactly ${config.simulations} worlds"
         }
         requireConformantRoot(rootPlayer, belief)
+        if (rootActionSignature != null) {
+            require(initialExpansion(belief.particles.first().value).candidates.any { it.signature == rootActionSignature }) {
+                "Conditioned root action is absent from the initial admitted menu"
+            }
+        }
         val rolloutTargetTurn = rolloutTargetTurn(config.rolloutTurnHorizon?.let {
             belief.particles.first().value.informationState(rootPlayer).observation.turnNumber
         })
@@ -275,6 +314,7 @@ class InformationSetSearch(
                 quiescenceMode = false,
                 quiescenceDepth = 0,
                 rolloutTargetTurn = rolloutTargetTurn,
+                rootActionSignature = rootActionSignature,
             )
             require(outcome.backedValue.isFinite()) { "Search produced a non-finite value" }
             recorder?.build(outcome)?.let(nextTraces::add)
@@ -382,6 +422,7 @@ class InformationSetSearch(
         quiescenceMode: Boolean,
         quiescenceDepth: Int,
         rolloutTargetTurn: Int?,
+        rootActionSignature: String? = null,
     ): SearchSettlement {
         onDepth(depth)
         world.terminalPayoff(rootPlayer)?.let {
@@ -578,7 +619,11 @@ class InformationSetSearch(
             }
         }
 
-        val edge = selectUct(node, searchSeed, simulationIndex, depth)
+        val edge = if (rootActionSignature == null) selectUct(node, searchSeed, simulationIndex, depth)
+            else {
+                check(depth == 0 && actor == rootPlayer)
+                requireNotNull(node.edges[rootActionSignature]) { "Conditioned root action is absent from this world" }
+            }
         recorder?.choose(tracePoint, edge.choice)
         val advanced = advanceCached(world, edge.choice, transitionCache, transitionNode, workAudit)
         val value = if (quiescenceMode) {

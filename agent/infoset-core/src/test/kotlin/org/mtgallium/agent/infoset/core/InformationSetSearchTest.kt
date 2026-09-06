@@ -9,6 +9,54 @@ import kotlin.test.assertFailsWith
 
 class InformationSetSearchTest {
     @Test
+    fun `conditional estimate forces only the first edge and spends every simulation on it`() {
+        val trace = mutableListOf<Pair<Int, String>>()
+        val original = FakeWorld()
+        val world = TracingWorld(original, trace)
+        val belief = batch(listOf(world))
+        val search = coreSearch(InformationSetSearchConfig(simulations = 32, maxPolicyDecisions = 3,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy)
+        val action = world.expandChoices().candidates.single { it.display.label == "B" }
+        val result = search.estimateRootAction("p0", belief, action.signature, 91L)
+        assertEquals(action, result.action)
+        assertEquals(32, result.visits)
+        assertEquals(-.2, result.meanBackedValue, 1e-12)
+        assertEquals(32, result.settlementCounts.heuristicSettlementBackups)
+        assertEquals(0, result.settlementCounts.terminalPayoffBackups)
+        assertTrue(trace.filter { it.first == 0 }.all { it.second == "B" })
+        assertTrue(trace.any { it.first == 1 }) // The opponent's genuine response is reached.
+        assertTrue(trace.any { it.first == 2 && it.second == "A" }) // Later own choices remain free.
+        assertTrue(result.diagnostics.nodes > 1)
+        assertEquals(0, original.depth)
+        assertEquals("A", search.search("p0", belief, 91L).chosen.display.label)
+    }
+
+    @Test
+    fun `conditional estimate preserves paired world schedules and typed settlements`() {
+        val search = coreSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy)
+        val belief = batch(listOf(FakeWorld()))
+        val action = belief.particles.first().value.expandChoices().candidates.single { it.display.label == "B" }
+        val worlds = List(8) { if (it < 4) FakeWorld(terminalAtDepth = 1) else FakeWorld() }
+        val result = search.estimateRootAction("p0", belief, action.signature, 91L, SimulationWorldSchedule(worlds))
+        assertEquals(.4, result.meanBackedValue, 1e-12)
+        assertEquals(4, result.settlementCounts.terminalPayoffBackups)
+        assertEquals(4, result.settlementCounts.heuristicSettlementBackups)
+        assertTrue(worlds.all { it.depth == 0 })
+        assertFailsWith<IllegalArgumentException> { search.estimateRootAction("p0", belief, "absent", 91L) }
+        assertFailsWith<IllegalStateException> {
+            search.estimateRootAction("p0", batch(listOf(FakeWorld(rejectAtDepth = 0))), action.signature, 91L)
+        }
+        val compressed = coreSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
+            compressPolicySingletonPasses = true,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy)
+        assertFailsWith<IllegalArgumentException> { compressed.estimateRootAction("p0", belief, action.signature, 91L) }
+    }
+
+    @Test
     fun `terminal continuation uses both fixed rollout seats and returns only actual payoff`() {
         val rootPolicy = RecordingPolicy("root-terminal-policy")
         val opponentPolicy = RecordingPolicy("opponent-terminal-policy")
@@ -1303,6 +1351,17 @@ private class AuditedReplacementPolicy(
             evidenceDisposition = disposition,
         ),
     )
+}
+
+private class TracingWorld(
+    private val world: FakeWorld,
+    private val trace: MutableList<Pair<Int, String>>,
+) : SearchWorld by world {
+    override fun fork(): SearchWorld = TracingWorld(world.fork() as FakeWorld, trace)
+    override fun step(choice: SemanticChoice): SearchStepResult {
+        trace += world.depth to choice.display.label
+        return world.step(choice)
+    }
 }
 
 private class FakeWorld(

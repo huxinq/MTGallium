@@ -37,6 +37,34 @@ sequential belief, then compares actual search choices on matched root/repetitio
 seeds. It records values, settlements, diagnostics and reconstruction/selection
 cost separately. The actual replayed hidden world never becomes a belief particle.
 
+`ACTION_CONDITIONAL` reconstructs the same legitimate information and belief,
+then spends the configured simulation budget on each initially admitted root
+action separately. Only the first edge is forced; normal tree selection,
+opponent decisions, rollout policies and horizon/settlement rules continue
+afterward. The complete represented candidate family remains intact. The
+diagnostic rejects trace reuse, wall-clock cutoffs and singleton-pass compression.
+Actions outside the initially admitted menu are refused; this is not a claim
+of exhaustive rules-legal coverage.
+
+Each action retains its adaptive mean backed value, visits, typed settlement
+counts and diagnostics in `rootActionEstimates`. A forced-action estimate is
+neither a policy recommendation nor a terminal outcome. The root/repetition
+seed and particle batch are shared across actions; divergent continuations
+need not consume corresponding chance events. Internal tree backups are not
+independent uncertainty samples. Use independent repetitions and preserve
+whole-game grouping when comparing values; more simulations do not remove
+evaluator or opponent-policy bias. A reference-valued comparison between
+baseline and modified search choices is a surrogate pending gameplay validation.
+Set a separate `searchSeedDomain` for reference scoring to avoid reusing the
+candidate-selection search randomness. Omission preserves historical seed
+derivation and plan bytes. Repetitions vary search sampling over the reconstructed
+particle batch; they do not independently rebuild that posterior approximation.
+
+Both search modes support the bound [research preflight](research-preflight.md)
+with `work.type = "position-screen"`. Reuse the finalized bank and reference
+estimates across candidates only while their source, configuration, action
+coverage and population meaning remain applicable.
+
 `MonoRedVisibleEvaluatorConfig` parameterizes the existing visible-v2 formula.
 Its default coefficients preserve that evaluator's numerical behavior; a
 configuration identity distinguishes overrides. Formula changes, learned labels,

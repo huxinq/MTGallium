@@ -7,6 +7,21 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class LeafStateSource { CURRENT_INFORMATION_STATE, CURRENT_SAMPLED_WORLD, BOUNDED_ROLLOUT }
 
+/** A forced first edge's search estimate; it is not a policy recommendation or terminal outcome. */
+@Serializable
+data class RootActionSearchEstimate(
+    val action: SemanticChoice,
+    val meanBackedValue: Double,
+    val visits: Int,
+    val settlementCounts: SearchSettlementCounts,
+    val diagnostics: InformationSetSearchDiagnostics,
+) {
+    init {
+        require(meanBackedValue.isFinite() && visits > 0)
+        require(settlementCounts.successfulBackups == visits && diagnostics.simulations == visits)
+    }
+}
+
 @Serializable
 enum class LeafEvaluator(val evaluatorId: String) {
     MTGALLIUM_VISIBLE_V2("mono-red-visible-board-v2"),

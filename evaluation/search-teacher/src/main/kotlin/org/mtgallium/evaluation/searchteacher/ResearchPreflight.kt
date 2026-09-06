@@ -35,6 +35,22 @@ internal sealed class ResearchPreflightWork {
         }
     }
 
+    @Serializable
+    @SerialName("position-screen")
+    data class PositionScreen(
+        val planPath: String,
+        val deckManifest: String,
+        val threads: Int,
+        val smokeSimulations: Int = 4,
+        val smokeRootLimit: Int = 1,
+        val smokeRepetitions: Int = 1,
+    ) : ResearchPreflightWork() {
+        init {
+            absolutePreflightPath(planPath); absolutePreflightPath(deckManifest)
+            require(threads > 0 && smokeSimulations > 0 && smokeRootLimit > 0 && smokeRepetitions > 0)
+        }
+    }
+
     /** Initial learning adapter deliberately uses the existing verified retained-32 population. */
     @Serializable
     @SerialName("decision-local-learning")
@@ -66,6 +82,38 @@ internal fun gameplayPreflightPlan(plan: SearchTeacherCalibrationPlan, work: Res
     fun reduce(policy: SearchTeacherCalibrationPolicy) = policy.copy(simulations = minOf(policy.simulations, work.smokeSimulations))
     return plan.copy(phase = SearchTeacherCalibrationPhase.PREFLIGHT, baseSeed = work.smokeBaseSeed,
         pairOffset = 0, pairCount = 1, control = reduce(plan.control), candidates = plan.candidates.map(::reduce))
+}
+
+internal fun positionScreenPreflightPlan(plan: PositionBankScreenPlan, work: ResearchPreflightWork.PositionScreen): PositionBankScreenPlan {
+    require(plan.mode != PositionBankScreenMode.FEATURES) { "Position preflight must exercise search" }
+    return plan.copy(rootLimit = minOf(plan.rootLimit, work.smokeRootLimit),
+        repetitions = minOf(plan.repetitions, work.smokeRepetitions),
+        policies = plan.policies.map { it.copy(search = it.search.copy(simulations = minOf(it.search.simulations, work.smokeSimulations))) })
+}
+
+internal fun requirePositionScreenPreflightComplete(
+    report: PositionBankScreenReport,
+    plan: PositionBankScreenPlan,
+    expectedRoots: Map<String, List<org.mtgallium.agent.infoset.core.SemanticChoice>>,
+) {
+    require(report.plan == plan && report.valid && report.selectedRootIds.isNotEmpty())
+    require(report.selectedRootIds == expectedRoots.keys.toList()) { "Smoke root population differs from the authenticated bank selection" }
+    require(report.rows.size == report.selectedRootIds.size * plan.policies.size * plan.repetitions)
+    val expected = report.selectedRootIds.flatMap { root -> plan.policies.flatMap { policy ->
+        (0 until plan.repetitions).map { repetition -> Triple(root, policy.search.id, repetition) }
+    } }.toSet()
+    require(report.rows.map { Triple(it.rootId, it.policyId, it.repetition) }.toSet() == expected)
+    report.rows.forEach { row ->
+        require(row.rootId in report.selectedRootIds && row.repetition in 0 until plan.repetitions)
+        val policy = plan.policies.single { it.search.id == row.policyId }
+        if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL) {
+            require(row.disposition == PositionBankScreenDisposition.ACTION_CONDITIONAL && row.rootActionEstimates.size >= 2)
+            require(row.rootActionEstimates.map { it.action.signature } == expectedRoots.getValue(row.rootId).map { it.signature }) {
+                "Smoke action coverage differs from the authenticated bank menu"
+            }
+            require(row.rootActionEstimates.all { it.visits == policy.search.simulations })
+        } else require(row.disposition == PositionBankScreenDisposition.SEARCHED && row.searchDiagnostics?.simulations == policy.search.simulations)
+    }
 }
 
 /** No wins, payoff, loss improvement, or strategic stopping boundary enters the technical gate. */
@@ -156,6 +204,12 @@ internal class ResearchPreflightRunner(private val root: Path) {
         val runtime = researchPreflightRuntime()
         val inputs = when (val work = plan.work) {
             is ResearchPreflightWork.Gameplay -> listOf(absolutePreflightPath(work.planPath), absolutePreflightPath(work.deckManifest))
+            is ResearchPreflightWork.PositionScreen -> {
+                val screen = evidenceJson.decodeFromString<PositionBankScreenPlan>(Files.readString(absolutePreflightPath(work.planPath)))
+                val bank = absolutePreflightPath(screen.bankDirectory)
+                loadVerifiedRealGamePositionBank(bank, screen.expectedBankIdentity)
+                listOf(absolutePreflightPath(work.planPath), absolutePreflightPath(work.deckManifest), bank)
+            }
             is ResearchPreflightWork.Learning -> listOf(absolutePreflightPath(work.parentDirectory), absolutePreflightPath(work.precisionDirectory))
         }
         val material = linkedMapOf("profile" to researchSha256(bytes), "source" to researchSha256(evidenceJson.encodeToString(source)),
@@ -247,6 +301,27 @@ internal class ResearchPreflightRunner(private val root: Path) {
                         val inputs = loadDecisionLocalLearnabilityInputs(absolutePreflightPath(work.parentDirectory), absolutePreflightPath(work.precisionDirectory))
                         workload.putAll(runLearningPreflight(inputs.combined, work, output))
                         artifacts += listOf("model.json", "scores.json")
+                    }
+                    is ResearchPreflightWork.PositionScreen -> {
+                        val planBytes = Files.readString(absolutePreflightPath(work.planPath))
+                        val full = evidenceJson.decodeFromString<PositionBankScreenPlan>(planBytes)
+                        val smoke = positionScreenPreflightPlan(full, work)
+                        ResearchRunFiles.atomicWrite(output.resolve("primary-plan.json"), planBytes)
+                        ResearchRunFiles.atomicWrite(output.resolve("smoke-plan.json"), evidenceJson.encodeToString(smoke))
+                        ResearchRunFiles.atomicWrite(output.resolve("deck.json"), Files.readAllBytes(absolutePreflightPath(work.deckManifest)))
+                        artifacts += listOf("primary-plan.json", "smoke-plan.json", "deck.json")
+                        val report = PositionBankScreenRunner(root, buildRegistry(), loadDeckManifest(absolutePreflightPath(work.deckManifest)))
+                            .run(smoke, output.resolve("screen"), work.threads)
+                        ResearchRunArtifacts.loadAndVerify(output.resolve("screen"), report.researchRunIdentity)
+                        val bank = loadVerifiedRealGamePositionBank(absolutePreflightPath(smoke.bankDirectory), smoke.expectedBankIdentity)
+                        val expectedRoots = bank.roots.filter { it.partition.name == smoke.partition.name }.sortedBy { it.rootId }
+                            .take(smoke.rootLimit).associate { it.rootId to it.reconstructedCandidates }
+                        requirePositionScreenPreflightComplete(report, smoke, expectedRoots)
+                        children["screen"] = report.researchRunIdentity
+                        workload.putAll(mapOf("full-plan-sha256" to researchSha256(planBytes), "worker-threads" to work.threads.toString(),
+                            "full-root-limit" to full.rootLimit.toString(), "full-repetitions" to full.repetitions.toString(),
+                            "smoke-root-limit" to smoke.rootLimit.toString(), "smoke-repetitions" to smoke.repetitions.toString(),
+                            "simulation-cap" to work.smokeSimulations.toString()))
                     }
                 }
             }

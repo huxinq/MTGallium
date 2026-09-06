@@ -67,6 +67,24 @@ A valid pair of losses passes; rejection, stopped execution, or missing legs
 fails. Smoke game outcomes are excluded from primary strength evidence. Their
 sequential disposition supplies no strength conclusion for the primary run.
 
+## Position-screen profile
+
+Use `work.type = "position-screen"` with absolute `planPath`, `deckManifest`,
+and positive `threads`. The plan is a complete `PositionBankScreenPlan` in
+`SEARCH` or `ACTION_CONDITIONAL` mode. Optional `smokeSimulations`,
+`smokeRootLimit` and `smokeRepetitions` default to 4, 1 and 1. Each caps its
+corresponding full setting; policies, model pins, particle counts, evaluator,
+bank identity, partition and worker count remain fixed.
+
+The gate authenticates the bank and binds its exact manifest alongside the
+full plan and deck. Every smoke row must complete the requested search; an
+automatic selection is insufficient. Action-conditional rows must retain
+multiple distinct actions with all requested visits. The child screen's
+finalized artifacts are verified. The smoke accesses a subset of the intended
+roots with the same repetition seeds; it is a technical rehearsal, not an
+independent quality sample or an additional replicate. A new full plan or bank
+manifest cannot reuse the old pass.
+
 ## Decision-local learning profile
 
 ```json
