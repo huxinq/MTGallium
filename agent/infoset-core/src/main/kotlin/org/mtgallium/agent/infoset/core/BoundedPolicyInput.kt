@@ -175,6 +175,29 @@ data class BoundedPolicyInputConfig(
 }
 
 object BoundedPolicyInputCompiler {
+    /** Shared feature window for live policies and sealed trajectory inputs. */
+    fun recentEventWindow(
+        history: List<PolicyHistoryEvent>,
+        config: BoundedPolicyInputConfig = BoundedPolicyInputConfig(),
+    ): PolicyRecentEventWindow {
+        var bytes = 0
+        var examined = 0
+        val suffixReversed = mutableListOf<PolicyHistoryEvent>()
+        for (event in history.asReversed()) {
+            if (suffixReversed.size == config.recentEventLimit) break
+            examined++
+            val eventBytes = PolicyJson.format.encodeToString(PolicyHistoryEvent.serializer(), event)
+                .toByteArray(StandardCharsets.UTF_8).size
+            require(eventBytes <= config.recentEventByteLimit) {
+                "One safe event requires $eventBytes bytes; window limit is ${config.recentEventByteLimit}"
+            }
+            if (bytes + eventBytes > config.recentEventByteLimit) break
+            bytes += eventBytes
+            suffixReversed += event
+        }
+        return PolicyRecentEventWindow(suffixReversed.asReversed(), examined, bytes)
+    }
+
     fun compile(
         information: PolicyInformationState,
         belief: PolicyBeliefSummary = PolicyBeliefSummary.exactOnly(information.knowledge.knowledgeDigest),
@@ -193,22 +216,8 @@ object BoundedPolicyInputCompiler {
             "Belief summary does not describe the current exact knowledge state"
         }
 
-        var bytes = 0
-        var examined = 0
-        val suffixReversed = mutableListOf<PolicyHistoryEvent>()
-        for (event in information.history.asReversed()) {
-            if (suffixReversed.size == config.recentEventLimit) break
-            examined++
-            val eventBytes = PolicyJson.format.encodeToString(PolicyHistoryEvent.serializer(), event)
-                .toByteArray(StandardCharsets.UTF_8).size
-            require(eventBytes <= config.recentEventByteLimit) {
-                "One safe event requires $eventBytes bytes; window limit is ${config.recentEventByteLimit}"
-            }
-            if (bytes + eventBytes > config.recentEventByteLimit) break
-            bytes += eventBytes
-            suffixReversed += event
-        }
-        val recent = suffixReversed.asReversed()
+        val window = recentEventWindow(information.history, config)
+        val recent = window.events
         val provisional = BoundedPolicyInput(
             actingPlayerId = information.actingPlayerId,
             observation = information.observation,
@@ -234,14 +243,20 @@ object BoundedPolicyInputCompiler {
             input = sealed,
             metrics = BoundedPolicyCompilationMetrics(
                 historyCursor = information.historyCommitment.cursor,
-                eventsExamined = examined,
+                eventsExamined = window.eventsExamined,
                 recentEventCount = recent.size,
-                recentEventBytes = bytes,
+                recentEventBytes = window.serializedBytes,
                 totalBytes = totalBytes,
             ),
         )
     }
 }
+
+data class PolicyRecentEventWindow(
+    val events: List<PolicyHistoryEvent>,
+    val eventsExamined: Int,
+    val serializedBytes: Int,
+)
 
 data class BoundedPolicyCompilation(
     val input: BoundedPolicyInput,

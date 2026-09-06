@@ -31,11 +31,13 @@ import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
 import org.mtgallium.agent.infoset.core.BoundedPolicyInput
 import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
+import org.mtgallium.agent.infoset.core.BoundedPolicyInputConfig
 import org.mtgallium.agent.infoset.core.CANDIDATE_SCHEMA_V3
 import org.mtgallium.agent.infoset.core.CANDIDATE_SCHEMA_V4
 import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
 import org.mtgallium.agent.infoset.core.PolicyCardView
 import org.mtgallium.agent.infoset.core.PolicyHistoryEvent
+import org.mtgallium.agent.infoset.core.PolicyInformationState
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
 import org.mtgallium.agent.infoset.core.PolicyObservation
@@ -205,6 +207,29 @@ internal class NeuralBehavioralCloningFeatureEncoder(
         require(candidates.isNotEmpty() && candidates.map { it.signature }.distinct().size == candidates.size)
         require(candidates.all { it.schemaVersion == input.candidateSchemaVersion })
         val features = NeuralBcFeatureInput.current(input).copy(candidates = candidates.map(SemanticChoice::toNeuralBcFeatureCandidate))
+        return encode(features, labelIndex = 0, gameId = "inference", decisionIndex = 0)
+    }
+
+    /** Live typed policy input needs no detached-artifact serialization or integrity round trip. */
+    internal fun encodeLivePolicyMenuForInference(
+        information: PolicyInformationState,
+        candidates: List<SemanticChoice>,
+    ): EncodedBcDecision {
+        require(!information.terminated && information.actingPlayerId != null)
+        require(information.actingPlayerId == information.observation.perspectivePlayerId)
+        require(information.observation.currentTurnStateComplete)
+        val config = BoundedPolicyInputConfig()
+        require(information.candidates.size <= config.candidateLimit)
+        require(candidates.isNotEmpty() && candidates.map { it.signature }.distinct().size == candidates.size)
+        require(candidates.all { it.schemaVersion == information.candidateSchemaVersion })
+        val features = NeuralBcFeatureInput(
+            actingPlayerId = information.actingPlayerId,
+            observation = information.observation,
+            knowledge = information.knowledge,
+            recentEvents = BoundedPolicyInputCompiler.recentEventWindow(information.history, config).events,
+            candidates = candidates.map(SemanticChoice::toNeuralBcFeatureCandidate),
+            candidateSchemaVersion = information.candidateSchemaVersion,
+        )
         return encode(features, labelIndex = 0, gameId = "inference", decisionIndex = 0)
     }
 

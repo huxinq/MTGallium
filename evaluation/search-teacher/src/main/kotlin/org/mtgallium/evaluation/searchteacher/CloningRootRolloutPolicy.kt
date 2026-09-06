@@ -6,7 +6,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicyBehaviorSpecification
 import org.mtgallium.agent.infoset.core.PolicyInformationState
@@ -66,10 +65,9 @@ internal class CloningRootRolloutPolicy private constructor(
     ): ProbabilityDistribution<SemanticChoice> {
         require(!opponentInformation.terminated && opponentInformation.actingPlayerId != null)
         require(opponentInformation.actingPlayerId == opponentInformation.observation.perspectivePlayerId)
-        val input = BoundedPolicyInputCompiler.compile(opponentInformation)
         // The adapter's admitted menu can contain a combat anchor absent from represented proposals.
         // Score that supplied menu without rewriting the represented state's candidate commitment.
-        val encoded = encoder.encodePolicyMenuForInference(input, candidates)
+        val encoded = encoder.encodeLivePolicyMenuForInference(opponentInformation, candidates)
         val scores = model.scores(encoded)
         require(scores.size == candidates.size && scores.all(Double::isFinite))
         val selected = scores.indices.maxBy { scores[it] }

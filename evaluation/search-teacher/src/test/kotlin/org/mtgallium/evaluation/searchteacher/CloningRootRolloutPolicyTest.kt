@@ -6,11 +6,18 @@ import com.wingedsheep.gym.GameEnvironment
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.*
 import org.junit.jupiter.api.Tag
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
 import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
+import org.mtgallium.agent.infoset.core.PolicyAudience
+import org.mtgallium.agent.infoset.core.PolicyAudienceScope
+import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
+import org.mtgallium.agent.infoset.core.PolicyHistoryEvent
+import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.research.run.ResearchRunArtifacts
@@ -18,6 +25,41 @@ import org.mtgallium.research.run.ResearchRunBindings
 
 @Tag("public-source")
 class CloningRootRolloutPolicyTest {
+    @Test
+    fun `live encoding exactly matches sealed features and scores across history cutoffs and admitted menus`() {
+        val model = CandidateConditionedInteractionPolicy.initialize(NeuralBcInteractionModelConfig(), 73L)
+        val encoder = NeuralBehavioralCloningFeatureEncoder()
+        val world = world()
+        val base = world.informationState(requireNotNull(world.actorToAct()))
+        val choices = world.expandChoicesForPolicyAdmission().candidates.reversed()
+        for (payloadSize in listOf(0, 4096)) {
+            val history = (0L until 100L).map { index -> PolicyHistoryEvent(
+                eventId = index, audience = PolicyAudience(PolicyAudienceScope.PUBLIC), actor = null,
+                kind = PolicyHistoryEventKind.TURN_STRUCTURE,
+                payload = buildJsonObject { put("synthetic", "x".repeat(payloadSize)) }, detail = null,
+            ) }
+            val information = base.copy(history = history, historyCommitment = PolicyHistoryCommitment.replay(history))
+            val sealed = BoundedPolicyInputCompiler.compile(information)
+            if (payloadSize == 0) assertEquals(64, sealed.recentEvents.size)
+            else assertTrue(sealed.recentEvents.size < 64)
+            for (menu in listOf(choices, choices.take(1))) {
+                val expected = encoder.encodePolicyMenuForInference(sealed, menu)
+                val actual = encoder.encodeLivePolicyMenuForInference(information, menu)
+                assertContentEquals(expected.state.indices, actual.state.indices)
+                assertContentEquals(expected.state.values, actual.state.values)
+                assertEquals(expected.candidateCount, actual.candidateCount)
+                expected.candidates.zip(actual.candidates).forEach { (left, right) ->
+                    assertContentEquals(left.indices, right.indices)
+                    assertContentEquals(left.values, right.values)
+                }
+                assertContentEquals(model.scores(expected), model.scores(actual))
+            }
+            assertFails { encoder.encodePolicyMenuForInference(sealed.copy(inputDigest = "0".repeat(64)), choices) }
+            assertFails { encoder.encodeLivePolicyMenuForInference(information.copy(
+                observation = information.observation.copy(currentTurnStateComplete = false)), choices) }
+        }
+    }
+
     @Test
     fun `calibration binds a learned root rollout while preserving opponent continuation and defaults`() {
         val model = CandidateConditionedInteractionPolicy.initialize(NeuralBcInteractionModelConfig(), 73L)

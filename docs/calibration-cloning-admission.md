@@ -81,5 +81,12 @@ caller's admitted menu, which can differ from represented action proposals;
 it does not rewrite that state's candidate commitment. Selection is deterministic
 argmax with first-menu-order tie breaking. Optional annotations are skipped
 only for the simulated root-player decisions where this policy is invoked.
+Live inference reads the typed policy state directly and shares the trajectory
+compiler's count- and byte-bounded event window. It preserves the same model
+features without serializing and hashing a temporary trajectory input. The
+full exact knowledge and represented state remain available; the event feature
+window does not replace them. Detached inputs still require their canonical
+digest and serialized size limits. The live path creates no detached artifact
+and does not impose its total serialized-size limit.
 A verified model and a legal continuation are technical checks, not evidence
 of better gameplay or an equal-compute improvement.
