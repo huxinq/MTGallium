@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertFails
 
 class ResearchPreflightTest {
@@ -11,6 +12,18 @@ class ResearchPreflightTest {
         "source" to "source", "engine" to "engine", "configuration" to "config", "runtime" to "runtime", "input" to "input"))
     private fun report(passed: Boolean = true) = ResearchPreflightReport(bindings = bindings,
         checks = listOf(ResearchPreflightCheck("technical-smoke", passed, "technical result")), workload = mapOf("size" to "2"))
+
+    @Test
+    fun `absent JVM classpath entries are bound and later contents invalidate them`() {
+        val path = createTempDirectory("preflight-classpath").resolve("classes")
+        val absent = researchPreflightClasspathHash(path)
+        assertEquals("ABSENT", absent)
+        Files.createDirectory(path)
+        val empty = researchPreflightClasspathHash(path)
+        assertNotEquals(absent, empty)
+        Files.writeString(path.resolve("Synthetic.class"), "class bytes")
+        assertNotEquals(empty, researchPreflightClasspathHash(path))
+    }
 
     @Test
     fun `reuse requires the complete current binding and verified artifacts`() {

@@ -21,7 +21,8 @@ and places smoke artifacts only in its own directory.
 
 Commit the treatment first. A pass binds the source SHA and source fingerprints,
 Argentum gitlink and checkout, full profile bytes, input hashes, target output,
-actual Java executable/modules, JVM arguments, and ordered classpath contents.
+actual Java executable/modules, JVM arguments, and ordered classpath contents
+(including absent entries permitted by the JVM).
 The binary fingerprint identifies the executed runtime; it does not prove that
 those binaries were built from the declared source. Build from the committed
 checkout and keep the execution classpath fixed.

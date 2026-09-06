@@ -71,15 +71,19 @@ fun researchPreflightRuntime(): Map<String, String> = buildMap {
     put("java-modules", researchSha256File(javaHome.resolve("lib/modules")))
     System.getProperty("java.class.path").split(java.io.File.pathSeparator).forEachIndexed { index, entry ->
         val path = Path.of(entry).toAbsolutePath().normalize()
-        require(Files.exists(path)) { "Classpath entry is missing: $path" }
-        val hash = if (Files.isDirectory(path)) {
-            val contents = Files.walk(path).use { paths ->
-                paths.filter { Files.isRegularFile(it) }.sorted().map {
-                    listOf(path.relativize(it).toString(), researchSha256File(it))
-                }.toList()
-            }
-            researchSha256(preflightJson.encodeToString(contents))
-        } else researchSha256File(path)
-        put("classpath-$index", "$path:$hash")
+        put("classpath-$index", "$path:${researchPreflightClasspathHash(path)}")
     }
+}
+
+/** The JVM permits absent output directories; their later appearance must invalidate reuse. */
+internal fun researchPreflightClasspathHash(path: Path): String {
+    if (!Files.exists(path)) return "ABSENT"
+    return if (Files.isDirectory(path)) {
+        val contents = Files.walk(path).use { paths ->
+            paths.filter { Files.isRegularFile(it) }.sorted().map {
+                listOf(path.relativize(it).toString(), researchSha256File(it))
+            }.toList()
+        }
+        researchSha256(preflightJson.encodeToString(contents))
+    } else researchSha256File(path)
 }
