@@ -29,7 +29,7 @@ import org.mtgallium.research.run.ResearchRunBindings
 import org.mtgallium.research.run.ResearchRunFiles
 
 @Serializable
-internal enum class PositionBankScreenMode { FEATURES, SEARCH, ACTION_CONDITIONAL }
+internal enum class PositionBankScreenMode { FEATURES, SEARCH, ACTION_CONDITIONAL, ACTION_CONDITIONAL_V2_TRACES }
 
 @Serializable
 internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
@@ -97,6 +97,8 @@ internal data class PositionBankScreenRow(
     val diagnostic: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rootActionEstimates: List<RootActionSearchEstimate> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val visibleV2ActionTraces: List<VisibleV2ActionTrace> = emptyList(),
 )
 
 @Serializable
@@ -212,20 +214,25 @@ internal class PositionBankScreenRunner(
                     val searchSeed = ComponentSeeds.derive(position.sourceGameId, position.decisionIndex,
                         position.baseSeed, plan.searchSeedDomain, repetition)
                     val selectionStarted = System.nanoTime()
-                    if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL) {
+                    if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL || plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES) {
                         val belief = session.beliefBatch(actual)
+                        val recorder = if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES)
+                            RecordingVisibleV2Evaluator(policy.evaluator) else null
+                        val traces = mutableListOf<VisibleV2ActionTrace>()
                         val search = SearchTeacherSearchFactory.create(parameters.searchConfig(), defaultMonoRedOpponentPolicy(),
-                            arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator,
+                            arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), recorder ?: evaluator,
                             InformationSetSearchReuseConfig.DISABLED)
                         val estimates = candidates.map { choice ->
+                            recorder?.reset()
                             search.estimateRootAction(position.actor, belief, choice.signature, searchSeed).also {
                                 requireValidScreenSearch(it.diagnostics)
+                                recorder?.let { capture -> traces += capture.finish(it) }
                             }
                         }
                         accounted.copy(disposition = PositionBankScreenDisposition.ACTION_CONDITIONAL,
                             policyIdentity = session.policyIdentity, searchSeed = searchSeed,
                             selectionMillis = (System.nanoTime() - selectionStarted) / 1_000_000.0,
-                            rootActionEstimates = estimates)
+                            rootActionEstimates = estimates, visibleV2ActionTraces = traces)
                     } else {
                         val selection = session.select(actual, position.actor, searchSeed)
                         val selectionMillis = (System.nanoTime() - selectionStarted) / 1_000_000.0

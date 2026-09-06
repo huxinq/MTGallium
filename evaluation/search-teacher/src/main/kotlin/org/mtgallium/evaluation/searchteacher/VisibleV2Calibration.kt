@@ -54,11 +54,11 @@ internal data class VisibleV2CalibrationReport(
     val fitMeaning: String = "Existing visible-v2 coefficients only, with tanhScale fixed to remove the common coefficient/scale degeneracy. Full-batch Adam minimizes equal-seed-group root value MSE plus a fixed squared-distance penalty to hand coefficients. The minimum training penalized objective chooses the checkpoint; validation targets and regret never select coefficients. Fresh-search held-out action regret is a separate evaluation.",
 )
 
-private fun visibleV2Coefficients(c: MonoRedVisibleEvaluatorConfig): DoubleArray {
+internal fun visibleV2Coefficients(c: MonoRedVisibleEvaluatorConfig): DoubleArray {
     require(c.landMarginals.size == 5) { "This calibration retains v2's existing five land marginals" }
     return (listOf(c.life, c.hand, c.power, c.toughness, c.haste) + c.landMarginals + c.landTail).toDoubleArray()
 }
-private fun visibleV2Configured(base: MonoRedVisibleEvaluatorConfig, x: DoubleArray): MonoRedVisibleEvaluatorConfig {
+internal fun visibleV2Configured(base: MonoRedVisibleEvaluatorConfig, x: DoubleArray): MonoRedVisibleEvaluatorConfig {
     require(x.size == 11)
     return base.copy(life = x[0], hand = x[1], power = x[2], toughness = x[3], haste = x[4],
         landMarginals = x.slice(5..9), landTail = x[10])
