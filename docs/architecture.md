@@ -41,6 +41,13 @@ revision, material configuration, and evidence identity that generated it;
 later source commits do not rewrite that historical identity. Public code may
 generate private evidence without making the generated evidence public.
 
+Replay-derived reference cloning combines a current safe projection with an
+authenticated historical searched and accepted action. It retains both source
+identities and requires the historical search menu to equal the current semantic
+menu. Current generation limits exclude whole games; absent historical omission
+metadata stays unknown. These derived examples do not manufacture historical
+trajectory sidecars or relax the separate public-corpus admission contract.
+
 Public CI verifies explicitly self-contained public capabilities. Verification
 whose meaning requires private historical evidence remains separate; generic
 invariants should use synthetic or public-safe fixtures rather than treating a
