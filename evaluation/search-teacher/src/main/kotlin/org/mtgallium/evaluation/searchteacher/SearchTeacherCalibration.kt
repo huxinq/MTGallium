@@ -132,22 +132,33 @@ internal data class SearchTeacherCalibrationPlan(
 
     fun pairSeed(pairIndex: Int): Long {
         require(pairIndex in pairOffset until pairOffset + pairCount)
-        return ComponentSeeds.derive(baseSeed, pairIndex, CALIBRATION_SCHEDULE)
+        return calibrationPairSeed(baseSeed, pairIndex)
     }
 }
+
+internal fun calibrationPairSeed(baseSeed: Long, pairIndex: Int): Long =
+    ComponentSeeds.derive(baseSeed, pairIndex, CALIBRATION_SCHEDULE)
 
 internal fun searchTeacherCalibrationBindings(
     plan: SearchTeacherCalibrationPlan, source: PolicySourceProvenance,
     policyIdentities: Map<String, String>, deckHash: String, cardPoolHash: String, workerThreads: Int,
     sequentialRule: PairedSequentialRule? = null,
+) = retainedCalibrationBindings(evidenceJson.encodeToString(plan), source, policyIdentities,
+    deckHash, cardPoolHash, workerThreads, sequentialRule?.let { evidenceJson.encodeToString(it) })
+
+/** Hash the complete retained configuration, including opaque opponent-only interventions. */
+internal fun retainedCalibrationBindings(
+    planJson: String, source: PolicySourceProvenance,
+    policyIdentities: Map<String, String>, deckHash: String, cardPoolHash: String, workerThreads: Int,
+    sequentialRuleJson: String?,
 ) = ResearchRunBindings(protocol = SEARCH_TEACHER_CALIBRATION_PROTOCOL, material = mapOf(
-    "plan" to sha256(evidenceJson.encodeToString(plan)),
+    "plan" to sha256(planJson),
     "source-provenance" to sha256(evidenceJson.encodeToString(source)),
     "policy-evidence" to sha256(evidenceJson.encodeToString<Map<String, String>>(policyIdentities.toSortedMap())),
     "deck" to deckHash, "card-pool" to cardPoolHash, "schedule" to CALIBRATION_SCHEDULE,
     // Timing is an outcome here; worker count cannot change across resumed attempts.
     "worker-threads" to workerThreads.toString(),
-) + (sequentialRule?.let { mapOf("sequential-rule" to sha256(evidenceJson.encodeToString(it))) } ?: emptyMap()))
+) + (sequentialRuleJson?.let { mapOf("sequential-rule" to sha256(it)) } ?: emptyMap()))
 
 @Serializable
 internal data class SearchTeacherCalibrationPolicyReport(

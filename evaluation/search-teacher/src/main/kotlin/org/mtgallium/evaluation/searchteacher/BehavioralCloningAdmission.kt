@@ -2,6 +2,7 @@ package org.mtgallium.evaluation.searchteacher
 
 import java.nio.file.Path
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import org.mtgallium.agent.infoset.core.BoundedPolicyInput
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
@@ -50,6 +51,32 @@ internal class BehavioralCloningAdmissionScope private constructor(
     }
 
     companion object {
+        /** The caller must first authenticate this retained report through its research-run manifest. */
+        fun retainedCalibrationReference(
+            deck: DeckManifest,
+            report: RetainedCalibrationCloningSource,
+        ): BehavioralCloningAdmissionScope {
+            require(deck.deckHash() == report.deckHash && deck.cardPoolHash() == report.cardPoolHash)
+            val control = report.teacher
+            require(control.descriptor.evaluator == null) { "This admission path supports the recorded default evaluator only" }
+            require(control.search.simulations == control.descriptor.simulations)
+            val leaf = control.search.leaf
+            return BehavioralCloningAdmissionScope(
+                expectedOuterRevision = report.sourceProvenance.outer.revision,
+                expectedArgentumRevision = report.sourceProvenance.argentum.revision,
+                deckManifestHash = report.deckHash,
+                cardPoolHash = report.cardPoolHash,
+                profileId = "retained-calibration-reference-v1",
+                profileHash = report.profileHash,
+                actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+                leaf = leaf,
+                particles = control.descriptor.particles,
+                simulations = control.descriptor.simulations,
+                invokedEvaluatorConfigurationId = SearchTeacherEvaluatorRegistry.strategy(leaf).source.invokedEvaluatorConfigurationId,
+                frozenMainDeckEntries = deck.mainDeck.toSortedMap().map { it.key to it.value },
+            )
+        }
+
         fun frozenMonoRed(
             deck: DeckManifest,
             profile: FrozenSearchProfile,

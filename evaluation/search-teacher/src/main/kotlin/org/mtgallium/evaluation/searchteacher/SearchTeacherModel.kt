@@ -732,7 +732,7 @@ data class PlannerEvidenceArtifact(
 }
 
 @Serializable
-data class CorpusEntry(
+data class CorpusEntry @JvmOverloads constructor(
     val gameId: String,
     val publicTrajectory: String,
     val publicSha256: String?,
@@ -744,8 +744,12 @@ data class CorpusEntry(
     val plannerEvidence: PlannerEvidenceArtifact? = null,
     val replayVerified: Boolean,
     val game: CorpusGameSummary,
+    /** Perspective supplying teacher labels when both players use Search Teacher. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val teacherSeat: String? = null,
 ) {
     init {
+        require(teacherSeat == null || teacherSeat in setOf("p0", "p1"))
         require((policyEvidenceIdentity == null) == (behaviorSpecificationSha256 == null)) {
             "Corpus policy identity and behavior-specification commitment must both be present or absent"
         }

@@ -189,9 +189,14 @@ internal class PublicCorpusValidator(
                 if (entry.game.p0Policy == ArenaPolicyKind.SEARCH) add("p0")
                 if (entry.game.p1Policy == ArenaPolicyKind.SEARCH) add("p1")
             }
-            check(searchSeats.size == 1 && entry.game.searchSeat == searchSeats.single()) {
-                "entry does not bind exactly one actual Search Teacher seat"
+            check(entry.game.searchSeat == searchSeats.singleOrNull()) {
+                "entry game summary has an inconsistent unique Search Teacher seat"
             }
+            val teacherSeat = entry.teacherSeat ?: run {
+                check(searchSeats.size == 1) { "entry does not bind exactly one actual Search Teacher seat" }
+                searchSeats.single()
+            }
+            check(teacherSeat in searchSeats) { "declared teacher seat is not an actual Search Teacher" }
             admissionScope?.let {
                 check(entry.game.searchPlanner == SearchPlannerKind.SHARED_TREE) {
                     "entry did not use the admitted shared-tree Search Teacher"
@@ -241,7 +246,7 @@ internal class PublicCorpusValidator(
                                 record.behaviorBinding.behaviorSpecificationSha256 ==
                                     entry.behaviorSpecificationSha256
                             ) { "entry behavior-specification commitment differs from trajectory header" }
-                            check(record.perspectivePlayerId == entry.game.searchSeat) {
+                            check(record.perspectivePlayerId == teacherSeat) {
                                 "trajectory perspective differs from the Search Teacher seat"
                             }
                             admissionScope?.let { scope ->
@@ -268,7 +273,7 @@ internal class PublicCorpusValidator(
                             }
                             check(record.decisionIndex > lastDecisionIndex) { "decision indices do not increase" }
                             lastDecisionIndex = record.decisionIndex
-                            check(record.actingPlayerId == entry.game.searchSeat) {
+                            check(record.actingPlayerId == teacherSeat) {
                                 "decision actor differs from the Search Teacher seat"
                             }
                             check(record.policyInput.observation.perspectivePlayerId == record.actingPlayerId) {
