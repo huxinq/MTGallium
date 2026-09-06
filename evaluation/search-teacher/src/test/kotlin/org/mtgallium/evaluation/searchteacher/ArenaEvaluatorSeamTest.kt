@@ -71,7 +71,7 @@ class ArenaEvaluatorSeamTest {
     }
 
     @Test
-    fun `arena accepts configured evaluators only on matching current-information shared-tree policies`() {
+    fun `arena rejects unsupported evaluator compositions`() {
         val evaluator = ConstantConfiguredEvaluator("constant-evaluator:valid")
 
         assertFailsWith<IllegalArgumentException> {

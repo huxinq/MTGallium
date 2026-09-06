@@ -1,0 +1,241 @@
+package org.mtgallium.evaluation.searchteacher
+
+import com.wingedsheep.engine.registry.CardRegistry
+import java.nio.file.Files
+import java.nio.file.Path
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.serialization.Serializable
+import org.mtgallium.agent.infoset.core.ComponentSeeds
+import org.mtgallium.agent.infoset.core.InformationSetSearchDiagnostics
+import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.PolicySourceProvenance
+import org.mtgallium.agent.infoset.core.SearchCandidateStatistics
+import org.mtgallium.agent.infoset.core.SearchSettlementCounts
+import org.mtgallium.agent.infoset.core.SemanticChoice
+import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
+import org.mtgallium.agent.searchteacher.MonoRedVisibleFeatures
+import org.mtgallium.agent.searchteacher.SearchTeacherPolicySession
+import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
+import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
+import org.mtgallium.evaluation.searchteacher.evidence.RunProvenance
+import org.mtgallium.research.run.ResearchRunArtifacts
+import org.mtgallium.research.run.ResearchRunBindings
+import org.mtgallium.research.run.ResearchRunFiles
+
+@Serializable
+internal enum class PositionBankScreenMode { FEATURES, SEARCH }
+
+@Serializable
+internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
+
+@Serializable
+internal data class PositionBankScreenPolicy(
+    val search: SearchTeacherCalibrationPolicy,
+    val evaluator: MonoRedVisibleEvaluatorConfig,
+) {
+    init {
+        require(search.evaluator == null || search.evaluator == evaluator) {
+            "Search and screen evaluator configurations must agree"
+        }
+    }
+}
+
+@Serializable
+internal data class PositionBankScreenPlan(
+    val schemaVersion: Int = 1,
+    val bankDirectory: String,
+    val expectedBankIdentity: String,
+    val partition: PositionBankScreenPartition,
+    val mode: PositionBankScreenMode,
+    val rootLimit: Int,
+    val repetitions: Int,
+    val policies: List<PositionBankScreenPolicy>,
+) {
+    init {
+        require(schemaVersion == 1 && bankDirectory.isNotBlank() && expectedBankIdentity.isNotBlank())
+        require(rootLimit > 0 && repetitions > 0 && policies.isNotEmpty())
+        require(policies.map { it.search.id }.distinct().size == policies.size)
+        require(mode != PositionBankScreenMode.FEATURES || repetitions == 1) {
+            "Deterministic feature rescoring has no stochastic repetitions"
+        }
+    }
+}
+
+@Serializable
+internal enum class PositionBankScreenDisposition { SCORED, SEARCHED, AUTOMATIC_SELECTION, REFUSED }
+
+@Serializable
+internal data class PositionBankScreenRow(
+    val rootId: String,
+    val policyId: String,
+    val evaluatorConfigurationId: String,
+    val repetition: Int,
+    val disposition: PositionBankScreenDisposition,
+    val rawRootHeuristic: Double,
+    val boundedRootHeuristic: Double,
+    val policyIdentity: String? = null,
+    val searchSeed: Long? = null,
+    val chosen: SemanticChoice? = null,
+    val selectionKind: String? = null,
+    val searchRootValue: Double? = null,
+    val candidateStatistics: List<SearchCandidateStatistics> = emptyList(),
+    val candidateSettlementCounts: Map<String, SearchSettlementCounts> = emptyMap(),
+    val searchDiagnostics: InformationSetSearchDiagnostics? = null,
+    val reconstructionMillis: Double? = null,
+    val selectionMillis: Double? = null,
+    val diagnostic: String? = null,
+)
+
+@Serializable
+internal data class PositionBankScreenReport(
+    val schemaVersion: Int = 1,
+    val researchRunIdentity: String,
+    val sourceProvenance: PolicySourceProvenance,
+    val generatedAtUtc: String,
+    val plan: PositionBankScreenPlan,
+    val workerThreads: Int,
+    val eligibleRoots: Int,
+    val selectedRootIds: List<String>,
+    val rows: List<PositionBankScreenRow>,
+    val valid: Boolean,
+    val limitations: List<String> = listOf(
+        "Root feature scores, search values and observed source choices are diagnostics, not correct-action or outcome labels.",
+        "Feature mode rescales cached information-state features; it does not replay a changed policy counterfactually.",
+        "Search mode reconstructs remembered information and sequential belief updates before searching; referee state is never supplied as a belief particle.",
+        "Matched root/repetition seeds are shared across policies. Different particle/search settings are explicit interventions.",
+        "Root selection is capped in fixed root-id order within the requested whole-seed-group partition. Validation access is explicit and must be reported in later tuning claims.",
+        "No tactical grading, parameter winner or playing-strength conclusion is generated by this screen.",
+        "Reconstruction cost and selection cost are separate; timing is for this concurrent screening workload.",
+    ),
+)
+
+internal class PositionBankScreenRunner(
+    private val root: Path,
+    private val registry: CardRegistry,
+    private val manifest: DeckManifest,
+) {
+    fun run(plan: PositionBankScreenPlan, output: Path, workerThreads: Int): PositionBankScreenReport {
+        require(workerThreads > 0)
+        val sourceRun = RunProvenance.capture(root).also { it.requireReady() }
+        require(!sourceRun.outerDirty && !sourceRun.engineDirty) { "Bank screening requires a committed clean treatment" }
+        val source = requireNotNull(sourceRun.sourceProvenance)
+        val bankDirectory = Path.of(plan.bankDirectory)
+        val bank = loadVerifiedRealGamePositionBank(bankDirectory, plan.expectedBankIdentity)
+        val eligible = bank.roots.filter { it.partition.name == plan.partition.name }.sortedBy { it.rootId }
+        val selected = eligible.take(plan.rootLimit)
+        require(selected.isNotEmpty()) { "The requested bank partition has no roots" }
+        val bindings = ResearchRunBindings(protocol = "real-game-position-screen-v1", material = mapOf(
+            "plan" to sha256(evidenceJson.encodeToString(plan)),
+            "bank" to bank.bankIdentity,
+            "bank-manifest" to sha256File(bankDirectory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+            "source" to sha256(evidenceJson.encodeToString(source)),
+            "deck" to manifest.deckHash(), "card-pool" to manifest.cardPoolHash(),
+            "worker-threads" to workerThreads.toString(),
+        ))
+        val directory = EvidenceStore(root).requireDiagnosticOutput(output, "Real-game position screening")
+        if (Files.exists(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))) {
+            ResearchRunArtifacts.loadAndVerify(directory, bindings.identity)
+            return evidenceJson.decodeFromString<PositionBankScreenReport>(Files.readString(directory.resolve("report.json")))
+                .also { require(it.researchRunIdentity == bindings.identity && it.plan == plan) }
+        }
+        val total = Math.multiplyExact(selected.size, Math.multiplyExact(plan.policies.size, plan.repetitions))
+        val progressPath = System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of)
+        val completed = AtomicInteger(0)
+        publishDurableRunProgress(progressPath, 0, total, "position screen", "screening selected roots", "rows")
+        val rows = parallelMapOrdered(total, workerThreads) { task ->
+            val position = selected[task / (plan.policies.size * plan.repetitions)]
+            val policy = plan.policies[(task / plan.repetitions) % plan.policies.size]
+            val repetition = task % plan.repetitions
+            val evaluator = ConfiguredMonoRedInformationEvaluator(policy.evaluator)
+            // The cache is a derived view, not a replacement authority for the represented state.
+            require(MonoRedVisibleFeatures.extract(position.information, position.actor) == position.visibleFeatures)
+            val raw = position.visibleFeatures.rawScore(evaluator.config)
+            val bounded = position.visibleFeatures.evaluate(evaluator.config)
+            val scored = PositionBankScreenRow(position.rootId, policy.search.id, evaluator.configurationId,
+                repetition, PositionBankScreenDisposition.SCORED, raw, bounded)
+            val row = if (plan.mode == PositionBankScreenMode.FEATURES) scored else try {
+                val reconstructionStarted = System.nanoTime()
+                val sourceEntry = bank.plan.sources.single { it.expectedRunIdentity == position.sourceRunIdentity }
+                val sourceDirectory = Path.of(sourceEntry.runDirectory)
+                val replayPath = ResearchRunFiles.resolveBelow(sourceDirectory, position.replayRelativePath)
+                require(sha256File(replayPath) == position.replaySha256)
+                val replay = readVerifiedCanonicalSemanticReplay(replayPath)
+                require(replay.header.gameId == position.sourceGameId)
+                require(replay.header.requireExtensionString("mtgallium.runIdentity") == position.sourceRunIdentity)
+                require(replay.header.requireExtensionString("mtgallium.deckHash") == manifest.deckHash())
+                require(replay.header.requireExtensionString("mtgallium.cardPoolHash") == manifest.cardPoolHash())
+                require(replay.header.requireExtensionLong("mtgallium.gameSeed") == position.gameSeed)
+                require(replay.header.requireExtensionLong("mtgallium.baseSeed") == position.baseSeed)
+                val prefix = replay.decisions.take(position.decisionIndex).map { it.choice }
+                require(PolicyJson.sha256(prefix.joinToString("\u001f") { it.signature }) == position.semanticPrefixDigest)
+                val parameters = policy.search.parameters(position.baseSeed)
+                val arenaPolicy = policy.search.policy(position.baseSeed)
+                val actual = createSemanticReplayWorld(registry, manifest, position.sourceGameId, position.gameSeed,
+                    position.baseSeed, 0, parameters.actionSpaceProfile)
+                val session = SearchTeacherPolicySession(actual, position.actor,
+                    mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck), parameters,
+                    defaultMonoRedOpponentPolicy(), position.sourceGameId,
+                    arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator)
+                replayFixedRootPrefix(position.decisionIndex, replay, actual, session)
+                require(actual.actorToAct() == position.actor)
+                require(actual.informationState(position.actor).informationStateDigest == position.informationStateDigest)
+                val candidates = actual.expandChoices().candidates
+                require(candidates == position.reconstructedCandidates) { "Current candidate expansion changed" }
+                val reconstructionMillis = (System.nanoTime() - reconstructionStarted) / 1_000_000.0
+                val searchSeed = ComponentSeeds.derive(position.sourceGameId, position.decisionIndex,
+                    position.baseSeed, "position-bank-screen-v1", repetition)
+                val selectionStarted = System.nanoTime()
+                val selection = session.select(actual, position.actor, searchSeed)
+                val selectionMillis = (System.nanoTime() - selectionStarted) / 1_000_000.0
+                require(candidates.any { it == selection.choice })
+                val search = selection.search
+                search?.diagnostics?.let { diagnostics ->
+                    require(diagnostics.rejectedTransitions == 0 &&
+                        diagnostics.opponentModelPolicyDecisions.evidenceInvalidatingReplacements == 0 &&
+                        diagnostics.rootRolloutPolicyDecisions.evidenceInvalidatingReplacements == 0 &&
+                        diagnostics.opponentRolloutPolicyDecisions.evidenceInvalidatingReplacements == 0) {
+                        "Screen search contains a rejected transition or evidence-invalidating policy replacement"
+                    }
+                }
+                scored.copy(disposition = if (search == null) PositionBankScreenDisposition.AUTOMATIC_SELECTION
+                    else PositionBankScreenDisposition.SEARCHED,
+                    policyIdentity = session.policyIdentity, searchSeed = searchSeed,
+                    chosen = selection.choice, selectionKind = selection.kind.name,
+                    searchRootValue = search?.rootValue, candidateStatistics = search?.candidates.orEmpty(),
+                    candidateSettlementCounts = search?.candidateSettlementCounts.orEmpty(),
+                    searchDiagnostics = search?.diagnostics, reconstructionMillis = reconstructionMillis,
+                    selectionMillis = selectionMillis)
+            } catch (failure: Exception) {
+                scored.copy(disposition = PositionBankScreenDisposition.REFUSED,
+                    diagnostic = "${failure::class.simpleName}: ${failure.message}")
+            }
+            publishDurableRunProgress(progressPath, completed.incrementAndGet(), total, "position screen", position.rootId, "rows")
+            row
+        }
+        val report = PositionBankScreenReport(researchRunIdentity = bindings.identity, sourceProvenance = source,
+            generatedAtUtc = Instant.now().toString(), plan = plan, workerThreads = workerThreads,
+            eligibleRoots = eligible.size, selectedRootIds = selected.map { it.rootId }, rows = rows,
+            valid = rows.none { it.disposition == PositionBankScreenDisposition.REFUSED })
+        writeJsonAtomically(directory.resolve("plan.json"), plan)
+        writeJsonAtomically(directory.resolve("report.json"), report)
+        writeTextAtomically(directory.resolve("report.md"), buildString {
+            appendLine("# Real-game position screen")
+            appendLine("Run `${report.researchRunIdentity}`; bank `${bank.bankIdentity}`; mode ${plan.mode}; partition ${plan.partition}.")
+            appendLine("${selected.size}/${eligible.size} roots, ${rows.size} rows, valid=${report.valid}. No correctness labels or promotion are inferred.")
+            plan.policies.forEach { policy ->
+                val group = rows.filter { it.policyId == policy.search.id }
+                appendLine("- ${policy.search.id}: ${group.groupingBy { it.disposition }.eachCount()}; " +
+                    "mean cached heuristic=${group.map { it.boundedRootHeuristic }.average()}; " +
+                    "selection ms=${group.mapNotNull { it.selectionMillis }.takeIf { it.isNotEmpty() }?.average()}.")
+            }
+            report.limitations.forEach { appendLine("- $it") }
+        })
+        ResearchRunArtifacts(directory, bindings.identity).also {
+            listOf("plan.json", "report.json", "report.md").forEach(it::register)
+            it.finalize()
+        }
+        return report
+    }
+}

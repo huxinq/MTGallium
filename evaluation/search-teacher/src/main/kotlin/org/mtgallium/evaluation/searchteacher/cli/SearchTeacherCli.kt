@@ -27,6 +27,9 @@ internal object SearchTeacherSuites {
         "outcome-qualification-preflight",
         "outcome-qualification-pilot",
         "search-teacher-calibration",
+        "search-teacher-sequential",
+        "real-game-position-bank",
+        "position-bank-screen",
         "search-budget-frontier-preflight",
         "search-budget-frontier-pilot",
         "search-budget-frontier-extension-preflight",
@@ -213,9 +216,9 @@ internal data class SearchTeacherCli(
 
         private fun SearchTeacherCli.validate() {
             SearchTeacherSuites.require(suite)
-            if (suite == "search-teacher-calibration") {
+            if (suite in setOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen")) {
                 require(profilePath != null && outputPath != null && deckManifest != null) {
-                    "Search Teacher calibration requires an explicit JSON plan via --profile, --output, and --deck-manifest"
+                    "$suite requires an explicit JSON plan via --profile, --output, and --deck-manifest"
                 }
             }
             require(pairs > 0)

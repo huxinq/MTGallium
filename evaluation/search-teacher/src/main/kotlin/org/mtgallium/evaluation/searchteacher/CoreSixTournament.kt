@@ -10,6 +10,7 @@ import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.OpponentPolicy
@@ -77,8 +78,10 @@ internal data class ArenaPolicySpec(
             searchReuse = searchReuse,
         )).also { effective ->
             informationEvaluator?.let { evaluator ->
-                require(effective.leaf.stateSource == LeafStateSource.CURRENT_INFORMATION_STATE) {
-                    "Arena information-state evaluator requires a CURRENT_INFORMATION_STATE leaf"
+                require(effective.leaf.stateSource == LeafStateSource.CURRENT_INFORMATION_STATE ||
+                    (effective.leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT &&
+                        effective.leaf.evaluator == LeafEvaluator.MTGALLIUM_VISIBLE_V2)) {
+                    "Arena evaluator overrides require a current-information leaf or visible-v2 bounded rollout"
                 }
                 require(evaluator.id == effective.leaf.evaluator.evaluatorId) {
                     "Arena evaluator ${evaluator.id} does not match configured ${effective.leaf.evaluator.evaluatorId} leaf"
