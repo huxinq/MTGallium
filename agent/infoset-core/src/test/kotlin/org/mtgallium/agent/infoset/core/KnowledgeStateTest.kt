@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class KnowledgeStateTest {
@@ -13,6 +14,50 @@ class KnowledgeStateTest {
         "p0" to mapOf("Mountain" to 19, "Shock" to 2),
         "p1" to mapOf("Mountain" to 19, "Shock" to 2),
     )
+
+    @Test
+    fun `observed transformation refreshes only the established object's face name`() {
+        val key = "knowledge-object-7"
+        val arrived = event(1, PerspectiveEventDetail.ZoneChange(ownerId = "p1", fromZone = "GRAVEYARD",
+            toZone = "BATTLEFIELD", cardName = "Temple of Power", knowledgeObjectKey = key))
+        val transformed = event(2, PerspectiveEventDetail.ObjectState(objectRef = "new-face-reference",
+            objectName = "Ojer Axonil, Deepest Might", change = "TRANSFORMED", value = "false", knowledgeObjectKey = key))
+        val before = PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(arrived))
+        val after = PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(arrived, transformed))
+        assertEquals(before.knownObjects.single().copy(cardName = "Ojer Axonil, Deepest Might"), after.knownObjects.single())
+        assertEquals("p1", after.knownObjects.single().ownerId)
+        assertEquals("BATTLEFIELD", after.knownObjects.single().zone)
+        assertTrue(after.epistemicallyComplete)
+    }
+
+    @Test
+    fun `transformation without an established handle cannot infer remembered identity from display`() {
+        val arrived = event(1, PerspectiveEventDetail.ZoneChange(ownerId = "p1", fromZone = "GRAVEYARD",
+            toZone = "BATTLEFIELD", cardName = "Temple of Power", knowledgeObjectKey = "known"))
+        val unchanged = PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(arrived))
+        val detail = PerspectiveEventDetail.ObjectState(objectRef = "known", objectName = "Ojer Axonil, Deepest Might",
+            change = "TRANSFORMED")
+        for (unbound in listOf(detail, detail.copy(knowledgeObjectKey = "unknown"),
+                detail.copy(knowledgeObjectKey = "known", change = "CONTROLLER_CHANGED"))) {
+            assertEquals(unchanged, PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(arrived, event(2, unbound))))
+        }
+        assertTrue(PolicyKnowledgeReducer.reduce("p0", decks, observation(),
+            listOf(event(1, detail.copy(knowledgeObjectKey = "unknown")))).knownObjects.isEmpty())
+    }
+
+    @Test
+    fun `legacy object-state encoding stays unchanged and new transform handle roundtrips`() {
+        val legacy = PerspectiveEventDetail.ObjectState(objectRef = "visible-object", objectName = "Temple of Power",
+            change = "TRANSFORMED", value = "true")
+        val encoded = PolicyJson.format.encodeToString(PerspectiveEventDetail.serializer(), legacy)
+        assertFalse("knowledgeObjectKey" in encoded)
+        val decoded = PolicyJson.format.decodeFromString<PerspectiveEventDetail>(encoded) as PerspectiveEventDetail.ObjectState
+        assertNull(decoded.knowledgeObjectKey)
+        assertEquals(legacy, decoded)
+        val bound = legacy.copy(knowledgeObjectKey = "knowledge-object-7")
+        assertEquals(bound, PolicyJson.format.decodeFromString<PerspectiveEventDetail>(
+            PolicyJson.format.encodeToString(PerspectiveEventDetail.serializer(), bound)))
+    }
 
     @Test
     fun `current visible cards are exact and hidden remainder preserves deck conservation`() {

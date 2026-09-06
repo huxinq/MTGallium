@@ -4,6 +4,7 @@ import com.wingedsheep.engine.core.*
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.ZoneKey
 import com.wingedsheep.engine.state.components.identity.CardComponent
+import com.wingedsheep.engine.state.components.identity.FaceDownComponent
 import com.wingedsheep.engine.state.components.identity.RevealedToComponent
 import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.sdk.model.EntityId
@@ -564,11 +565,16 @@ internal object PerspectiveEventProjector {
                 actor = alias(event.controllerId)
             }
             is TransformedEvent -> {
+                val visibleFace = event.entityId in afterState.getBattlefield() &&
+                    afterRefs.referenceOrNull(event.entityId) != null &&
+                    afterState.getEntity(event.entityId)?.get<FaceDownComponent>() == null &&
+                    cardName(afterState, event.entityId) == event.newFaceName
                 detail = PerspectiveEventDetail.ObjectState(
                     objectRef = ref(event.entityId),
                     objectName = event.newFaceName,
                     change = "TRANSFORMED",
                     value = event.intoBackFace.toString(),
+                    knowledgeObjectKey = if (visibleFace) knowledgeObjectKey(event.entityId) else null,
                 )
                 kind = PolicyHistoryEventKind.OBJECT_STATE
                 actor = alias(event.controllerId)

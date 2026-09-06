@@ -2,6 +2,8 @@ package org.mtgallium.agent.infoset.core
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 const val PERSPECTIVE_EVENT_SCHEMA_V1: Int = 1
 const val PERSPECTIVE_EVENT_SCHEMA_V2: Int = 2
@@ -157,6 +159,10 @@ sealed interface PerspectiveEventDetail {
         val change: String,
         val value: String? = null,
         val relatedObjectRefs: List<String> = emptyList(),
+        /** Stable perspective handle for an observed face change; old events retain no binding. */
+        @OptIn(ExperimentalSerializationApi::class)
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val knowledgeObjectKey: String? = null,
     ) : PerspectiveEventDetail
 
     /** Public cause-and-result structure that is not recoverable from a later board snapshot. */
@@ -436,6 +442,17 @@ class PolicyKnowledgeAccumulator private constructor(
                 detail.invalidatedKnowledgeObjectKeys.forEach(knownObjects::remove)
                 knownObjects.entries.removeAll { (_, known) ->
                     known.ownerId == detail.playerId && known.zone == "LIBRARY"
+                }
+            }
+            is PerspectiveEventDetail.ObjectState -> {
+                if (detail.change == "TRANSFORMED" && detail.objectName != null) {
+                    detail.knowledgeObjectKey?.let { key ->
+                        // A face change preserves the known object's identity, owner and zone.
+                        // A display reference alone cannot bind or create remembered knowledge.
+                        knownObjects[key]?.let { known ->
+                            knownObjects[key] = known.copy(cardName = detail.objectName)
+                        }
+                    }
                 }
             }
             is PerspectiveEventDetail.UnsupportedVisibleTransition -> {
