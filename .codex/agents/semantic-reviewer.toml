@@ -9,6 +9,10 @@ Code Review Rules and relevant docs/architecture.md boundaries. Inspect affected
 source types and call paths needed to assess behavior. Use supplied verification
 as evidence of what ran, not as proof that the interpretation is correct.
 
+Conserve Codex allowance: scope reads to the affected contract and concrete
+concerns, reuse supplied context, and stop when the assigned review is resolved.
+Do not repeat verification unless a specific gap or finding requires it.
+
 Report concrete semantic defects, unsupported claims, missing discriminating
 witnesses, changed evidence meaning, or unresolved consequential owner choices.
 For each material finding, give the defect, source location/call path, consequence,

@@ -137,20 +137,57 @@ duplicate detailed experiment reports, measurements, manifests, or diary
 interpretation in commit messages, and do not require a body for an obvious
 narrow mechanical change.
 
-## Time and compute
+## Codex allowance, time, and compute
+
+Conserving the owner's Codex allowance is a major operating priority. Optimize
+total agent work needed to complete the objective, including parent reasoning,
+subagents, context loading, and repeated turns; faster wall-clock completion
+alone does not justify more agent work. Preserve research correctness, required
+verification, and completion of authorized work. Do not invent allowance balances
+or savings when usage data is unavailable.
+
+Use targeted reads and compact tool output; reuse established source context,
+handoffs, and still-applicable verification. Avoid broad repository reacquisition,
+duplicate reviews, speculative exploration, and repeated polling of unchanged
+work. Stop investigating when the evidence resolves the assigned question.
 
 Treat elapsed time and agent effort as operational evidence. Distinguish
 irreducible compute from repository reacquisition, repeated setup, broad
 verification, orchestration, serialization, and avoidable reasoning. Use the
 least intensive model or agent effort unlikely to reduce decision-relevant
-quality; raise it for semantic ambiguity or genuine difficulty.
+quality. For Astra, start at low effort unless the owner selects otherwise or
+the task-kind record supports a higher baseline. Escalate only for a concrete
+reasoning gap, such as an unresolved semantic ambiguity or a failed approach
+whose cause points to reasoning depth. Missing inputs, tool failures, and slow
+compute alone do not justify more effort. Use the smallest supported increase;
+do not claim an effort change unless the active setting is confirmed.
 
-Delegate a bounded question when independent work can run alongside useful
-local work or independent review materially improves confidence. Give each agent
+Keep a small private record at
+`~/.local/state/mtgallium/astra-effort-observations.md`. At task completion or a
+meaningful escalation, append one compact observation: task kind and reference,
+confirmed effort (or unknown), outcome and relevant check/rework, and escalation
+reason/result if any. Record low-effort successes as well as failures. Use only
+observations from requested work; do not run benchmarks, duplicate tasks at
+multiple efforts, or create a separate reporting workflow. Reuse an observation
+already recorded for the same task. Consult only relevant entries when choosing
+effort; no need to read the record for routine work starting at low.
+
+Raise a task-kind baseline when repeated comparable observations support it,
+or a concrete consequential failure and successful higher-effort repair justify
+it. Record the reason in one line; a single difficult task does not raise every
+baseline. Treat these as operational observations, not controlled comparisons
+or measured allowance savings. Keep the record brief and update it as part of
+the existing handoff, without an extra agent or review pass.
+
+Delegate a bounded question when it is likely to reduce total agent work or
+independent review materially improves confidence. Parallelizable work alone is
+not sufficient reason to delegate. Handle short, clear tasks locally. Give each agent
 its objective, relevant paths, ownership, and expected evidence. Reuse an existing
 agent for related questions; avoid duplicate exploration and serial handoffs
-whose answer is already established. Retain cheaper specialist models for
-bounded tracing and review; use Astra for difficult synthesis or ambiguity.
+whose answer is already established. Pass only relevant context, bound the
+deliverable, and stop agents whose work is no longer needed. Retain cheaper
+specialist models for bounded tracing and review; use Astra for difficult
+synthesis or ambiguity. Respect explicit owner model selections.
 
 When work encounters friction, briefly investigate its cause in the instructions,
 tools, code, or the agent's own approach. Distinguish demonstrated causes from

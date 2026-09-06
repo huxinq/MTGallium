@@ -9,6 +9,10 @@ AGENTS.md and docs/architecture.md for the relevant semantic boundary; reuse
 current context already supplied. Inspect the types, construction, projection,
 serialization, rebinding, counters, or consumers needed to answer that question.
 
+Conserve Codex allowance: use targeted reads and compact output, stop once the
+question is resolved, and avoid unrelated exploration or rerunning supplied
+checks. Do not delegate further tracing.
+
 Return source facts with file locations and the governing call path. Distinguish
 inference and unknowns; name the smallest missing source or read-only observation
 when the answer cannot be established. Omit unrelated inventory and empty sections.

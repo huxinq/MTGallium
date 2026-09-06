@@ -15,8 +15,8 @@ a reachable witness that separates the intended behavior from a plausible wrong
 implementation. These are correctness requirements, not a required report outline.
 
 Use `source-tracer` for an unresolved, bounded ownership or call-path question
-when delegation adds value. Trace locally when the path is short or already
-established. Give the tracer only the question and relevant context; continue
+when it is likely to reduce total agent work. Trace locally when the path is
+short or already established. Give the tracer only relevant context; continue
 independent work while it runs. Its report is source context, not owner approval.
 
 Make the smallest semantically adequate change and run the focused regression.
@@ -26,6 +26,12 @@ actual diff, and relevant verification, or a separate local `/review` using the
 repository Code Review Rules. Repair material findings before committing the
 treatment. If independent review is unavailable, report that specific limitation;
 continue implementation and verification without claiming the review happened.
+
+Apply the root `AGENTS.md` allowance priority: keep review scoped to the affected
+contract and reuse current source context and verification. One independent
+review satisfies this requirement; request another pass only for a material
+change or unresolved finding. Allowance conservation does not waive the review
+or focused regression required above.
 
 Ask the owner only about an unresolved consequential choice under `AGENTS.md`.
 Apply established decisions without asking again; continue unaffected work while
