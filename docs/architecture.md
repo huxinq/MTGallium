@@ -67,6 +67,13 @@ evaluation/search-teacher
 integration/argentum-search-teacher ──→ adapter + Search Teacher
 ```
 
+Experimental root guidance scores only actual acting-player information and an
+exhaustive admitted menu. Frozen preferences order unvisited edges and add a
+unit-weight, visit-decaying UCT bonus; they never become backed values or
+initial visits. Policy identity and diagnostics retain the guidance identity;
+zero scores preserve the existing search. The first version refuses tree reuse
+and in-tree decision compression.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout

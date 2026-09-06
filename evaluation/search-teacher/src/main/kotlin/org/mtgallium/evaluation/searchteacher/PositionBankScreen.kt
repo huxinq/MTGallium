@@ -40,6 +40,8 @@ internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
 internal data class PositionBankScreenPolicy(
     val search: SearchTeacherCalibrationPolicy,
     val evaluator: MonoRedVisibleEvaluatorConfig,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootKernel: RootKernelFitReference? = null,
 ) {
     init {
         require(search.tacticalEvaluator == null || evaluator == MonoRedVisibleEvaluatorConfig()) {
@@ -73,6 +75,9 @@ internal data class PositionBankScreenPlan(
         require(rootIds.isEmpty() || (rootIds.size == rootLimit && rootIds == rootIds.distinct().sorted()))
         require(policies.map { it.search.id }.distinct().size == policies.size)
         require(mode != PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES || policies.all { it.search.tacticalEvaluator == null })
+        require(mode == PositionBankScreenMode.SEARCH || policies.all { it.rootKernel == null }) {
+            "Root kernel guidance is supported only by ordinary search screens"
+        }
         require(mode != PositionBankScreenMode.FEATURES || repetitions == 1) {
             "Deterministic feature rescoring has no stochastic repetitions"
         }
@@ -150,6 +155,8 @@ internal class PositionBankScreenRunner(
         val eligible = bank.roots.filter { it.partition.name == plan.partition.name }.sortedBy { it.rootId }
         val selected = selectPositionScreenRoots(plan, eligible)
         require(selected.isNotEmpty()) { "The requested bank partition has no roots" }
+        // Load and verify each frozen model once before any reconstruction or search.
+        val rootPolicies = plan.policies.mapNotNull { policy -> policy.rootKernel?.let { policy.search.id to it.load() } }.toMap()
         val bindings = ResearchRunBindings(protocol = "real-game-position-screen-v1", material = mapOf(
             "plan" to sha256(evidenceJson.encodeToString(plan)),
             "bank" to bank.bankIdentity,
@@ -203,7 +210,8 @@ internal class PositionBankScreenRunner(
                 val session = SearchTeacherPolicySession(actual, position.actor,
                     mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck), parameters,
                     defaultMonoRedOpponentPolicy(), position.sourceGameId,
-                    arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator)
+                    arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator,
+                    rootSelectionPolicy = rootPolicies[policy.search.id])
                 replayFixedRootPrefix(position.decisionIndex, replay, actual, session)
                 require(actual.actorToAct() == position.actor)
                 require(actual.informationState(position.actor).informationStateDigest == position.informationStateDigest)

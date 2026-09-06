@@ -175,8 +175,9 @@ class InformationSetSearch(
         searchSeed: Long,
         beliefContinuityEpoch: Long = 0L,
         simulationWorldSchedule: SimulationWorldSchedule? = null,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): InformationSetSearchResult = searchInternal(
-        rootPlayer, belief, searchSeed, beliefContinuityEpoch, simulationWorldSchedule, null,
+        rootPlayer, belief, searchSeed, beliefContinuityEpoch, simulationWorldSchedule, null, rootSelectionGuidance,
     )
 
     /**
@@ -209,6 +210,7 @@ class InformationSetSearch(
         beliefContinuityEpoch: Long,
         simulationWorldSchedule: SimulationWorldSchedule?,
         rootActionSignature: String?,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): InformationSetSearchResult {
         require(belief.particles.isNotEmpty())
         require(simulationWorldSchedule == null || !reuseConfig.enabled) {
@@ -218,6 +220,21 @@ class InformationSetSearch(
             "A fixed simulation-world schedule must contain exactly ${config.simulations} worlds"
         }
         requireConformantRoot(rootPlayer, belief)
+        // Snapshot the caller's map so one immutable preference set owns the entire search.
+        val guidance = rootSelectionGuidance?.copy(scores = rootSelectionGuidance.scores.toMap())
+        guidance?.let {
+            require(!reuseConfig.enabled && !config.compressPolicySingletonPasses && rootActionSignature == null)
+            val representative = belief.particles.first().value
+            require(representative.actorToAct() == rootPlayer)
+            require(representative.informationState(rootPlayer).informationStateDigest == it.informationStateDigest) {
+                "Root guidance belongs to another information state"
+            }
+            val expansion = initialExpansion(representative)
+            require(expansion.isExhaustive && expansion.candidates.map { choice -> choice.signature }.toSet() == it.scores.keys) {
+                "Root guidance requires the exact exhaustive initial admitted menu"
+            }
+        }
+        val selectionGuidance = guidance?.takeIf { it.scores.values.any { score -> score != 0.0 } }
         if (rootActionSignature != null) {
             require(initialExpansion(belief.particles.first().value).candidates.any { it.signature == rootActionSignature }) {
                 "Conditioned root action is absent from the initial admitted menu"
@@ -315,6 +332,7 @@ class InformationSetSearch(
                 quiescenceDepth = 0,
                 rolloutTargetTurn = rolloutTargetTurn,
                 rootActionSignature = rootActionSignature,
+                rootSelectionGuidance = selectionGuidance,
             )
             require(outcome.backedValue.isFinite()) { "Search produced a non-finite value" }
             recorder?.build(outcome)?.let(nextTraces::add)
@@ -400,6 +418,7 @@ class InformationSetSearch(
                 evaluatorOutputChecksum = workAudit.evaluatorOutputChecksum(),
                 quiescenceUnresolvedBackups = quiescenceAudit.unresolvedBackups,
                 wallClockBudgetMillis = config.wallClockBudgetMillis,
+                rootSelectionGuidance = guidance,
             ),
         )
     }
@@ -423,6 +442,7 @@ class InformationSetSearch(
         quiescenceDepth: Int,
         rolloutTargetTurn: Int?,
         rootActionSignature: String? = null,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): SearchSettlement {
         onDepth(depth)
         world.terminalPayoff(rootPlayer)?.let {
@@ -619,7 +639,7 @@ class InformationSetSearch(
             }
         }
 
-        val edge = if (rootActionSignature == null) selectUct(node, searchSeed, simulationIndex, depth)
+        val edge = if (rootActionSignature == null) selectUct(node, searchSeed, simulationIndex, depth, rootSelectionGuidance)
             else {
                 check(depth == 0 && actor == rootPlayer)
                 requireNotNull(node.edges[rootActionSignature]) { "Conditioned root action is absent from this world" }
@@ -1455,17 +1475,26 @@ class InformationSetSearch(
         searchSeed: Long,
         simulationIndex: Int,
         depth: Int,
+        guidance: RootSelectionGuidance?,
     ): SearchEdge {
+        check(guidance == null || depth == 0)
         val unvisited = node.edges.values.filter { it.visits == 0 }
         if (unvisited.isNotEmpty()) {
-            return unvisited.minBy { edge ->
+            if (guidance == null) return unvisited.minBy { edge ->
                 PolicyJson.sha256("$searchSeed:$simulationIndex:$depth:${edge.choice.signature}")
             }
+            return unvisited.minWith(compareByDescending<SearchEdge> { edge ->
+                guidance.scores.getValue(edge.choice.signature)
+            }.thenBy { edge ->
+                PolicyJson.sha256("$searchSeed:$simulationIndex:$depth:${edge.choice.signature}")
+            })
         }
         val logParent = ln((node.visits + 1).toDouble())
         return node.edges.values.maxWith(
             compareBy<SearchEdge> { edge ->
-                edge.meanValue() + config.explorationConstant * sqrt(logParent / edge.visits)
+                val uct = edge.meanValue() + config.explorationConstant * sqrt(logParent / edge.visits)
+                val score = guidance?.scores?.getValue(edge.choice.signature) ?: 0.0
+                if (score == 0.0) uct else uct + score / (1.0 + edge.visits)
             }.thenByDescending { it.choice.signature }
         )
     }

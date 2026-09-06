@@ -8,6 +8,74 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class InformationSetSearchTest {
+
+    @Test
+    fun `zero root guidance preserves every search result except declared guidance and timing`() {
+        val world = FakeWorld()
+        val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
+        val guidance = RootSelectionGuidance("zero", world.informationState("p0").informationStateDigest, scores)
+        val search = coreSearch(InformationSetSearchConfig(simulations = 32, maxPolicyDecisions = 3,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        for (seed in listOf(1L, 91L, 203L)) {
+            val plain = search.search("p0", batch(listOf(world)), seed)
+            val guided = search.search("p0", batch(listOf(world)), seed, rootSelectionGuidance = guidance)
+            assertEquals(plain.copy(diagnostics = plain.diagnostics.copy(evaluatorNanos = 0)),
+                guided.copy(diagnostics = guided.diagnostics.copy(evaluatorNanos = 0, rootSelectionGuidance = null)))
+            assertEquals(guidance, guided.diagnostics.rootSelectionGuidance)
+        }
+    }
+
+    @Test
+    fun `root bias orders exploration without entering utility or later own choices`() {
+        val trace = mutableListOf<Pair<Int, String>>()
+        val world = TracingWorld(FakeWorld(), trace)
+        val scores = world.expandChoices().candidates.associate { it.signature to if (it.display.label == "B") 1.0 else -1.0 }
+        val guidance = RootSelectionGuidance("prefer-B", world.informationState("p0").informationStateDigest, scores)
+        fun search(simulations: Int, depth: Int) = coreSearch(InformationSetSearchConfig(simulations = simulations,
+            maxPolicyDecisions = depth, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD,
+                LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        val first = search(1, 1).search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
+        assertEquals("B", first.chosen.display.label)
+        assertEquals(-.2, first.rootValue)
+        assertEquals(1, first.candidates.sumOf { it.visits })
+        assertEquals(1, first.candidateSettlementCounts.values.sumOf { it.heuristicSettlementBackups })
+        // With no exploration term, bonus changes the third root visit after both edges were tried.
+        val constantWorld = FakeWorld(valueForA = 0.0, valueForB = 0.0)
+        val zeroValue = coreSearch(InformationSetSearchConfig(simulations = 3, maxPolicyDecisions = 1,
+            explorationConstant = 0.0, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD,
+                LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+            .search("p0", batch(listOf(constantWorld)), 91L, rootSelectionGuidance = guidance)
+        assertEquals(2, zeroValue.candidates.single { it.choice.display.label == "B" }.visits)
+        assertTrue(zeroValue.candidates.all { it.meanValue == 0.0 })
+        trace.clear()
+        val long = search(64, 3).search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
+        assertTrue(trace.any { it.first == 2 && it.second == "A" })
+        assertEquals("A", long.chosen.display.label)
+        assertEquals(64, long.candidates.sumOf { it.visits })
+    }
+
+    @Test
+    fun `root guidance refuses wrong states menus nonfinite scores and nonexhaustive roots`() {
+        val world = FakeWorld()
+        val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
+        val guidance = RootSelectionGuidance("zero", world.informationState("p0").informationStateDigest, scores)
+        val search = coreSearch(InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        assertFailsWith<IllegalArgumentException> { guidance.copy(scores = scores.mapValues { Double.NaN }) }
+        assertFailsWith<IllegalArgumentException> { guidance.copy(scores = scores.mapValues { 1.1 }) }
+        assertFailsWith<IllegalArgumentException> {
+            search.search("p0", batch(listOf(world)), 1L, rootSelectionGuidance = guidance.copy(informationStateDigest = "wrong"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            search.search("p0", batch(listOf(world)), 1L, rootSelectionGuidance = guidance.copy(scores = scores.entries.take(1).associate { it.toPair() }))
+        }
+        val wide = FakeWorld(candidateCount = 100)
+        assertFailsWith<IllegalArgumentException> {
+            search.search("p0", batch(listOf(wide)), 1L, rootSelectionGuidance = guidance.copy(
+                informationStateDigest = wide.informationState("p0").informationStateDigest,
+                scores = wide.expandChoices().candidates.associate { it.signature to 0.0 }))
+        }
+    }
     @Test
     fun `conditional estimate forces only the first edge and spends every simulation on it`() {
         val trace = mutableListOf<Pair<Int, String>>()

@@ -273,6 +273,8 @@ data class InformationSetSearchDiagnostics(
     val evaluatorOutputChecksum: String = "0000000000000000",
     /** V3 backs up neutral uncertainty instead of applying a quiet evaluator to unresolved tactics. */
     val quiescenceUnresolvedBackups: Int = 0,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rootSelectionGuidance: RootSelectionGuidance? = null,
     val wallClockBudgetMillis: Long? = null,
 ) {
     val evaluatorId: String get() = leaf.evaluator.evaluatorId

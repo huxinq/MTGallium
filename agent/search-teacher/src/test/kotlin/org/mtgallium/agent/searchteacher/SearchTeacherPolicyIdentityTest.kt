@@ -84,6 +84,9 @@ class SearchTeacherPolicyIdentityTest {
         )
         val encoded = PolicyJson.format.encodeToJsonElement(specification) as JsonObject
         assertFalse("singletonSelection" in encoded)
+        assertFalse("rootSelectionGuidanceId" in encoded)
+        assertNotEquals(SearchTeacherPolicyIdentity.identity(specification),
+            SearchTeacherPolicyIdentity.identity(specification.copy(rootSelectionGuidanceId = "rule:model")))
         assertFalse("rolloutTurnHorizon" in (encoded.getValue("search") as JsonObject))
         val decoded = PolicyJson.format.decodeFromJsonElement<SearchTeacherBehaviorSpecification>(encoded)
         assertFalse(decoded.singletonSelection.enabled)
