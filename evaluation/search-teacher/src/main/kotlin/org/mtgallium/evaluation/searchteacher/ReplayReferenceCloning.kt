@@ -142,7 +142,6 @@ internal fun deriveReplayReferenceCloning(
         require(comparison.pairs.map { it.pairIndex }.containsAll(selectedPairIndices))
         comparison.pairs.filter { it.pairIndex in selectedPairIndices }.sortedBy { it.pairIndex }.forEach { pair ->
             require(pair.valid && pair.games.size == 2)
-            var previousPayload: String? = null
             for (leg in 0..1) {
                 val gameId = "${comparison.candidateId}-pair-${pair.pairIndex}-leg-$leg"
                 val seat = if (leg == 0) "p0" else "p1"
@@ -150,8 +149,9 @@ internal fun deriveReplayReferenceCloning(
                 val p1 = if (leg == 1) teacher.descriptor.id else comparison.candidateId
                 val checkpoint = input("checkpoints/$gameId.json")
                 val envelope = ResearchRunCheckpoints.load(checkpoint)
-                require(envelope.parentPayloadSha256 == previousPayload)
-                previousPayload = envelope.payloadSha256
+                // Calibration persists each leg as an independent checkpoint, with its leg
+                // number as sequence; it does not chain one game's payload to the other.
+                require(envelope.parentPayloadSha256 == null)
                 val game = requireNotNull(loadSearchTeacherCalibrationCheckpoint(checkpoint, parent, expectedParentIdentity,
                     pair.pairIndex, leg, report.pairSeed(pair.pairIndex), p0, p1, gameId))
                 require(game == pair.games.single { it.gameId == gameId })
