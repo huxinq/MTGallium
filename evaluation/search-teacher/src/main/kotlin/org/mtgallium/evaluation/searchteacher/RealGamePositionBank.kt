@@ -5,6 +5,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.core.PolicyInformationState
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
@@ -24,7 +26,11 @@ internal const val REAL_GAME_POSITION_BANK_PROTOCOL = "real-game-position-bank-c
 internal const val REAL_GAME_POSITION_BANK_VALIDATION_FRACTION = 0.25
 
 @Serializable
-internal data class RealGamePositionBankSource(val runDirectory: String, val expectedRunIdentity: String) {
+internal data class RealGamePositionBankSource(
+    val runDirectory: String, val expectedRunIdentity: String,
+    /** Authenticate the retained raw plan; only its reference policy is executable/admitted. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val retainedReferenceOnly: Boolean = false,
+) {
     init { require(Path.of(runDirectory).isAbsolute && expectedRunIdentity.isNotBlank()) }
 }
 
@@ -65,8 +71,9 @@ internal data class RealGamePositionBankSourceBinding(
     val sourceProvenance: PolicySourceProvenance,
     val deckHash: String,
     val cardPoolHash: String,
-    val sourcePlan: SearchTeacherCalibrationPlan,
-    val policies: List<SearchTeacherCalibrationPolicyReport>,
+    /** Raw authenticated source configuration, including historical fields not executable in current source. */
+    val sourcePlan: JsonObject,
+    val policies: List<JsonObject>,
     val assignedGames: Int,
     val validPairGames: Int,
     val searchedDecisions: Int,
@@ -231,8 +238,17 @@ private fun bankBindings(plan: RealGamePositionBankPlan, source: PolicySourcePro
         "source-provenance" to sha256(evidenceJson.encodeToString(source)),
         "source-runs" to sha256(evidenceJson.encodeToString(sources))))
 
-private data class BankSource(val binding: RealGamePositionBankSourceBinding,
-    val report: SearchTeacherCalibrationReport)
+private data class BankSource(
+    val binding: RealGamePositionBankSourceBinding,
+    val comparisons: List<SearchTeacherCalibrationComparison>,
+    val executablePolicies: List<SearchTeacherCalibrationPolicyReport>,
+) {
+    val runIdentity get() = binding.runIdentity
+    val deckHash get() = binding.deckHash
+    val cardPoolHash get() = binding.cardPoolHash
+    val sourceProvenance get() = binding.sourceProvenance
+    val baseSeed get() = binding.sourcePlan.getValue("baseSeed").jsonPrimitive.long
+}
 
 internal fun requireRealGamePositionBankSourceIdentity(report: SearchTeacherCalibrationReport, expectedIdentity: String) {
     require(report.sequentialRule == null && report.sequentialResult == null &&
@@ -249,8 +265,62 @@ internal fun requireRealGamePositionBankSourceIdentity(report: SearchTeacherCali
         report.workerThreads).identity == report.runIdentity)
 }
 
+/** Full recorded schedules may carry sequential metadata; admission does not reinterpret its test result. */
+private fun readRetainedReferenceBankSource(input: RealGamePositionBankSource): BankSource {
+    val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
+    val entries = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity).artifacts.associateBy { it.relativePath }
+    fun registered(relative: String): Path = ResearchRunFiles.resolveBelow(directory, relative).also {
+        require(entries.getValue(relative).sha256 == sha256File(it))
+    }
+    val reportText = Files.readString(registered("report.json"))
+    val report = readRetainedCalibrationCloningSource(reportText, Files.readString(registered("plan.json")), input.expectedRunIdentity)
+    val raw = evidenceJson.parseToJsonElement(reportText).jsonObject
+    require(report.sourceProvenance.gitlinkMatchesCheckout)
+    requireRetainedBankPairPopulation(report)
+    report.comparisons.forEach { comparison -> comparison.pairs.forEach { pair ->
+        require(pair == searchBudgetFrontierPair(pair.pairIndex, pair.seed, pair.games, comparison.candidateId))
+        require(pair.games.size == 2)
+        pair.games.forEachIndexed { leg, game ->
+            val id = "${comparison.candidateId}-pair-${pair.pairIndex}-leg-$leg"
+            val p0 = if (leg == 0) report.teacher.descriptor.id else comparison.candidateId
+            val p1 = if (leg == 0) comparison.candidateId else report.teacher.descriptor.id
+            val path = registered("checkpoints/$id.json")
+            val envelope = ResearchRunCheckpoints.load(path)
+            require(envelope.parentPayloadSha256 == null)
+            require(loadSearchTeacherCalibrationCheckpoint(path, directory, report.runIdentity,
+                pair.pairIndex, leg, pair.seed, p0, p1, id) == game)
+            val checkpoint = evidenceJson.decodeFromString<SearchTeacherCalibrationCheckpoint>(envelope.payload().decodeToString())
+            checkpoint.artifactSha256.forEach { (relative, hash) -> require(entries.getValue(relative).sha256 == hash) }
+            if (pair.valid) {
+                require(game.replayVerified && game.replayVerificationDiagnostic == null)
+                require(sha256File(registered("replays/$id.privileged.replay.jsonl.gz")) == game.replaySha256)
+            }
+        }
+    } }
+    val games = report.comparisons.flatMap { it.pairs }.flatMap { it.games }
+    return BankSource(RealGamePositionBankSourceBinding(directory.toString(), report.runIdentity,
+        entries.getValue("report.json").sha256, sha256File(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+        report.sourceProvenance, report.deckHash, report.cardPoolHash, report.plan,
+        raw.getValue("policies").jsonArray.map { it.jsonObject }, games.size,
+        report.comparisons.sumOf { c -> c.pairs.count { it.valid } * 2 },
+        games.sumOf { game -> game.seatDiagnostics.values.sumOf { it.searchDecisionsDetail.size } }),
+        report.comparisons, listOf(report.teacher))
+}
+
+internal fun requireRetainedBankPairPopulation(report: RetainedCalibrationCloningSource) {
+    val offset = report.plan.getValue("pairOffset").jsonPrimitive.int
+    val count = report.plan.getValue("pairCount").jsonPrimitive.int
+    require(offset >= 0 && count > 0)
+    report.comparisons.forEach { comparison ->
+        require(comparison.pairs.size == count) { "Retained bank admission requires the complete planned pair schedule" }
+        require(comparison.pairs.map { it.pairIndex } == (offset until offset + comparison.pairs.size).toList())
+        require(comparison.pairs.all { it.seed == report.pairSeed(it.pairIndex) })
+    }
+}
+
 /** Modern calibration-only admission: identity, registered report/plan and checkpoint population must agree. */
 private fun readBankSource(input: RealGamePositionBankSource): BankSource {
+    if (input.retainedReferenceOnly) return readRetainedReferenceBankSource(input)
     val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
     val artifacts = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity)
     val entries = artifacts.artifacts.associateBy { it.relativePath }
@@ -290,9 +360,11 @@ private fun readBankSource(input: RealGamePositionBankSource): BankSource {
     val games = report.comparisons.flatMap { it.pairs }.flatMap { it.games }
     return BankSource(RealGamePositionBankSourceBinding(directory.toString(), report.runIdentity,
         entries.getValue("report.json").sha256, sha256File(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
-        report.sourceProvenance, report.deckHash, report.cardPoolHash, report.plan, report.policies, games.size,
+        report.sourceProvenance, report.deckHash, report.cardPoolHash,
+        evidenceJson.encodeToJsonElement(report.plan).jsonObject,
+        report.policies.map { evidenceJson.encodeToJsonElement(it).jsonObject }, games.size,
         report.comparisons.sumOf { it.validGames }, games.sumOf { game -> game.seatDiagnostics.values.sumOf { it.searchDecisionsDetail.size } }),
-        report)
+        report.comparisons, report.policies)
 }
 
 internal fun loadVerifiedRealGamePositionBank(directory: Path, expectedIdentity: String): RealGamePositionBankReport {
@@ -312,7 +384,9 @@ internal fun loadVerifiedRealGamePositionBank(directory: Path, expectedIdentity:
         val source = report.sources.single { it.runIdentity == row.sourceRunIdentity }
         require(row.informationStateDigest == row.information.informationStateDigest)
         require(row.visibleFeatures == MonoRedVisibleFeatures.extract(row.information, row.actor))
-        require(row.sourceDescriptor == source.policies.single { it.descriptor.id == row.sourcePolicyId }.descriptor)
+        require(row.sourceDescriptor == evidenceJson.decodeFromJsonElement<SearchTeacherCalibrationPolicyReport>(source.policies.single {
+            it.getValue("descriptor").jsonObject.getValue("id").jsonPrimitive.content == row.sourcePolicyId
+        }).descriptor)
         require(row.seedGroupId == realGamePositionSeedGroup(source.deckHash, source.cardPoolHash, row.gameSeed))
         require(row.partition == realGamePositionPartition(row.seedGroupId, report.plan.validationFraction))
     }
@@ -328,16 +402,16 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
         val source = sourceRun.sourceProvenance
         val admitted = plan.sources.map(::readBankSource)
         admitted.forEach { parent ->
-            require(parent.report.deckHash == manifest.deckHash() && parent.report.cardPoolHash == manifest.cardPoolHash())
-            require(parent.report.sourceProvenance.argentum.revision == source.argentum.revision) {
+            require(parent.deckHash == manifest.deckHash() && parent.cardPoolHash == manifest.cardPoolHash())
+            require(parent.sourceProvenance.argentum.revision == source.argentum.revision) {
                 "Position bank v1 requires the exact source-game engine revision"
             }
-            val arena = SearchTeacherArena(registry, manifest, calibrationPresentationProfile(parent.report.sourceProvenance),
-                parent.report.plan.baseSeed)
-            parent.report.policies.forEach { policy ->
-                val spec = policy.descriptor.policy(parent.report.plan.baseSeed)
-                require(arena.evidenceBinding(spec, null, parent.report.sourceProvenance) == policy.binding)
-                require(describeTournamentPolicy(spec) == policy.policy && spec.effectiveParameters(parent.report.plan.baseSeed).searchConfig() == policy.search)
+            val arena = SearchTeacherArena(registry, manifest, calibrationPresentationProfile(parent.sourceProvenance),
+                parent.baseSeed)
+            parent.executablePolicies.forEach { policy ->
+                val spec = policy.descriptor.policy(parent.baseSeed)
+                require(arena.evidenceBinding(spec, null, parent.sourceProvenance) == policy.binding)
+                require(describeTournamentPolicy(spec) == policy.policy && spec.effectiveParameters(parent.baseSeed).searchConfig() == policy.search)
                 require(spec.effectiveRootRolloutPolicy().behaviorSpecification == policy.rootRolloutPolicy &&
                     spec.effectiveOpponentRolloutPolicy().behaviorSpecification == policy.opponentRolloutPolicy)
             }
@@ -352,11 +426,11 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
         val games = mutableListOf<RealGamePositionBankGame>()
         val rootsById = mutableMapOf<String, Triple<BankSource, GameRunResult, ArenaSearchDecisionDiagnostic>>()
         val inventory = mutableListOf<RealGamePositionBankAssignment>()
-        admitted.forEach { parent -> parent.report.comparisons.forEach { comparison -> comparison.pairs.forEach { pair ->
+        admitted.forEach { parent -> parent.comparisons.forEach { comparison -> comparison.pairs.forEach { pair ->
             pair.games.forEachIndexed { leg, game ->
-                val group = realGamePositionSeedGroup(parent.report.deckHash, parent.report.cardPoolHash, game.seed)
+                val group = realGamePositionSeedGroup(parent.deckHash, parent.cardPoolHash, game.seed)
                 val partition = realGamePositionPartition(group, plan.validationFraction)
-                games += RealGamePositionBankGame(parent.report.runIdentity, game.gameId, pair.pairIndex, leg,
+                games += RealGamePositionBankGame(parent.runIdentity, game.gameId, pair.pairIndex, leg,
                     group, partition, pair.valid, game.seatDiagnostics.values.sumOf { it.searchDecisionsDetail.size },
                     if (pair.valid) emptyList() else pair.invalidationReasons)
                 game.seatDiagnostics.forEach { (actor, seat) ->
@@ -370,13 +444,15 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
                         if (pair.valid) require(decision.decisionIndex < game.decisions)
                         val choices = decision.candidateStatistics.map { it.choice }
                         require(choices.map { it.signature }.distinct().size == choices.size)
-                        val rootId = "real-game-root-v1-sha256:" + sha256("${parent.report.runIdentity}:${game.gameId}:$actor:${decision.decisionIndex}")
+                        val rootId = "real-game-root-v1-sha256:" + sha256("${parent.runIdentity}:${game.gameId}:$actor:${decision.decisionIndex}")
                         val reasons = buildList {
                             if (!pair.valid) add("invalid-source-pair")
+                            if (parent.executablePolicies.none { it.descriptor.id == seat.policyId })
+                                add("unselected-source-policy")
                             if (choices.size < 2) add("fewer-than-two-admitted-candidates")
                             if (decision.chosen == null) add("missing-observed-source-choice")
                         }
-                        inventory += RealGamePositionBankAssignment(rootId, parent.report.runIdentity, game.gameId,
+                        inventory += RealGamePositionBankAssignment(rootId, parent.runIdentity, game.gameId,
                             seat.policyId, actor, decision.decisionIndex, pair.pairIndex, group, partition,
                             realGamePositionFamily(choices), RealGamePositionAssignmentStatus.EXCLUDED, reasons)
                         rootsById[rootId] = Triple(parent, game, decision)
@@ -396,7 +472,7 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
             val (parent, game, _) = rootsById.getValue(selectedGame.first().rootId)
             val replayRelative = "replays/${game.gameId}.privileged.replay.jsonl.gz"
             val replay = readVerifiedCanonicalSemanticReplay(ResearchRunFiles.resolveBelow(Path.of(parent.binding.runDirectory), replayRelative))
-            authenticateBankReplay(parent.report, game, replay)
+            authenticateBankReplay(parent, game, replay)
             selectedGame.forEach { assignment ->
                 val index = assignments.indexOfFirst { it.rootId == assignment.rootId }
                 try {
@@ -427,9 +503,9 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
 
     private fun reconstructRoot(parent: BankSource, game: GameRunResult, replay: VerifiedCanonicalSemanticReplay,
         replayRelative: String, diagnostic: ArenaSearchDecisionDiagnostic, assignment: RealGamePositionBankAssignment): RealGamePositionBankRoot {
-        val policy = parent.report.policies.single { it.descriptor.id == assignment.sourcePolicyId }
-        val parameters = policy.descriptor.parameters(parent.report.plan.baseSeed)
-        val actual = createSemanticReplayWorld(registry, manifest, game.gameId, game.seed, parent.report.plan.baseSeed,
+        val policy = parent.executablePolicies.single { it.descriptor.id == assignment.sourcePolicyId }
+        val parameters = policy.descriptor.parameters(parent.baseSeed)
+        val actual = createSemanticReplayWorld(registry, manifest, game.gameId, game.seed, parent.baseSeed,
             0, parameters.actionSpaceProfile)
         require(assignment.decisionIndex in replay.decisions.indices)
         replayFixedRootPrefix(assignment.decisionIndex, replay, actual, null)
@@ -445,9 +521,9 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
         val observed = requireNotNull(diagnostic.chosen)
         require(observed in admitted && replay.decisions[assignment.decisionIndex].choice == observed)
         val prefix = replay.decisions.take(assignment.decisionIndex).map { it.choice }
-        return RealGamePositionBankRoot(assignment.rootId, parent.report.runIdentity, game.gameId, assignment.sourcePolicyId,
+        return RealGamePositionBankRoot(assignment.rootId, parent.runIdentity, game.gameId, assignment.sourcePolicyId,
             policy.descriptor, assignment.pairIndex, assignment.actor, assignment.decisionIndex, game.seed,
-            parent.report.plan.baseSeed, replayRelative, requireNotNull(game.replaySha256), replay.terminal.recordDigest,
+            parent.baseSeed, replayRelative, requireNotNull(game.replaySha256), replay.terminal.recordDigest,
             PolicyJson.sha256(prefix.joinToString("\u001f") { it.signature }), information.informationStateDigest,
             information, MonoRedVisibleFeatures.extract(information, assignment.actor), admitted, expansion.candidates,
             expansion.proposalVersion, expansion.isProfileExhaustive, observed, assignment.seedGroupId,
@@ -455,7 +531,7 @@ internal class RealGamePositionBankRunner(private val root: Path, private val re
     }
 }
 
-private fun authenticateBankReplay(report: SearchTeacherCalibrationReport, game: GameRunResult,
+private fun authenticateBankReplay(report: BankSource, game: GameRunResult,
     replay: VerifiedCanonicalSemanticReplay) {
     require(replay.header.gameId == game.gameId && replay.terminal.gameId == game.gameId)
     require(replay.header.producer == "mtgallium-search-teacher" && replay.header.engineVersion == report.sourceProvenance.argentum.revision)
@@ -466,6 +542,6 @@ private fun authenticateBankReplay(report: SearchTeacherCalibrationReport, game:
     require(replay.header.requireExtensionString("mtgallium.deckHash") == report.deckHash)
     require(replay.header.requireExtensionString("mtgallium.cardPoolHash") == report.cardPoolHash)
     require(replay.header.requireExtensionLong("mtgallium.gameSeed") == game.seed)
-    require(replay.header.requireExtensionLong("mtgallium.baseSeed") == report.plan.baseSeed)
+    require(replay.header.requireExtensionLong("mtgallium.baseSeed") == report.baseSeed)
     require(replay.decisions.size == game.decisions)
 }

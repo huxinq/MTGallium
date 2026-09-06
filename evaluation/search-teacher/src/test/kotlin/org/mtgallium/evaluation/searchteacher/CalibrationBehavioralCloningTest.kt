@@ -55,6 +55,23 @@ class CalibrationBehavioralCloningTest {
         }
         val read = readRetainedCalibrationCloningSource(evidenceJson.encodeToString(rawReport),
             evidenceJson.encodeToString(rawPlan), identity)
+        // Bank admission validates only the recorded contiguous population, not a rewritten fixed campaign.
+        assertFails { requireRetainedBankPairPopulation(read) }
+        val pair = SearchBudgetFrontierPair(0, plan.pairSeed(0), emptyList(), false, listOf("synthetic"))
+        val prefix = read.copy(comparisons = read.comparisons.map { it.copy(pairs = listOf(pair)) })
+        requireRetainedBankPairPopulation(prefix)
+        assertFails { requireRetainedBankPairPopulation(prefix.copy(plan = JsonObject(prefix.plan + ("pairCount" to JsonPrimitive(2))))) }
+        for (pairs in listOf(listOf(pair, pair), listOf(pair.copy(pairIndex = 1)), listOf(pair.copy(seed = 999)))) {
+            assertFails { requireRetainedBankPairPopulation(prefix.copy(comparisons = prefix.comparisons.map { it.copy(pairs = pairs) })) }
+        }
+        val opaqueBinding = RealGamePositionBankSourceBinding("/synthetic", identity, "report", "manifest",
+            source, deck.deckHash(), deck.cardPoolHash(), rawPlan, rawReport.getValue("policies").jsonArray.map { it.jsonObject }, 0, 0, 0)
+        val bindingText = evidenceJson.encodeToString(opaqueBinding)
+        assertEquals(opaqueBinding, evidenceJson.decodeFromString<RealGamePositionBankSourceBinding>(bindingText))
+        assertTrue(bindingText.contains(unknown))
+        val ordinarySource = RealGamePositionBankSource("/synthetic", identity)
+        assertFalse(evidenceJson.encodeToString(ordinarySource).contains("retainedReferenceOnly"))
+        assertTrue(evidenceJson.encodeToString(ordinarySource.copy(retainedReferenceOnly = true)).contains("retainedReferenceOnly"))
         val scope = BehavioralCloningAdmissionScope.retainedCalibrationReference(deck, read)
         val game = CorpusGameSummary(gameId = "g", p0Policy = ArenaPolicyKind.SEARCH,
             p1Policy = ArenaPolicyKind.SEARCH, winner = "p0", terminal = true, decisions = 1,
