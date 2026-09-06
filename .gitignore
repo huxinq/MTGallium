@@ -11,3 +11,4 @@ node_modules/
 private-evidence/
 reports/
 *.tsbuildinfo
+__pycache__/
