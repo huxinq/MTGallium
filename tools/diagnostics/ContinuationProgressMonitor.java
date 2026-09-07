@@ -180,6 +180,7 @@ public class ContinuationProgressMonitor {
             } else {
                 write(dest.resolve("report.json"),data);write(dest.resolve("bindings.json"),Map.of("identity",snapshotIdentity,"material",bindings.getMaterial()));
                 var artifacts=new ResearchRunArtifacts(dest,snapshotIdentity);artifacts.register("report.json");artifacts.register("bindings.json");artifacts.finalize();
+                ResearchRunArtifacts.Companion.loadAndVerify(dest,snapshotIdentity);
             }
             snapshot=data;
         }
