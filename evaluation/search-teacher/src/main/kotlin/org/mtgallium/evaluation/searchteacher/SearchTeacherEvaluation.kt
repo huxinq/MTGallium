@@ -34,6 +34,14 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
     fun diagnosticOutput(path: Path): Path =
         store.requireDiagnosticOutput(path, "the ${suite.id} command output")
 
+    if (options.suite == "search-profile-summary") {
+        require(options.outputPath == null) { "Profile inspection writes to stdout; it does not modify retained evidence" }
+        print(summarizeRegisteredSearchProfile(requireNotNull(options.profilePath) {
+            "Pass a JFR registered in its parent directory's finalized manifest via --profile"
+        }, options.sourceRunIdentity))
+        return
+    }
+
     // This audit verifies already-finalized private artifacts. It is intentionally outside normal
     // run-provenance capture: the checked-out source must not be misrepresented as the historical
     // trainer, and the audit neither creates nor changes research evidence.
@@ -57,6 +65,51 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
                 "frames=${report.frames.joinToString { "${it.rootPlayerId}:${it.leg}:${it.frameIndex}:${it.actorRelation}" }}; " +
                 "report=$output; checksum=$checksumPath",
         )
+        return
+    }
+
+    if (options.suite in setOf("research-preflight", "research-preflight-verify")) {
+        val output = diagnosticOutput(requireNotNull(options.outputPath))
+        val report = ResearchPreflightRunner(root).run(requireNotNull(options.profilePath), output,
+            verifyOnly = options.suite == "research-preflight-verify")
+        println("Research preflight passed: ${report.bindings.identity}; output=$output")
+        return
+    }
+
+    if (options.suite == "terminal-prediction-diagnostic") {
+        val plan = evidenceJson.decodeFromString<TerminalPredictionDiagnosticPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = runTerminalPredictionDiagnostic(root, plan, diagnosticOutput(requireNotNull(options.outputPath)))
+        println("Terminal prediction diagnostic ${report.identity}: ${report.roots.size} development roots; descriptive only")
+        return
+    }
+    if (options.suite == "terminal-kernel-study") {
+        val plan = evidenceJson.decodeFromString<TerminalKernelStudyPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = TerminalKernelStudyRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Terminal kernel study ${report.identity}: exploratory gate=${report.gate.passed}; not a gameplay-strength result")
+        return
+    }
+    if (options.suite == "terminal-target-sensitivity") {
+        val plan = evidenceJson.decodeFromString<TerminalTargetSensitivityPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = TerminalTargetSensitivityRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Terminal target sensitivity ${report.identity}: ${report.cells.size} declared cells; no target or model selection")
+        return
+    }
+    if (options.suite == "research-transfer-audit") {
+        val plan = evidenceJson.decodeFromString<ResearchTransferAuditPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = ResearchTransferAuditRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)))
+        println("Screen-to-gameplay audit ${report.identity}: ${report.observations.size} authenticated links, ${report.inconclusiveGameplay} inconclusive gameplay results")
+        return
+    }
+    if (options.suite == "campaign-data-use") {
+        val plan = evidenceJson.decodeFromString<CampaignDataUsePlan>(Files.readString(requireNotNull(options.profilePath)))
+        val record = CampaignDataRegistry(root, diagnosticOutput(requireNotNull(options.outputPath)), plan.campaignId).record(plan)
+        println("Campaign population use ${record.identity}: ${record.seedGroups.size} seed groups, ${record.rootIds.size} roots")
+        return
+    }
+    if (options.suite == "campaign-data-snapshot") {
+        val plan = evidenceJson.decodeFromString<CampaignSnapshotPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val snapshot = retainCampaignSnapshot(root, plan, diagnosticOutput(requireNotNull(options.outputPath)))
+        println("Campaign snapshot: ${snapshot.records.size} records, ${snapshot.groups.size} seed groups; unregistered access is unknown")
         return
     }
 
@@ -1230,6 +1283,16 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         val report = PositionBankScreenRunner(root, registry, manifest).run(plan, output, options.threads)
         println("Position screen ${report.researchRunIdentity}; valid=${report.valid}; report=${output.resolve("report.json")}")
         check(report.valid) { "Position screen includes refusals; inspect the retained report" }
+        return
+    }
+    if (options.suite in setOf("search-teacher-continuation", "search-teacher-continuation-preflight")) {
+        val plan = evidenceJson.decodeFromString<SearchTeacherContinuationPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = SearchTeacherContinuationRunner(root, registry, manifest).run(plan, requireNotNull(options.outputPath),
+            preflightOnly = options.suite == "search-teacher-continuation-preflight")
+        println("Optional continuation: ${report?.result?.disposition ?: "preflight verified"}")
+        if (report != null) check(report.operationalValid && report.treatmentIssues.isEmpty()) {
+            "Continuation contains invalid gameplay or treatment issues; inspect its report"
+        }
         return
     }
     if (options.suite == "search-teacher-sequential") {

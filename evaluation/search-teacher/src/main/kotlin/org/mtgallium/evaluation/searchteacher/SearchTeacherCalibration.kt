@@ -10,6 +10,11 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSettings
+import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.core.LeafStateSource
+import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.MixtureOpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicy
@@ -70,12 +75,44 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootCloningFit: CloningFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val tacticalEvaluator: MonoRedTacticalEvaluatorSettings? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootKernelRolloutFit: RootKernelFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val fastRootKernelRolloutFit: RootKernelFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val fastOpponentKernelRolloutFit: RootKernelFitReference? = null,
 ) {
     init {
+        require(evaluator == null || tacticalEvaluator == null) { "Only one evaluator may be configured" }
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
         require(particles > 0 && simulations > 0 && maxPolicyDecisions > 0)
         require(explorationConstant.isFinite() && explorationConstant >= 0)
         require(rolloutHeuristicProbability.isFinite() && rolloutHeuristicProbability > 0 && rolloutHeuristicProbability <= 1)
+        require(rootCloningFit == null || (rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
+            "A learned root rollout must not silently override another root-policy configuration"
+        }
+        require(fastRootKernelRolloutFit == null ||
+            (rootKernelRolloutFit == null && rootCloningFit == null && rootRolloutPolicy == null &&
+                rolloutHeuristicProbability == 1.0)) {
+            "A fast kernel root rollout must not override another root-policy configuration"
+        }
+        require(fastOpponentKernelRolloutFit == null ||
+            (opponentRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
+            "A fast kernel opponent rollout must not override another opponent-policy configuration"
+        }
+        require(rootKernelRolloutFit == null ||
+            (rootCloningFit == null && rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
+            "A kernel root rollout must not silently override another root-policy configuration"
+        }
     }
 
     fun parameters(baseSeed: Long): SearchTeacherPolicyParameters = SearchTeacherRuntimeConfig().policyParameters().copy(
@@ -83,14 +120,18 @@ internal data class SearchTeacherCalibrationPolicy(
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
         rolloutTurnHorizon = rolloutTurnHorizon,
+        leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+            if (tacticalEvaluator == null) LeafEvaluator.MTGALLIUM_VISIBLE_V2 else LeafEvaluator.MTGALLIUM_TACTICAL_V3),
     )
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
-        informationEvaluator = evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
-        rootRolloutPolicy = configuredRolloutPolicy(
+        informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
+        rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy() ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
+            it.load()
+        } ?: configuredRolloutPolicy(
             "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),
         ),
-        opponentRolloutPolicy = configuredRolloutPolicy(
+        opponentRolloutPolicy = fastOpponentKernelRolloutFit?.loadFastRolloutPolicy() ?: configuredRolloutPolicy(
             "opponent", opponentRolloutPolicy, SearchTeacherSearchFactory.opponentRolloutPolicy(),
         ))
 
@@ -132,22 +173,33 @@ internal data class SearchTeacherCalibrationPlan(
 
     fun pairSeed(pairIndex: Int): Long {
         require(pairIndex in pairOffset until pairOffset + pairCount)
-        return ComponentSeeds.derive(baseSeed, pairIndex, CALIBRATION_SCHEDULE)
+        return calibrationPairSeed(baseSeed, pairIndex)
     }
 }
+
+internal fun calibrationPairSeed(baseSeed: Long, pairIndex: Int): Long =
+    ComponentSeeds.derive(baseSeed, pairIndex, CALIBRATION_SCHEDULE)
 
 internal fun searchTeacherCalibrationBindings(
     plan: SearchTeacherCalibrationPlan, source: PolicySourceProvenance,
     policyIdentities: Map<String, String>, deckHash: String, cardPoolHash: String, workerThreads: Int,
     sequentialRule: PairedSequentialRule? = null,
+) = retainedCalibrationBindings(evidenceJson.encodeToString(plan), source, policyIdentities,
+    deckHash, cardPoolHash, workerThreads, sequentialRule?.let { evidenceJson.encodeToString(it) })
+
+/** Hash the complete retained configuration, including opaque opponent-only interventions. */
+internal fun retainedCalibrationBindings(
+    planJson: String, source: PolicySourceProvenance,
+    policyIdentities: Map<String, String>, deckHash: String, cardPoolHash: String, workerThreads: Int,
+    sequentialRuleJson: String?,
 ) = ResearchRunBindings(protocol = SEARCH_TEACHER_CALIBRATION_PROTOCOL, material = mapOf(
-    "plan" to sha256(evidenceJson.encodeToString(plan)),
+    "plan" to sha256(planJson),
     "source-provenance" to sha256(evidenceJson.encodeToString(source)),
     "policy-evidence" to sha256(evidenceJson.encodeToString<Map<String, String>>(policyIdentities.toSortedMap())),
     "deck" to deckHash, "card-pool" to cardPoolHash, "schedule" to CALIBRATION_SCHEDULE,
     // Timing is an outcome here; worker count cannot change across resumed attempts.
     "worker-threads" to workerThreads.toString(),
-) + (sequentialRule?.let { mapOf("sequential-rule" to sha256(evidenceJson.encodeToString(it))) } ?: emptyMap()))
+) + (sequentialRuleJson?.let { mapOf("sequential-rule" to sha256(it)) } ?: emptyMap()))
 
 @Serializable
 internal data class SearchTeacherCalibrationPolicyReport(
@@ -292,8 +344,9 @@ internal fun calibrationPresentationProfile(source: PolicySourceProvenance): Fro
 internal class SearchTeacherCalibrationRunner(
     private val root: Path, private val registry: CardRegistry, private val manifest: DeckManifest,
 ) {
+    @JvmOverloads
     fun run(plan: SearchTeacherCalibrationPlan, output: Path, workerThreads: Int,
-        sequentialRule: PairedSequentialRule? = null): SearchTeacherCalibrationReport {
+        sequentialRule: PairedSequentialRule? = null, publishProgress: Boolean = true): SearchTeacherCalibrationReport {
         require(workerThreads > 0)
         sequentialRule?.let { SearchTeacherSequentialPlan(plan, it) }
         val started = System.nanoTime()
@@ -309,7 +362,7 @@ internal class SearchTeacherCalibrationRunner(
             manifest.deckHash(), manifest.cardPoolHash(), workerThreads, sequentialRule).identity
         if (Files.exists(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))) {
             ResearchRunArtifacts.loadAndVerify(directory, identity)
-            return evidenceJson.decodeFromString<SearchTeacherCalibrationReport>(Files.readString(directory.resolve("report.json")))
+            return readEvidenceJson(directory.resolve("report.json"), SearchTeacherCalibrationReport.serializer())
                 .also { require(it.runIdentity == identity && it.plan == plan && it.sequentialRule == sequentialRule) }
         }
         val planPath = directory.resolve("plan.json")
@@ -324,7 +377,7 @@ internal class SearchTeacherCalibrationRunner(
         }
         val completed = AtomicInteger(0)
         val total = Math.multiplyExact(plan.candidates.size, plan.pairCount)
-        val progressPath = System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of)
+        val progressPath = if (publishProgress) System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of) else null
         publishDurableRunProgress(progressPath, 0, total, "calibration ${plan.phase}", "preparing paired gameplay")
         fun playTask(task: Int): Pair<String, SearchBudgetFrontierPair> {
             val candidate = plan.candidates[task / plan.pairCount]
@@ -382,7 +435,7 @@ internal class SearchTeacherCalibrationRunner(
             sequentialRule = sequentialRule, sequentialResult = sequential?.result,
             sequentialOvershootPairs = sequential?.let { it.pairs.drop(it.result.inspectedPairs) },
             sequentialOperationalValid = sequential?.operationalValid, sequentialPopulation = sequential?.population)
-        writeJsonAtomically(directory.resolve("report.json"), report)
+        writeEvidenceJsonStream(directory.resolve("report.json"), report, SearchTeacherCalibrationReport.serializer())
         writeTextAtomically(directory.resolve("report.md"), renderSearchTeacherCalibration(report))
         ResearchRunArtifacts(directory, identity).also { artifacts ->
             listOf("plan.json", "report.json", "report.md").forEach(artifacts::register)
@@ -433,8 +486,30 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     appendLine("Run `${report.runIdentity}`; source `${report.sourceProvenance.outer.revision}`; Argentum `${report.sourceProvenance.argentum.revision}`.")
     appendLine("Control `${report.plan.control.id}`; pairs ${report.plan.pairOffset} until ${report.plan.pairOffset + report.plan.pairCount}; valid=${report.valid}.")
     appendLine("Worker threads: ${report.workerThreads}. Timing describes this concurrent arena workload.")
+    appendLine("Current calibration attempt through report construction: ${report.currentAttemptElapsedMillis / 1_000.0} seconds; excludes caller setup, prior resumed attempts and subsequent report writing/finalization/verification.")
+    (listOf(report.plan.control) + report.plan.candidates).forEach { policy ->
+        appendLine("Policy `${policy.id}`: particles=${policy.particles}, simulations=${policy.simulations}, decision horizon=${policy.maxPolicyDecisions}.")
+    }
+    val controlFields = evidenceJson.encodeToJsonElement(SearchTeacherCalibrationPolicy.serializer(), report.plan.control) as kotlinx.serialization.json.JsonObject
+    report.plan.candidates.forEach { candidate ->
+        val fields = evidenceJson.encodeToJsonElement(SearchTeacherCalibrationPolicy.serializer(), candidate) as kotlinx.serialization.json.JsonObject
+        val changed = (controlFields.keys + fields.keys).filter { it != "id" && controlFields[it] != fields[it] }.sorted()
+        appendLine("Configuration changes for `${candidate.id}` (excluding display ID): ${changed.joinToString { field -> "$field: ${controlFields[field] ?: "default"} → ${fields[field] ?: "default"}" }.ifEmpty { "none" }}.")
+    }
     report.sequentialResult?.let { result ->
         appendLine("Sequential rule: ${result.disposition} after ${result.inspectedPairs} inspected pairs; ${result.operationalOvershootPairs} completed overshoot pairs.")
+        if (result.disposition == PairedSequentialDisposition.BUDGET_EXHAUSTED) {
+            appendLine("Inconclusive: the pair cap was reached without satisfying the declared stopping criterion.")
+        }
+        result.confidenceSequence?.let { interval ->
+            val acceptance = requireNotNull(result.rule.practicalAcceptance)
+            appendLine("Practical objective=${acceptance.objective}; margin=${acceptance.margin}; score floor=${result.rule.nullPointRate}; equivalence band=(${result.rule.nullPointRate}, ${result.rule.targetPointRate}).")
+            appendLine("Anytime confidence sequence (${interval.simultaneousCoverageAtLeast} simultaneous coverage): [${interval.lower}, ${interval.upper}] over ${interval.validScoredPairs} valid pairs; maximum compatible distance from parity=${interval.maximumCompatibleDistanceFromParity}.")
+            appendLine("This strength criterion does not establish a runtime improvement or stronger learned play. Invalid execution prevents acceptance; the interval alone cannot override it.")
+        }
+        if (result.disposition == PairedSequentialDisposition.FUTILITY) {
+            appendLine("Stopped for futility: neither directional boundary remains reachable within the planned pair cap. Inconclusive; parity or equivalence is not established.")
+        }
         appendLine("First-prefix valid=${report.valid}; all-attempt operational valid=${report.sequentialOperationalValid}.")
         report.sequentialPopulation?.let { population ->
             appendLine("Pairs: planned=${population.plannedPairs}, executed=${population.executedPairs}, inspected=${population.inspectedPairs}, planned but unexecuted=${population.plannedUnexecutedPairs}, overshoot=${population.overshootPairs}.")
@@ -445,6 +520,7 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     }
     report.comparisons.forEach { comparison ->
         appendLine("- ${comparison.candidateId}: ${comparison.validPairs}/${comparison.assignedPairs} valid ${if (report.sequentialResult == null) "pairs" else "inspected pairs"}; point rate=${comparison.candidatePointRate}; paired bootstrap 95%=[${comparison.pairedBootstrap95Lower}, ${comparison.pairedBootstrap95Upper}].")
+        appendLine("  Candidate W/L/draw=${comparison.candidateBySeat.sumOf { it.wins }}/${comparison.candidateBySeat.sumOf { it.losses }}/${comparison.candidateBySeat.sumOf { it.draws }} over ${comparison.validGames} complete valid games; invalid pairs=${comparison.invalidPairs}; incomplete pairs=${comparison.incompletePairs}. Counts use the comparison prefix, excluding sequential overshoot.")
         comparison.operationalByPolicy.forEach { cost ->
             appendLine("  ${cost.search.policyId}: searched ${cost.search.searchedDecisions}/${cost.selections} selections; singleton=${cost.selectionCounts[SearchTeacherSelectionKind.POLICY_SINGLETON_ACTION] ?: 0}; search ms/selection=${cost.searchedMillisPerSelection}; search ms/game=${cost.searchedMillisPerGame}; shared game ms=${cost.sharedWholeGameMeanMillis}.")
         }

@@ -1,6 +1,7 @@
 package org.mtgallium.agent.infoset.argentum
 
 import com.wingedsheep.engine.core.PendingDecision
+import com.wingedsheep.gym.contract.EntityFeatures
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.sdk.model.EntityId
 import kotlinx.serialization.json.Json
@@ -26,6 +27,7 @@ import org.mtgallium.agent.infoset.core.PolicyZoneView
 class SafeObservationProjection internal constructor(
     val observation: PolicyObservation,
     internal val references: SafeReferenceMap,
+    internal val canonicalFragments: ObservationCanonicalFragments = ObservationCanonicalFragments.build(observation),
 ) {
     /**
      * Exact projection update for the engine's pure priority-transfer transition. The matching
@@ -41,9 +43,10 @@ class SafeObservationProjection internal constructor(
             },
             observationDigest = "",
         )
-        val element = PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(), updated)
+        val fragments = ObservationCanonicalFragments.build(updated, canonicalFragments)
         return SafeObservationProjection(
-            observation = updated.copy(observationDigest = PolicyJson.digest(element)),
+            observation = updated.copy(observationDigest = fragments.digest()),
+            canonicalFragments = fragments,
             references = references,
         )
     }
@@ -71,8 +74,9 @@ class SafeObservationProjector {
         playerAliases: Map<EntityId, String>?,
         runtime: ArgentumPolicyRuntimeProjection,
         pendingDecision: PendingDecision? = null,
+        previous: SafeObservationProjection? = null,
     ): SafeObservationProjection {
-        val refs = SafeReferenceMap(observation, playerAliases, runtime.cards)
+        val refs = SafeReferenceMap(observation, playerAliases, runtime.cards, previous?.references)
         val chooserDecision = pendingDecision?.takeIf { decision ->
             decision.id == observation.pendingDecision?.decisionId &&
                 decision.playerId == observation.perspectivePlayerId
@@ -204,9 +208,10 @@ class SafeObservationProjector {
             },
             observationDigest = "",
         )
-        val element = PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(), safe)
+        val fragments = ObservationCanonicalFragments.build(safe, previous?.canonicalFragments)
         return SafeObservationProjection(
-            observation = safe.copy(observationDigest = PolicyJson.digest(element)),
+            observation = safe.copy(observationDigest = fragments.digest()),
+            canonicalFragments = fragments,
             references = refs,
         )
     }
@@ -304,10 +309,22 @@ internal class SafeReferenceMap(
     observation: TrainingObservation,
     playerAliases: Map<EntityId, String>? = null,
     cardRuntime: Map<EntityId, ArgentumPolicyCardRuntime> = emptyMap(),
+    previous: SafeReferenceMap? = null,
 ) {
     private val rawToSafe = linkedMapOf<String, String>()
     private val rawToSemantic = linkedMapOf<String, String>()
     private var privateIndex = 0
+    private data class CardDescriptor(
+        val features: EntityFeatures,
+        val runtime: ArgentumPolicyCardRuntime?,
+        val digest: String,
+    )
+    // Immutable after construction, bounded by this view's visible cards. Raw ids only locate
+    // prior inputs; the complete masked DTO, runtime facts and player aliases decide reuse.
+    private val cardDescriptors = hashMapOf<EntityId, CardDescriptor>()
+    private var playerBindings: Map<EntityId, String> = emptyMap()
+    internal var reusedCardDescriptors: Int = 0
+        private set
 
     init {
         val visibleCards = observation.zones.flatMap { it.cards }
@@ -332,11 +349,21 @@ internal class SafeReferenceMap(
             playerAliases.forEach { (player, alias) -> put(player, alias, alias) }
         }
 
+        playerBindings = observation.players.associate { it.id to player(it.id) }
+        val reusable = previous?.takeIf { it.playerBindings == playerBindings }?.cardDescriptors.orEmpty()
+
         // First canonicalize the visible object graph without using engine identity or container
         // order. The iterative refinement makes otherwise-identical objects distinct when their
         // visible attachment/target neighbourhoods differ.
         val base = linkedMapOf<String, String>()
         visibleCards.forEach { card ->
+            reusable[card.entityId]?.takeIf { it.features == card && it.runtime == cardRuntime[card.entityId] }
+                ?.let { old ->
+                    base[card.entityId.value] = old.digest
+                    cardDescriptors[card.entityId] = old
+                    reusedCardDescriptors++
+                    return@forEach
+                }
             val descriptorParts = mutableListOf(
                 "card",
                 card.cardDefinitionId.orEmpty(),
@@ -375,7 +402,13 @@ internal class SafeReferenceMap(
                     )
                 }
             val descriptor = descriptorParts.joinToString("\u001f")
-            base[card.entityId.value] = descriptorDigest(descriptor)
+            val digest = descriptorDigest(descriptor)
+            base[card.entityId.value] = digest
+            // Freeze collection inputs so subsequent caller mutation cannot validate stale bytes.
+            val snapshot = card.copy(types = card.types.toSet(), subtypes = card.subtypes.toSet(),
+                colors = card.colors.toSet(), keywords = card.keywords.toSet(),
+                counters = card.counters.toMap(), attachments = card.attachments.toList())
+            cardDescriptors[card.entityId] = CardDescriptor(snapshot, cardRuntime[card.entityId], digest)
         }
         observation.stack.forEachIndexed { index, item ->
             val descriptor = listOf(

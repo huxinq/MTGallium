@@ -129,6 +129,9 @@ data class SearchTeacherBehaviorSpecification(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootSelectionGuidanceId: String? = null,
 ) {
     init {
         require(schemaVersion == SEARCH_TEACHER_BEHAVIOR_SCHEMA_V1)

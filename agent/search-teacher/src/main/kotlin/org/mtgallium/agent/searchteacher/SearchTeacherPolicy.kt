@@ -1,5 +1,9 @@
 package org.mtgallium.agent.searchteacher
 
+import org.mtgallium.agent.infoset.core.ROOT_SELECTION_GUIDANCE_RULE
+import org.mtgallium.agent.infoset.core.RootSelectionGuidance
+import org.mtgallium.agent.infoset.core.RootSelectionPolicy
+
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
@@ -231,6 +235,7 @@ class SearchTeacherPolicySession(
     private val integration: SearchTeacherIntegrationSpecification = SearchTeacherIntegrationSpecification(),
     private val beliefProposalAuditSink: ArgentumBeliefProposalAuditSink =
         ArgentumBeliefProposalAuditSink.NONE,
+    private val rootSelectionPolicy: RootSelectionPolicy? = null,
 ) {
     val behaviorSpecification: SearchTeacherBehaviorSpecification =
         SearchTeacherPolicyIdentity.specification(
@@ -242,7 +247,10 @@ class SearchTeacherPolicySession(
             informationEvaluator = informationEvaluator,
             actionExpansion = root.semanticExpansionSpecification(),
             integration = integration,
-        )
+        ).copy(rootSelectionGuidanceId = rootSelectionPolicy?.let {
+            require(it.configurationId.isNotBlank())
+            "$ROOT_SELECTION_GUIDANCE_RULE:${it.configurationId}"
+        })
     private val belief = SearchTeacherBeliefTracker(
         root = root,
         viewer = viewer,
@@ -291,12 +299,19 @@ class SearchTeacherPolicySession(
         // Sequential particles are still advanced after every accepted action, but the expensive
         // all-particle digest audit is needed only when its result can affect an actual search.
         belief.synchronize(world, acceptedDecisionCount)
+        val guidance = rootSelectionPolicy?.let { policy ->
+            require(expansion.isProfileExhaustive) { "Root guidance requires a profile-exhaustive admitted menu" }
+            val information = world.informationState(actor)
+            RootSelectionGuidance(policy.configurationId,
+                information.informationStateDigest, policy.scores(information, expansion.candidates))
+        }
         val result = try {
             search.search(
                 rootPlayer = actor,
                 belief = belief.batch(),
                 searchSeed = searchSeed,
                 beliefContinuityEpoch = belief.continuityEpoch,
+                rootSelectionGuidance = guidance,
             )
         } catch (failure: LearnedOutcomeValueException) {
             throw learnedOutcomeValuePolicyStop(failure)

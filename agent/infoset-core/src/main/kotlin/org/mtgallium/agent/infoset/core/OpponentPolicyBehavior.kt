@@ -17,6 +17,9 @@ data class OpponentPolicyBehaviorSpecification(
     val distributionIsSeedInvariant: Boolean,
     val parameters: Map<String, String> = emptyMap(),
     val components: List<OpponentPolicyComponentSpecification> = emptyList(),
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val requiresProductionAdmission: Boolean = true,
 ) {
     init {
         require(schemaVersion == OPPONENT_POLICY_BEHAVIOR_SCHEMA_V1)

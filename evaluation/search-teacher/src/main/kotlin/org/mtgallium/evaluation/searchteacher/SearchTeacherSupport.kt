@@ -7,7 +7,13 @@ import com.wingedsheep.sdk.model.Deck
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.SerializationStrategy
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.encodeToStream
 import kotlinx.serialization.json.Json
+import org.mtgallium.research.run.ResearchRunFiles
 import org.mtgallium.agent.infoset.core.PublicArtifactPrivacy
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
@@ -127,6 +133,19 @@ internal inline fun <reified T> writeJsonAtomically(path: Path, value: T) {
         evidenceJson.encodeToString(value) + "\n",
     )
 }
+
+/** Preserve JSON bytes and atomic publication without a report-sized String or UTF-8 byte array. */
+@OptIn(ExperimentalSerializationApi::class)
+internal fun <T> writeEvidenceJsonStream(path: Path, value: T, serializer: SerializationStrategy<T>): Path =
+    ResearchRunFiles.atomicWrite(path) { output ->
+        evidenceJson.encodeToStream(serializer, value, output)
+        output.write('\n'.code)
+    }
+
+/** Streaming parsing removes the whole-file String limit; the decoded domain object still uses memory. */
+@OptIn(ExperimentalSerializationApi::class)
+internal fun <T> readEvidenceJson(path: Path, serializer: DeserializationStrategy<T>): T =
+    Files.newInputStream(path).buffered().use { evidenceJson.decodeFromStream(serializer, it) }
 
 internal fun writeTextAtomically(path: Path, value: String): Path =
     EvidenceStore(path.toAbsolutePath().root).writeEncoded(path, value)

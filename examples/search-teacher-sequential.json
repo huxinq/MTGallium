@@ -34,6 +34,7 @@
     "falsePositiveRate": 0.025,
     "falseNegativeRate": 0.025,
     "maximumPairs": 24,
-    "betFractions": [0.2, 0.5, 0.8]
+    "betFractions": [0.2, 0.5, 0.8],
+    "stopForFutility": true
   }
 }

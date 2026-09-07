@@ -8,6 +8,137 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class InformationSetSearchTest {
+
+    @Test
+    fun `root guidance accepts complete declared profiles despite intentional legal action omissions`() {
+        val world = ProfilePrunedWorld(FakeWorld())
+        val expansion = world.expandChoices()
+        assertTrue(!expansion.isExhaustive && expansion.isProfileExhaustive)
+        val guidance = RootSelectionGuidance("profile", world.informationState("p0").informationStateDigest,
+            expansion.candidates.associate { it.signature to if (it.display.label == "B") 1.0 else -1.0 })
+        val search = coreSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        val result = search.search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
+        assertEquals("B", result.chosen.display.label)
+        assertEquals(-.2, result.rootValue)
+        assertEquals(1, result.candidates.sumOf { it.visits })
+    }
+
+    @Test
+    fun `zero root guidance preserves every search result except declared guidance and timing`() {
+        val world = FakeWorld()
+        val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
+        val guidance = RootSelectionGuidance("zero", world.informationState("p0").informationStateDigest, scores)
+        val search = coreSearch(InformationSetSearchConfig(simulations = 32, maxPolicyDecisions = 3,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        for (seed in listOf(1L, 91L, 203L)) {
+            val plain = search.search("p0", batch(listOf(world)), seed)
+            val guided = search.search("p0", batch(listOf(world)), seed, rootSelectionGuidance = guidance)
+            assertEquals(plain.copy(diagnostics = plain.diagnostics.copy(evaluatorNanos = 0)),
+                guided.copy(diagnostics = guided.diagnostics.copy(evaluatorNanos = 0, rootSelectionGuidance = null)))
+            assertEquals(guidance, guided.diagnostics.rootSelectionGuidance)
+        }
+    }
+
+    @Test
+    fun `root bias orders exploration without entering utility or later own choices`() {
+        val trace = mutableListOf<Pair<Int, String>>()
+        val world = TracingWorld(FakeWorld(), trace)
+        val scores = world.expandChoices().candidates.associate { it.signature to if (it.display.label == "B") 1.0 else -1.0 }
+        val guidance = RootSelectionGuidance("prefer-B", world.informationState("p0").informationStateDigest, scores)
+        fun search(simulations: Int, depth: Int) = coreSearch(InformationSetSearchConfig(simulations = simulations,
+            maxPolicyDecisions = depth, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD,
+                LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        val first = search(1, 1).search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
+        assertEquals("B", first.chosen.display.label)
+        assertEquals(-.2, first.rootValue)
+        assertEquals(1, first.candidates.sumOf { it.visits })
+        assertEquals(1, first.candidateSettlementCounts.values.sumOf { it.heuristicSettlementBackups })
+        // With no exploration term, bonus changes the third root visit after both edges were tried.
+        val constantWorld = FakeWorld(valueForA = 0.0, valueForB = 0.0)
+        val zeroValue = coreSearch(InformationSetSearchConfig(simulations = 3, maxPolicyDecisions = 1,
+            explorationConstant = 0.0, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD,
+                LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+            .search("p0", batch(listOf(constantWorld)), 91L, rootSelectionGuidance = guidance)
+        assertEquals(2, zeroValue.candidates.single { it.choice.display.label == "B" }.visits)
+        assertTrue(zeroValue.candidates.all { it.meanValue == 0.0 })
+        trace.clear()
+        val long = search(64, 3).search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
+        assertTrue(trace.any { it.first == 2 && it.second == "A" })
+        assertEquals("A", long.chosen.display.label)
+        assertEquals(64, long.candidates.sumOf { it.visits })
+    }
+
+    @Test
+    fun `root guidance refuses wrong states menus nonfinite scores and nonexhaustive roots`() {
+        val world = FakeWorld()
+        val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
+        val guidance = RootSelectionGuidance("zero", world.informationState("p0").informationStateDigest, scores)
+        val search = coreSearch(InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)), UniformOpponentPolicy)
+        assertFailsWith<IllegalArgumentException> { guidance.copy(scores = scores.mapValues { Double.NaN }) }
+        assertFailsWith<IllegalArgumentException> { guidance.copy(scores = scores.mapValues { 1.1 }) }
+        assertFailsWith<IllegalArgumentException> {
+            search.search("p0", batch(listOf(world)), 1L, rootSelectionGuidance = guidance.copy(informationStateDigest = "wrong"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            search.search("p0", batch(listOf(world)), 1L, rootSelectionGuidance = guidance.copy(scores = scores.entries.take(1).associate { it.toPair() }))
+        }
+        val wide = FakeWorld(candidateCount = 100)
+        assertFailsWith<IllegalArgumentException> {
+            search.search("p0", batch(listOf(wide)), 1L, rootSelectionGuidance = guidance.copy(
+                informationStateDigest = wide.informationState("p0").informationStateDigest,
+                scores = wide.expandChoices().candidates.associate { it.signature to 0.0 }))
+        }
+    }
+    @Test
+    fun `conditional estimate forces only the first edge and spends every simulation on it`() {
+        val trace = mutableListOf<Pair<Int, String>>()
+        val original = FakeWorld()
+        val world = TracingWorld(original, trace)
+        val belief = batch(listOf(world))
+        val search = coreSearch(InformationSetSearchConfig(simulations = 32, maxPolicyDecisions = 3,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy)
+        val action = world.expandChoices().candidates.single { it.display.label == "B" }
+        val result = search.estimateRootAction("p0", belief, action.signature, 91L)
+        assertEquals(action, result.action)
+        assertEquals(32, result.visits)
+        assertEquals(-.2, result.meanBackedValue, 1e-12)
+        assertEquals(32, result.settlementCounts.heuristicSettlementBackups)
+        assertEquals(0, result.settlementCounts.terminalPayoffBackups)
+        assertTrue(trace.filter { it.first == 0 }.all { it.second == "B" })
+        assertTrue(trace.any { it.first == 1 }) // The opponent's genuine response is reached.
+        assertTrue(trace.any { it.first == 2 && it.second == "A" }) // Later own choices remain free.
+        assertTrue(result.diagnostics.nodes > 1)
+        assertEquals(0, original.depth)
+        assertEquals("A", search.search("p0", belief, 91L).chosen.display.label)
+    }
+
+    @Test
+    fun `conditional estimate preserves paired world schedules and typed settlements`() {
+        val search = coreSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy)
+        val belief = batch(listOf(FakeWorld()))
+        val action = belief.particles.first().value.expandChoices().candidates.single { it.display.label == "B" }
+        val worlds = List(8) { if (it < 4) FakeWorld(terminalAtDepth = 1) else FakeWorld() }
+        val result = search.estimateRootAction("p0", belief, action.signature, 91L, SimulationWorldSchedule(worlds))
+        assertEquals(.4, result.meanBackedValue, 1e-12)
+        assertEquals(4, result.settlementCounts.terminalPayoffBackups)
+        assertEquals(4, result.settlementCounts.heuristicSettlementBackups)
+        assertTrue(worlds.all { it.depth == 0 })
+        assertFailsWith<IllegalArgumentException> { search.estimateRootAction("p0", belief, "absent", 91L) }
+        assertFailsWith<IllegalStateException> {
+            search.estimateRootAction("p0", batch(listOf(FakeWorld(rejectAtDepth = 0))), action.signature, 91L)
+        }
+        val compressed = coreSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
+            compressPolicySingletonPasses = true,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy)
+        assertFailsWith<IllegalArgumentException> { compressed.estimateRootAction("p0", belief, action.signature, 91L) }
+    }
+
     @Test
     fun `terminal continuation uses both fixed rollout seats and returns only actual payoff`() {
         val rootPolicy = RecordingPolicy("root-terminal-policy")
@@ -381,6 +512,115 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `bounded rollout prefix caching preserves seed-sensitive choices and settlement accounting`() {
+        fun run(cache: Boolean): Pair<InformationSetSearchResult, List<String>> {
+            val decisions = mutableListOf<String>()
+            fun policy(name: String) = object : OpponentPolicy {
+                override val id = name
+                override val distributionIsSeedInvariant = false
+                override fun distribution(opponentInformation: PolicyInformationState,
+                    candidates: List<SemanticChoice>, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
+                    ProbabilityDistribution.normalized(candidates.mapIndexed { index, choice ->
+                        ProbabilityMass(choice, if ((policySeed and 1L).toInt() == index) 3.0 else 1.0)
+                    })
+                override fun decisionDiagnostic(opponentInformation: PolicyInformationState,
+                    candidates: List<SemanticChoice>, chosen: SemanticChoice, policySeed: Long,
+                    attributionSeed: Long): OpponentPolicyDecisionDiagnostic {
+                    decisions += "$id:${opponentInformation.informationStateDigest}:$policySeed:$attributionSeed:${chosen.signature}"
+                    return OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = id)
+                }
+            }
+            val result = coreSearch(InformationSetSearchConfig(simulations = 96, maxPolicyDecisions = 16,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+                cacheSimulationTransitions = cache), UniformOpponentPolicy,
+                rolloutPolicy = policy("root-seeded"), rolloutOpponentPolicy = policy("opponent-seeded"))
+                .search("p0", batch(List(2) { FakeWorld() }), searchSeed = 7571L)
+            return result to decisions
+        }
+        val (plain, plainDecisions) = run(false)
+        val (cached, cachedDecisions) = run(true)
+        assertEquals(plainDecisions, cachedDecisions)
+        assertEquals(plain.chosen, cached.chosen)
+        assertEquals(plain.rootValue, cached.rootValue)
+        assertEquals(plain.candidates, cached.candidates)
+        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        assertEquals(plain.diagnostics.rootRolloutPolicyDecisions, cached.diagnostics.rootRolloutPolicyDecisions)
+        assertEquals(plain.diagnostics.opponentRolloutPolicyDecisions, cached.diagnostics.opponentRolloutPolicyDecisions)
+        assertTrue(cached.diagnostics.rolloutTransitionCacheHits > 0)
+        assertTrue(cached.diagnostics.searchWorldSteps < plain.diagnostics.searchWorldSteps)
+        assertEquals(0, plain.diagnostics.rolloutTransitionCacheSnapshots)
+    }
+
+    @Test
+    fun `bounded rollout cache caps snapshots and continues uncached without changing the result`() {
+        fun run(cache: Boolean) = coreSearch(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 128,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+            cacheSimulationTransitions = cache), UniformOpponentPolicy)
+            .search("p0", batch(listOf(FakeWorld())), searchSeed = 7572L)
+        val plain = run(false)
+        val cached = run(true)
+        assertEquals(plain.chosen, cached.chosen)
+        assertEquals(plain.rootValue, cached.rootValue)
+        assertEquals(plain.candidates, cached.candidates)
+        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        assertEquals(4096, cached.diagnostics.rolloutTransitionCacheSnapshots)
+        assertTrue(cached.diagnostics.rolloutTransitionCacheBypasses > 0)
+    }
+
+    @Test
+    fun `rollout prefixes remain separate across scheduled worlds and rejected transitions still fail`() {
+        fun search(cache: Boolean) = coreSearch(InformationSetSearchConfig(simulations = 16, maxPolicyDecisions = 8,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+            cacheSimulationTransitions = cache), UniformOpponentPolicy)
+        val schedule = SimulationWorldSchedule(List(16) { i ->
+            FakeWorld(valueForA = i / 16.0, valueForB = -i / 16.0, terminalAtDepth = if (i % 2 == 0) 4 else null)
+        })
+        val plain = search(false).search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
+        val cached = search(true).search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
+        assertEquals(plain.chosen, cached.chosen)
+        assertEquals(plain.rootValue, cached.rootValue)
+        assertEquals(plain.candidates, cached.candidates)
+        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        assertEquals(0, cached.diagnostics.rolloutTransitionCacheHits)
+        for (enabled in listOf(false, true)) {
+            assertFailsWith<RejectedSearchTransitionException> {
+                search(enabled).search("p0", batch(listOf(FakeWorld(rejectAtDepth = 3))), 7573L)
+            }
+        }
+    }
+
+    @Test
+    fun `rollout cache prefixes can enter widened trees without changing retained trace frontiers`() {
+        fun run(cache: Boolean): List<InformationSetSearchResult> {
+            val session = coreSession(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 10,
+                initialExpansionLimit = 2, wideningThresholds = listOf(2, 4), wideningLimits = listOf(3, 4),
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+                cacheSimulationTransitions = cache), UniformOpponentPolicy,
+                reuseConfig = InformationSetSearchReuseConfig(enabled = true))
+            val roots = List(2) { FakeWorld(candidateCount = 4, hiddenVariant = "same") }
+            val first = session.search("p0", batch(roots), 7574L, beliefContinuityEpoch = 0L)
+            val promoted = roots.map { original -> (original.fork() as FakeWorld).also { world ->
+                repeat(2) { assertTrue(world.step(world.expandChoices().candidates.first()).accepted) }
+            } }
+            return listOf(first, session.search("p0", batch(promoted), 7575L, beliefContinuityEpoch = 0L))
+        }
+        val plain = run(false)
+        val cached = run(true)
+        assertTrue(cached.first().diagnostics.wideningEvents > 0)
+        assertTrue(cached.first().diagnostics.rolloutTransitionCacheHits > 0)
+        plain.zip(cached).forEach { (a, b) ->
+            assertEquals(a.chosen, b.chosen)
+            assertEquals(a.rootValue, b.rootValue)
+            assertEquals(a.candidates, b.candidates)
+            assertEquals(a.candidateSettlementCounts, b.candidateSettlementCounts)
+            assertEquals(a.diagnostics.retainedTraceCount, b.diagnostics.retainedTraceCount)
+            assertEquals(a.diagnostics.retainedSnapshotCount, b.diagnostics.retainedSnapshotCount)
+            assertEquals(a.diagnostics.reusedSimulations, b.diagnostics.reusedSimulations)
+            assertEquals(a.diagnostics.refreshedSimulations, b.diagnostics.refreshedSimulations)
+        }
+    }
+
+    @Test
     fun `exact semantic prefix cache preserves the search result and removes repeated world steps`() {
         fun run(cache: Boolean) = coreSearch(
             InformationSetSearchConfig(
@@ -440,6 +680,30 @@ class InformationSetSearchTest {
         )
         assertTrue(result.diagnostics.refreshedSimulations > 0)
         assertEquals(64, result.candidates.sumOf { it.visits })
+    }
+
+    @Test
+    fun `menu-only frontier refresh preserves horizon debt settlements and attribution seeds`() {
+        fun run(enabled: Boolean): Pair<InformationSetSearchResult, Pair<MenuSelectionProbePolicy, MenuSelectionProbePolicy>> {
+            val root = MenuSelectionProbePolicy("refresh-root", enabled)
+            val opponent = MenuSelectionProbePolicy("refresh-opponent", enabled)
+            val session = coreSession(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 3,
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+                UniformOpponentPolicy, root, opponent, reuseConfig = InformationSetSearchReuseConfig(enabled = true))
+            session.search("p0", batch(List(8) { FakeWorld(hiddenVariant = "compatible") }), 101L, beliefContinuityEpoch = 0L)
+            val promoted = List(8) { FakeWorld(hiddenVariant = "compatible").also { world ->
+                repeat(2) { world.step(world.expandChoices().candidates.first()) }
+            } }
+            return session.search("p0", batch(promoted), 102L, beliefContinuityEpoch = 0L) to (root to opponent)
+        }
+        val (baseline, oldPolicies) = run(false)
+        val (optimized, policies) = run(true)
+        assertTrue(optimized.diagnostics.refreshedSimulations > 0)
+        assertTrue(policies.first.menuCalls + policies.second.menuCalls > 0)
+        assertEquals(oldPolicies.first.seeds, policies.first.seeds)
+        assertEquals(oldPolicies.second.seeds, policies.second.seeds)
+        assertEquals(baseline.copy(diagnostics = baseline.diagnostics.copy(evaluatorNanos = 0)),
+            optimized.copy(diagnostics = optimized.diagnostics.copy(evaluatorNanos = 0)))
     }
 
     @Test
@@ -1305,6 +1569,17 @@ private class AuditedReplacementPolicy(
     )
 }
 
+private class TracingWorld(
+    private val world: FakeWorld,
+    private val trace: MutableList<Pair<Int, String>>,
+) : SearchWorld by world {
+    override fun fork(): SearchWorld = TracingWorld(world.fork() as FakeWorld, trace)
+    override fun step(choice: SemanticChoice): SearchStepResult {
+        trace += world.depth to choice.display.label
+        return world.step(choice)
+    }
+}
+
 private class FakeWorld(
     private val candidateCount: Int = 2,
     private val variant: String = "default",
@@ -1427,3 +1702,11 @@ private fun fakeChoiceSignature(label: String): String = SemanticChoice.computeS
     SemanticOperationFamily.OTHER,
     buildJsonObject { put("choice", JsonPrimitive(label)) },
 )
+
+/** Intentional profile omission is distinct from an incompletely enumerated admitted menu. */
+private class ProfilePrunedWorld(private val world: SearchWorld) : SearchWorld by world {
+    override fun fork(): SearchWorld = ProfilePrunedWorld(world.fork())
+    override fun expandChoices(): PolicyExpansion = world.expandChoices().copy(
+        isExhaustive = false, isProfileExhaustive = true,
+        omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA))
+}

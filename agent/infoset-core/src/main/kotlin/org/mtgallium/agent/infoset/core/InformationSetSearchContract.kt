@@ -7,6 +7,21 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class LeafStateSource { CURRENT_INFORMATION_STATE, CURRENT_SAMPLED_WORLD, BOUNDED_ROLLOUT }
 
+/** A forced first edge's search estimate; it is not a policy recommendation or terminal outcome. */
+@Serializable
+data class RootActionSearchEstimate(
+    val action: SemanticChoice,
+    val meanBackedValue: Double,
+    val visits: Int,
+    val settlementCounts: SearchSettlementCounts,
+    val diagnostics: InformationSetSearchDiagnostics,
+) {
+    init {
+        require(meanBackedValue.isFinite() && visits > 0)
+        require(settlementCounts.successfulBackups == visits && diagnostics.simulations == visits)
+    }
+}
+
 @Serializable
 enum class LeafEvaluator(val evaluatorId: String) {
     MTGALLIUM_VISIBLE_V2("mono-red-visible-board-v2"),
@@ -258,7 +273,17 @@ data class InformationSetSearchDiagnostics(
     val evaluatorOutputChecksum: String = "0000000000000000",
     /** V3 backs up neutral uncertainty instead of applying a quiet evaluator to unresolved tactics. */
     val quiescenceUnresolvedBackups: Int = 0,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rootSelectionGuidance: RootSelectionGuidance? = null,
     val wallClockBudgetMillis: Long? = null,
+    /** Exact within-search rollout-prefix hits; policy choices are still sampled afresh. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheHits: Int = 0,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheSnapshots: Int = 0,
+    /** Prefixes whose new snapshot was refused by the runtime memory cap; execution continues. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheBypasses: Int = 0,
 ) {
     val evaluatorId: String get() = leaf.evaluator.evaluatorId
 }

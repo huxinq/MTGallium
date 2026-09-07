@@ -1,5 +1,44 @@
 # Search adapter cost profile
 
+`ObservationFragmentBenchmark.java` provides a bounded, manifest-verified screen
+of canonical observation fragment reuse. Compile it against the packaged research
+runtime, then pass a finalized gameplay directory, its expected research-run
+identity, repository root, and a new output path relative to the configured private evidence root. It checks every registered p0 decision observation against the full
+serializer and retained digest before measuring six alternating rounds of digest
+construction and current-thread allocations. Each stream starts with an empty
+fragment cache. It runs no games and measures neither safe projection nor overall
+search speed. The gameplay source owns the input observations; the benchmark
+source owns the fragment algorithm and timings. It requires clean committed
+source and writes source/Argentum provenance, actual runtime hashes, material
+configuration and a report bound by its finalized artifact manifest. The existing
+private-evidence destination guard applies; stdout only points to the result.
+
+Read `search-cost-summary.md` first after a new adapter profile completes. It
+reports the complete-stack search denominator, mutually exclusive cost shares,
+inclusive entry points, digest callers and sampled allocation weights. It is
+registered beside the recording in the existing artifact manifest.
+
+For an older recording already registered in its parent directory's finalized
+manifest, one read-only command produces the same summary:
+
+```sh
+just search-profile-summary /private/sealed-profile/profile.jfr
+```
+
+This verifies the parent manifest before reading the JFR; it runs no games,
+reconstruction or model loading and does not modify historical evidence. The
+recording's parent owns execution provenance. Stack classification is versioned
+in source; unmatched search work remains visible as `Other search`. Truncated
+and missing stacks are counted separately. Inclusive entries overlap, and
+allocation weights are sampling estimates rather than exact counters or GC
+pauses. Search shares are not whole-game speedups.
+
+For completed gameplay, read the already-retained `report.md` first. It includes
+source identity, policy configuration changes, W/L/draw counts, stopping result,
+confidence sequence, population accounting and scoped timing. Use `report.json`
+only when a question needs per-game or per-decision detail. Artifact verification
+still belongs to the source-owned completed-run loader, not a text extractor.
+
 `SearchAdapterProfile.java` runs four existing tactical roots with a synthetic
 60-card deck and the default production Search Teacher configuration (8
 particles, 64 simulations, 32-decision horizon). It measures initial policy

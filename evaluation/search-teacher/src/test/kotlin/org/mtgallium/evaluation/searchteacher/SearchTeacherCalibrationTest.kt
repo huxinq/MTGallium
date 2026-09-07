@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -45,7 +46,7 @@ class SearchTeacherCalibrationTest {
             example.calibration.candidates.single())
         assertEquals(PairedSequentialRule(nullPointRate = 0.5, targetPointRate = 0.5,
             falsePositiveRate = 0.025, falseNegativeRate = 0.025, maximumPairs = 24,
-            betFractions = listOf(0.2, 0.5, 0.8)), example.rule)
+            betFractions = listOf(0.2, 0.5, 0.8), stopForFutility = true), example.rule)
         for ((score, expected) in listOf(1.0 to PairedSequentialDisposition.ABOVE_NULL,
             0.0 to PairedSequentialDisposition.BELOW_TARGET)) {
             val result = pairedSequentialTest(example.rule,
@@ -155,7 +156,7 @@ class SearchTeacherCalibrationTest {
             Files.deleteIfExists(directory.resolve("checkpoint.json"))
             Files.delete(directory)
         }
-        listOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen").forEach { suite ->
+        listOf("search-teacher-calibration", "search-teacher-sequential", "search-teacher-continuation", "search-teacher-continuation-preflight", "real-game-position-bank", "position-bank-screen").forEach { suite ->
             assertFails { SearchTeacherCli.parse(arrayOf("--suite", suite)) }
             assertEquals(suite, SearchTeacherCli.parse(arrayOf("--suite", suite, "--profile", "/tmp/plan.json",
                 "--output", "/tmp/output", "--deck-manifest", "/tmp/deck.json")).suite)
@@ -218,6 +219,15 @@ class SearchTeacherCalibrationTest {
             falsePositiveRate = .05, falseNegativeRate = .05, maximumPairs = plan.pairCount)
         assertNotEquals(bindings.identity, searchTeacherCalibrationBindings(plan, source,
             mapOf("control" to "c"), "deck", "pool", 1, rule).identity)
+        val encodedRule = evidenceJson.encodeToString(rule)
+        assertFalse("stopForFutility" in encodedRule)
+        assertEquals(rule, evidenceJson.decodeFromString<PairedSequentialRule>(encodedRule))
+        val futileRule = rule.copy(stopForFutility = true)
+        assertEquals(futileRule, evidenceJson.decodeFromString<PairedSequentialRule>(evidenceJson.encodeToString(futileRule)))
+        assertNotEquals(searchTeacherCalibrationBindings(plan, source,
+            mapOf("control" to "c"), "deck", "pool", 1, rule).identity,
+            searchTeacherCalibrationBindings(plan, source,
+                mapOf("control" to "c"), "deck", "pool", 1, futileRule).identity)
         assertFails { SearchTeacherSequentialPlan(plan.copy(candidates = listOf(candidate, candidate.copy(id = "other"))), rule) }
         assertFails { SearchTeacherSequentialPlan(plan, rule.copy(maximumPairs = plan.pairCount + 1)) }
     }
@@ -235,6 +245,26 @@ class SearchTeacherCalibrationTest {
             arena.evidenceBinding(configured, null, source).identity)
         assertNotEquals(arena.evidenceBinding(configured, null, source).identity,
             arena.evidenceBinding(changed, null, source).identity)
+    }
+
+    @Test
+    fun `preflight accepts losing valid games and rejects stopped or missing legs`() {
+        val smoke = plan.copy(phase = SearchTeacherCalibrationPhase.PREFLIGHT, pairCount = 1)
+        val loss0 = game("loss0", true).copy(winner = "p0")
+        val loss1 = game("loss1", true).copy(p0PolicyId = candidate.id, p1PolicyId = control.id, winner = "p1")
+        fun report(games: List<GameRunResult>): SearchTeacherCalibrationReport {
+            val comparison = calibrationComparison(smoke, candidate,
+                listOf(searchBudgetFrontierPair(0, smoke.pairSeed(0), games, candidate.id)))
+            return SearchTeacherCalibrationReport(runIdentity = "synthetic", generatedAtUtc = "synthetic",
+                sourceProvenance = source, deckHash = "deck", cardPoolHash = "pool", plan = smoke,
+                workerThreads = 1, currentAttemptElapsedMillis = 1.0, policies = emptyList(),
+                comparisons = listOf(comparison), valid = comparison.validPairs == 1)
+        }
+        val losses = report(listOf(loss0, loss1))
+        assertEquals(0.0, losses.comparisons.single().candidatePointRate)
+        requireGameplayPreflightComplete(losses, smoke)
+        assertFails { requireGameplayPreflightComplete(report(listOf(loss0, game("stopped", false))), smoke) }
+        assertFails { requireGameplayPreflightComplete(report(listOf(loss0)), smoke) }
     }
 
     private fun game(id: String, terminal: Boolean) = GameRunResult(gameId = id, seed = plan.pairSeed(0),

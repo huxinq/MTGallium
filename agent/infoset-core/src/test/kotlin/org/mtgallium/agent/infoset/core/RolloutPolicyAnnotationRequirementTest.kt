@@ -9,6 +9,41 @@ import kotlinx.serialization.json.buildJsonObject
 
 class RolloutPolicyAnnotationRequirementTest {
     @Test
+    fun `menu-only rollout selection preserves seeds decisions and diagnostics while avoiding information reads`() {
+        data class Run(val result: InformationSetSearchResult, val terminal: TerminalPolicyContinuation,
+            val probe: ExpansionProbe, val root: MenuSelectionProbePolicy, val opponent: MenuSelectionProbePolicy)
+        fun run(enabled: Boolean): Run {
+            val probe = ExpansionProbe()
+            val root = MenuSelectionProbePolicy("root-menu", enabled)
+            val opponent = MenuSelectionProbePolicy("opponent-menu", enabled)
+            val config = InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 8,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1))
+            val search = InformationSetSearch(config, UniformOpponentPolicy, root, opponent,
+                leafEvaluationStrategy = LeafEvaluationStrategy(LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId,
+                    LeafValueSource.SampledWorld(LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId)))
+            val result = search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
+            val terminal = search.continueFirstUnvisitedEdgeToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
+            return Run(result, terminal, probe, root, opponent)
+        }
+        val baseline = run(false)
+        val optimized = run(true)
+        // Deferred information can require a later derived-cache snapshot when a rollout prefix
+        // enters the tree. Only that work counter and evaluator timing may differ.
+        assertEquals(baseline.result.copy(diagnostics = baseline.result.diagnostics.copy(
+            evaluatorNanos = 0, transitionCacheDerivedSnapshots = 0)),
+            optimized.result.copy(diagnostics = optimized.result.diagnostics.copy(
+                evaluatorNanos = 0, transitionCacheDerivedSnapshots = 0)))
+        assertEquals(baseline.terminal, optimized.terminal)
+        assertEquals(baseline.probe.acceptedLabels, optimized.probe.acceptedLabels)
+        assertEquals(baseline.root.seeds, optimized.root.seeds)
+        assertEquals(baseline.opponent.seeds, optimized.opponent.seeds)
+        assertTrue(optimized.root.menuCalls > 0)
+        assertTrue(optimized.opponent.menuCalls > 0)
+        assertEquals(baseline.probe.informationCalls - optimized.root.menuCalls - optimized.opponent.menuCalls,
+            optimized.probe.informationCalls)
+    }
+
+    @Test
     fun `zero-weight annotation consumers are not called to build the distribution`() {
         val world = PolicyAdmissionWorld(ExpansionProbe())
         val candidates = world.expandChoicesForPolicyAdmission().candidates
@@ -117,6 +152,55 @@ class RolloutPolicyAnnotationRequirementTest {
     }
 
     @Test
+    fun `plain-menu policies omit production admission in tree and both rollouts`() {
+        val probe = ExpansionProbe()
+        val rootRollout = PerspectiveRecordingPolicy("root-plain", false)
+        val opponentRollout = PerspectiveRecordingPolicy("opponent-plain", false)
+        val treeOpponent = PerspectiveRecordingPolicy("tree-plain", false)
+        val evaluator = object : InformationStateEvaluator {
+            override val id = LeafEvaluator.MTGALLIUM_VISIBLE_V2.evaluatorId
+            override fun evaluate(information: PolicyInformationState, rootPlayer: String): Double = 0.0
+        }
+        val search = InformationSetSearch(
+            config = InformationSetSearchConfig(
+                simulations = 8,
+                maxPolicyDecisions = 8,
+                leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT,
+                    LeafEvaluator.MTGALLIUM_VISIBLE_V2,
+                ),
+            ),
+            opponentPolicy = treeOpponent,
+            rolloutPolicy = rootRollout,
+            rolloutOpponentPolicy = opponentRollout,
+            leafEvaluationStrategy = LeafEvaluationStrategy(
+                evaluator.id,
+                LeafValueSource.Information(evaluator),
+            ),
+        )
+
+        val result = search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
+
+        search.settleFirstUnvisitedEdge(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
+        search.continueFirstUnvisitedEdgeToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
+
+        assertEquals(0, probe.annotationCalls)
+        assertEquals(0, probe.admissionCalls)
+        assertTrue(probe.acceptedLabels.all { it.startsWith("base-") })
+        assertTrue(rootRollout.calls > 0)
+        assertTrue(opponentRollout.calls > 0)
+        assertTrue(treeOpponent.calls > 0)
+        assertEquals(treeOpponent.id, result.diagnostics.opponentModelId)
+        assertEquals(rootRollout.id, result.diagnostics.rootRolloutPolicyId)
+        assertEquals(opponentRollout.id, result.diagnostics.opponentRolloutPolicyId)
+        assertEquals(0, result.diagnostics.policyAnnotatedExpansions)
+        (rootRollout.perspectives + opponentRollout.perspectives + treeOpponent.perspectives).forEach { witness ->
+            assertEquals(witness.actor, witness.viewer)
+            assertFalse(witness.candidateLabels.contains("admitted"))
+        }
+    }
+
+    @Test
     fun `policy admission preserves the annotated candidate identity while omitting tags`() {
         val probe = ExpansionProbe()
         val world = PolicyAdmissionWorld(probe)
@@ -130,6 +214,27 @@ class RolloutPolicyAnnotationRequirementTest {
         assertEquals(1, probe.admissionCalls)
         assertEquals(1, probe.annotationCalls)
         admitted.candidates.forEach { assertTrue(world.fork().step(it).accepted) }
+    }
+
+    @Test
+    fun `private belief choices honor plain versus admitted menu and mixture zero weights`() {
+        for (admission in listOf(false, true)) {
+            val probe = ExpansionProbe()
+            val plain = PerspectiveRecordingPolicy("private-policy", admission)
+            val policy = MixtureOpponentPolicy("private-mixture", listOf(
+                OpponentPolicyMixtureEntry(InactiveAnnotationPolicy, 0.0),
+                OpponentPolicyMixtureEntry(plain, 1.0),
+            ))
+            assertEquals(admission, policy.requiresProductionAdmission)
+            assertEquals(admission, policy.behaviorSpecification.requiresProductionAdmission)
+            val particles = ParticleBelief.from(belief(PolicyAdmissionWorld(probe, 1)), BeliefMode.CONSISTENCY_ONLY_V1)
+            assertEquals(1, particles.advanceUnobserved("p1", policy, 91L).belief.size)
+            assertEquals(0, probe.annotationCalls)
+            assertEquals(if (admission) 1 else 0, probe.admissionCalls)
+            assertEquals(if (admission) "admitted" else "base-a", probe.acceptedLabels.single())
+            assertTrue(plain.perspectives.isNotEmpty())
+            plain.perspectives.forEach { assertEquals("p1", it.viewer) }
+        }
     }
 
     private fun belief(world: SearchWorld) = BeliefBatch(
@@ -188,7 +293,9 @@ private data class PerspectiveWitness(
     val candidateLabels: List<String>,
 )
 
-private class PerspectiveRecordingPolicy(override val id: String) : OpponentPolicy {
+private class PerspectiveRecordingPolicy(
+    override val id: String, override val requiresProductionAdmission: Boolean = true,
+) : OpponentPolicy {
     var calls: Int = 0
     val perspectives = mutableListOf<PerspectiveWitness>()
     override val distributionIsSeedInvariant: Boolean = true
@@ -211,6 +318,7 @@ private class PerspectiveRecordingPolicy(override val id: String) : OpponentPoli
 }
 
 private class ExpansionProbe {
+    var informationCalls: Int = 0
     var admissionCalls: Int = 0
     var annotationCalls: Int = 0
     val acceptedLabels = mutableListOf<String>()
@@ -239,6 +347,7 @@ private class PolicyAdmissionWorld(
     override fun actorToAct(): String? = if (tick >= 4) null else if (tick % 2 == 0) "p0" else "p1"
 
     override fun informationState(viewer: String): PolicyInformationState {
+        probe.informationCalls++
         val actor = actorToAct()
         return PolicyInformationState(
             actingPlayerId = actor,
@@ -298,4 +407,25 @@ private class PolicyAdmissionWorld(
     override fun terminalPayoff(rootPlayer: String): Double? = if (tick >= 4) 0.0 else null
 
     override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.0
+}
+
+/** Exact uniform test policy with nontrivial attribution seeds, shared with the refresh witness. */
+internal class MenuSelectionProbePolicy(override val id: String, private val enabled: Boolean) : OpponentPolicy {
+    override val requiresProductionAdmission = false
+    val seeds = mutableListOf<Pair<Long, Long>>()
+    var menuCalls = 0
+    override fun distribution(opponentInformation: PolicyInformationState, candidates: List<SemanticChoice>, policySeed: Long) =
+        ProbabilityDistribution.uniform(candidates)
+    private fun diagnostic(policySeed: Long, attributionSeed: Long): OpponentPolicyDecisionDiagnostic {
+        seeds += policySeed to attributionSeed
+        return OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = "$id:${attributionSeed and 1}")
+    }
+    override fun decisionDiagnostic(opponentInformation: PolicyInformationState, candidates: List<SemanticChoice>,
+        chosen: SemanticChoice, policySeed: Long, attributionSeed: Long) = diagnostic(policySeed, attributionSeed)
+    override fun selectFromCandidates(candidates: List<SemanticChoice>, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision? {
+        if (!enabled) return null
+        menuCalls++
+        return OpponentPolicyDecision(sampleOpponentPolicyDistribution(ProbabilityDistribution.uniform(candidates), sampleSeed),
+            diagnostic(policySeed, ComponentSeeds.derive(sampleSeed, id, "component-attribution")))
+    }
 }

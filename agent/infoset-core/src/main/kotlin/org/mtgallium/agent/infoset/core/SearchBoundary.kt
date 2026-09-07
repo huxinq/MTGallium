@@ -175,6 +175,8 @@ enum class BeliefMode { CONSISTENCY_ONLY_V1, POLICY_CONDITIONED_V1 }
 
 interface OpponentPolicy {
     val id: String
+    /** Opt out only for a declared policy over the plain semantic proposal menu, without production anchors. */
+    val requiresProductionAdmission: Boolean get() = true
     /** True only when [distribution] or diagnostics consume optional policy annotations. */
     val requiresPolicyAnnotations: Boolean get() = false
     /** Enables exact per-state distribution memoization; sampling remains independently seeded. */
@@ -186,6 +188,7 @@ interface OpponentPolicy {
      */
     val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
+            requiresProductionAdmission = requiresProductionAdmission,
             implementationId = "opaque-declared-policy-v1",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,
@@ -208,6 +211,18 @@ interface OpponentPolicy {
         declaredPolicyId = id,
         selectedComponentId = id,
     )
+
+    /**
+     * Optional exact selection from the already-admitted acting-player menu. Return null when
+     * any part of selection or diagnostics needs information. A non-null result must equal
+     * [select] with the same menu and seeds; this capability does not change policy identity,
+     * menu admission, genuine decision boundaries or the caller's perspective obligations.
+     */
+    fun selectFromCandidates(
+        candidates: List<SemanticChoice>,
+        policySeed: Long,
+        sampleSeed: Long,
+    ): OpponentPolicyDecision? = null
 
     /** Samples one action and returns the component/replacement record for that exact site. */
     fun select(

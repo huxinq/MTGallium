@@ -13,6 +13,9 @@ class MixtureOpponentPolicy(
     override val id: String,
     private val components: List<OpponentPolicyMixtureEntry>,
 ) : OpponentPolicy {
+    override val requiresProductionAdmission: Boolean = components.any {
+        it.weight > 0.0 && it.policy.requiresProductionAdmission
+    }
     override val requiresPolicyAnnotations: Boolean = components.any {
         it.weight > 0.0 && it.policy.requiresPolicyAnnotations
     }
@@ -26,6 +29,7 @@ class MixtureOpponentPolicy(
 
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
+            requiresProductionAdmission = requiresProductionAdmission,
             implementationId = "weighted-mixture-with-posterior-attribution-v2",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,
@@ -128,7 +132,8 @@ object UniformOpponentPolicy : OpponentPolicy {
     ): ProbabilityDistribution<SemanticChoice> = ProbabilityDistribution.uniform(candidates)
 }
 
-internal fun <T> sampleOpponentPolicyDistribution(
+/** Shared selection sampler; menu-only policies must retain this exact seeded draw. */
+fun <T> sampleOpponentPolicyDistribution(
     distribution: ProbabilityDistribution<T>,
     seed: Long,
 ): T {

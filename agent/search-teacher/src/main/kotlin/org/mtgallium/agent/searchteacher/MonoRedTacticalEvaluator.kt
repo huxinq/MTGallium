@@ -239,18 +239,9 @@ class MonoRedTacticalEvaluator(
         components["phiDurable"] = 0.0
         components["phiInitiative"] = phiInitiative
 
-        val weights = settings.weights
-        val rawScore = weights.life * phiLife +
-            weights.lethal * phiLethal +
-            weights.body * phiBody +
-            weights.attack * phiAttack +
-            weights.block * phiBlock +
-            weights.reach * phiReach +
-            weights.hand * phiHand +
-            weights.mana * phiMana +
-            weights.landConversion * phiLandConversion +
-            weights.initiative * phiInitiative
-        val value = 0.95 * tanh(rawScore.coerceIn(-6.0, 6.0) / settings.outputTemperature)
+        val features = MonoRedTacticalLinearFeatures.fromComponents(components)
+        val rawScore = features.rawScore(settings.weights)
+        val value = features.evaluate(settings)
         require(value.isFinite() && value > -0.95 && value < 0.95)
         return TacticalEvaluationResult(
             evaluatorId = id,
@@ -507,3 +498,20 @@ class MonoRedTacticalEvaluator(
 object MonoRedTacticalEvaluatorV3 : ConfiguredInformationStateEvaluator by MonoRedTacticalEvaluator()
 
 private fun PolicyManaPool.total(): Int = white + blue + black + red + green + colorless
+
+/** Exact ten coordinates of the existing tactical formula; projected information only. */
+@Serializable
+data class MonoRedTacticalLinearFeatures(val values: List<Double>) {
+    init { require(values.size == 10 && values.all(Double::isFinite)) }
+    fun rawScore(w: MonoRedTacticalEvaluatorWeights): Double =
+        w.life * values[0] + w.lethal * values[1] + w.body * values[2] +
+            w.attack * values[3] + w.block * values[4] + w.reach * values[5] +
+            w.hand * values[6] + w.mana * values[7] + w.landConversion * values[8] + w.initiative * values[9]
+    fun evaluate(settings: MonoRedTacticalEvaluatorSettings): Double =
+        0.95 * tanh(rawScore(settings.weights).coerceIn(-6.0, 6.0) / settings.outputTemperature)
+    companion object {
+        fun fromComponents(components: Map<String, Double>): MonoRedTacticalLinearFeatures =
+            MonoRedTacticalLinearFeatures(listOf("phiLife", "phiLethal", "phiBody", "phiAttack", "phiBlock",
+                "phiReach", "phiHand", "phiMana", "phiLandConversion", "phiInitiative").map(components::getValue))
+    }
+}

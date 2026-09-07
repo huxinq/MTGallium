@@ -143,12 +143,22 @@ internal class CandidateConditionedInteractionPolicy private constructor(
     }
 }
 
+/** Equal-decision diagnostics over the trainer's non-singleton TRAIN and VALIDATION inputs. */
+@Serializable
+internal data class NeuralBcInteractionEpochMetrics(
+    val epoch: Int,
+    val trainingTeacherAgreement: Double,
+    /** Checkpoint-selection loss: label probability is floored at 1e-15. */
+    val validationCrossEntropy: Double,
+)
+
 internal data class TrainedInteractionBcModel(
     val policy: CandidateConditionedInteractionPolicy,
     val bestEpoch: Int,
     val bestValidationLoss: Double,
     val selectedCheckpointTrainingLoss: Double,
     val maximumTrainingAccuracy: Double,
+    val epochTrace: List<NeuralBcInteractionEpochMetrics>,
 )
 
 internal class NeuralBcInteractionTrainer(
@@ -169,13 +179,13 @@ internal class NeuralBcInteractionTrainer(
         var bestEpoch = 0
         var bestValidationLoss = Double.POSITIVE_INFINITY
         var maximumTrainingAccuracy = 0.0
+        val epochTrace = mutableListOf<NeuralBcInteractionEpochMetrics>()
         for (epoch in 1..trainingConfig.maximumEpochs) {
             effectiveTrain.shuffled(Random(seed xor epoch.toLong())).forEach(adam::step)
-            maximumTrainingAccuracy = maxOf(
-                maximumTrainingAccuracy,
-                neuralBcAccuracy(policy, effectiveTrain),
-            )
+            val trainingAccuracy = neuralBcAccuracy(policy, effectiveTrain)
+            maximumTrainingAccuracy = maxOf(maximumTrainingAccuracy, trainingAccuracy)
             val validationLoss = interactionMeanLoss(policy, effectiveValidation)
+            epochTrace += NeuralBcInteractionEpochMetrics(epoch, trainingAccuracy, validationLoss)
             if (validationLoss < bestValidationLoss - 1e-7) {
                 bestValidationLoss = validationLoss
                 bestEpoch = epoch
@@ -189,6 +199,7 @@ internal class NeuralBcInteractionTrainer(
             bestValidationLoss = bestValidationLoss,
             selectedCheckpointTrainingLoss = interactionMeanLoss(policy, effectiveTrain),
             maximumTrainingAccuracy = maximumTrainingAccuracy,
+            epochTrace = epochTrace.toList(),
         )
     }
 }

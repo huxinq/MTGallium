@@ -5,6 +5,7 @@ import java.nio.file.Path
 import java.util.zip.GZIPOutputStream
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -34,6 +35,62 @@ import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 
 @Tag("public-source")
 class PublicCorpusValidatorTest {
+    @Test
+    fun `relocated planner references remain explicit and hash bound without being dereferenced`() {
+        val fixture = fixture(listOf(header(), outcome()))
+        val original = evidenceJson.decodeFromString<CorpusManifest>(Files.readString(fixture.manifest))
+        val entry = original.entries.single()
+        val originalReference = "../../historical/public/trajectory.jsonl.gz"
+        val sidecar = org.mtgallium.agent.infoset.core.PlannerEvidenceSidecar(
+            binding = org.mtgallium.agent.infoset.core.PlannerEvidenceBinding(entry.gameId, originalReference,
+                requireNotNull(entry.publicSha256), header().schemaVersion, header().candidateSchemaVersion,
+                header().behaviorBinding, header().actionSpaceProfile), decisions = emptyList())
+        val path = fixture.root.resolve("planner/test.json.gz")
+        sidecar.writeCompressed(path)
+        val artifact = PlannerEvidenceArtifact("planner/test.json.gz", sha256File(path), Files.size(path), sidecar.schemaVersion)
+        assertFalse("originalSafeTrajectoryReference" in evidenceJson.encodeToString(artifact))
+        fun rewrite(next: PlannerEvidenceArtifact) {
+            val entries = listOf(entry.copy(plannerEvidence = next))
+            val identity = CorpusManifest.computeDatasetIdentity(original.profileId, original.profileHash,
+                original.sourceProvenance, 1, 1, 1, entries, true)
+            Files.writeString(fixture.manifest, evidenceJson.encodeToString(original.copy(entries = entries, datasetIdentity = identity)))
+        }
+        rewrite(artifact)
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        rewrite(artifact.copy(originalSafeTrajectoryReference = originalReference))
+        assertTrue(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        rewrite(artifact.copy(originalSafeTrajectoryReference = "wrong-reference"))
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+    }
+
+    @Test
+    fun `two Search Teachers require an explicit matching perspective without relabeling the game`() {
+        val fixture = fixture(listOf(header(), outcome()))
+        val original = evidenceJson.decodeFromString<CorpusManifest>(Files.readString(fixture.manifest))
+        val entry = original.entries.single()
+        assertFalse("teacherSeat" in evidenceJson.encodeToString(entry))
+        val dual = entry.copy(game = entry.game.copy(p1Policy = ArenaPolicyKind.SEARCH, searchSeat = null))
+        fun rewrite(next: CorpusEntry) {
+            val entries = listOf(next)
+            val identity = CorpusManifest.computeDatasetIdentity(original.profileId, original.profileHash,
+                original.sourceProvenance, 1, 1, 1, entries, true)
+            Files.writeString(fixture.manifest, evidenceJson.encodeToString(original.copy(entries = entries, datasetIdentity = identity)))
+        }
+        rewrite(dual)
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        rewrite(dual.copy(teacherSeat = "p0"))
+        val declared = Files.readString(fixture.manifest)
+        assertTrue(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        assertEquals(null, evidenceJson.decodeFromString<CorpusManifest>(declared).entries.single().game.searchSeat)
+        // The new perspective commitment is in dataset identity, not just advisory metadata.
+        Files.writeString(fixture.manifest, declared.replace("\"teacherSeat\": \"p0\"", "\"teacherSeat\": \"p1\""))
+        assertFailsWith<IllegalArgumentException> { PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest) }
+        rewrite(dual.copy(teacherSeat = "p1"))
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+        rewrite(entry.copy(teacherSeat = "p1"))
+        assertFalse(PublicCorpusValidator(fixture.root, emptyMap()).validate(fixture.manifest).passed)
+    }
+
     @Test
     fun `streams a valid public-only trajectory`() {
         val fixture = fixture(listOf(header(), outcome()))

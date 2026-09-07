@@ -1141,7 +1141,9 @@ internal fun replayFixedRootPrefix(
     replay: VerifiedCanonicalSemanticReplay,
     actual: ArgentumSearchWorld,
     session: SearchTeacherPolicySession?,
+    beforeDecision: (Int) -> Unit = {},
 ) {
+    require(decisionIndex in 0..replay.decisions.size)
     val stateEquivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
     requireFixedRootReplayStateMatch(
         difference = stateEquivalence.initialDifference(
@@ -1152,6 +1154,9 @@ internal fun replayFixedRootPrefix(
         rawOrdinal = -1,
     )
     replay.decisions.take(decisionIndex).forEach { decision ->
+        // The preceding prefix is verified here. A consumer must wait for this function to
+        // return before retaining a collection that claims verification of the entire prefix.
+        beforeDecision(decision.decisionIndex)
         val actor = requireNotNull(actual.actorToAct())
         val exact = actual.expandChoices().candidates.singleOrNull { it.signature == decision.choice.signature }
             ?: error("Canonical semantic choice ${decision.decisionIndex} is no longer legal")
@@ -1159,6 +1164,7 @@ internal fun replayFixedRootPrefix(
         val applied = actual.stepWithReplayTrace(exact)
         require(applied.result.accepted && applied.rawTransitions.size == decision.transitions.size)
         applied.rawTransitions.zip(decision.transitions).forEach { (raw, expected) ->
+            require(expected.accepted && raw.accepted) { "Canonical semantic replay requires accepted raw transitions" }
             require(recordedReplayActionEquals(requireNotNull(expected.action), raw.action))
             val eventComparison = recordedReplayEventComparison(
                 expected.events, raw.events, requireNotNull(expected.action), raw.action,

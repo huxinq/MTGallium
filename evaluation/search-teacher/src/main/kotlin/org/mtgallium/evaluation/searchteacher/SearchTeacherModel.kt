@@ -716,11 +716,14 @@ data class PopulationEvaluationReport(
 )
 
 @Serializable
-data class PlannerEvidenceArtifact(
+data class PlannerEvidenceArtifact @JvmOverloads constructor(
     val reference: String,
     val sha256: String,
     val sizeBytes: Long,
     val schemaVersion: Int,
+    /** Retained locator before relocation; it is compared as metadata, never dereferenced. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val originalSafeTrajectoryReference: String? = null,
 ) {
     init {
         require(reference.isNotBlank() && !reference.startsWith('/') && ':' !in reference)
@@ -732,7 +735,7 @@ data class PlannerEvidenceArtifact(
 }
 
 @Serializable
-data class CorpusEntry(
+data class CorpusEntry @JvmOverloads constructor(
     val gameId: String,
     val publicTrajectory: String,
     val publicSha256: String?,
@@ -744,8 +747,12 @@ data class CorpusEntry(
     val plannerEvidence: PlannerEvidenceArtifact? = null,
     val replayVerified: Boolean,
     val game: CorpusGameSummary,
+    /** Perspective supplying teacher labels when both players use Search Teacher. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val teacherSeat: String? = null,
 ) {
     init {
+        require(teacherSeat == null || teacherSeat in setOf("p0", "p1"))
         require((policyEvidenceIdentity == null) == (behaviorSpecificationSha256 == null)) {
             "Corpus policy identity and behavior-specification commitment must both be present or absent"
         }
@@ -980,6 +987,7 @@ data class CorpusValidationReport(
     val sourceManifestHash: String,
     val profileHash: String,
     val games: Int,
+    /** Terminal game summaries in the input population, independent of label-admission success. */
     val terminalGames: Int,
     val searchDecisions: Int,
     val events: Int,

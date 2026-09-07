@@ -55,6 +55,76 @@ class SafeObservationProjectorTest {
     }
 
     @Test
+    fun `previous descriptors preserve full projection through card runtime graph and alias changes`() {
+        val env = environment()
+        val aliases = env.playerIds.mapIndexed { index, id -> id to "p$index" }.toMap()
+        val original = ObservationBuilder(cardRegistry).build(env.state, env.playerIds[0], env.legalActions())
+            .observation as TrainingObservation
+        val cards = original.zones.flatMap { it.cards }
+        val first = cards[0]
+        val second = cards[1]
+        fun replace(observation: TrainingObservation, card: com.wingedsheep.gym.contract.EntityFeatures) =
+            observation.copy(zones = observation.zones.map { zone ->
+                zone.copy(cards = zone.cards.map { if (it.entityId == card.entityId) card else it })
+            })
+        val projector = SafeObservationProjector()
+        fun project(observation: TrainingObservation, previous: SafeObservationProjection? = null,
+            runtime: ArgentumPolicyRuntimeProjection = ArgentumPolicyRuntimeProjection.EMPTY,
+            players: Map<EntityId, String> = aliases) = projector.project(observation, players, runtime, previous = previous)
+        val initial = project(original)
+        val identical = project(original, initial)
+        assertEquals(cards.size, identical.references.reusedCardDescriptors)
+        assertEquals(initial.observation, identical.observation)
+        val changes = listOf(first.copy(name = "Changed"), first.copy(tapped = !first.tapped),
+            first.copy(controllerId = env.playerIds[1]), first.copy(counters = mapOf("+1/+1" to 2)),
+            first.copy(colors = setOf("BLUE")), first.copy(faceDown = true),
+            first.copy(types = linkedSetOf("ARTIFACT", "CREATURE")),
+            first.copy(types = linkedSetOf("CREATURE", "ARTIFACT")))
+        for (card in changes) {
+            val changed = replace(original, card)
+            val cached = project(changed, initial)
+            assertEquals(project(changed).observation, cached.observation)
+            assertEquals(cards.size - 1, cached.references.reusedCardDescriptors)
+        }
+        val ordered = replace(original, first.copy(types = linkedSetOf("ARTIFACT", "CREATURE")))
+        val reversed = replace(original, first.copy(types = linkedSetOf("CREATURE", "ARTIFACT")))
+        val orderedView = project(ordered)
+        val reversedView = project(reversed, orderedView)
+        assertEquals(cards.size, reversedView.references.reusedCardDescriptors)
+        assertEquals(project(reversed).observation, reversedView.observation)
+        assertNotEquals(orderedView.observation.observationDigest, reversedView.observation.observationDigest)
+        val runtime = ArgentumPolicyRuntimeProjection.EMPTY.copy(cards = mapOf(
+            first.entityId to ArgentumPolicyCardRuntime(hasActivatedAbilityThisTurn = true)))
+        assertEquals(project(original, runtime = runtime).observation, project(original, initial, runtime).observation)
+        assertEquals(cards.size - 1, project(original, initial, runtime).references.reusedCardDescriptors)
+        val swapped = aliases.mapValues { (_, alias) -> if (alias == "p0") "p1" else "p0" }
+        val rebound = project(original, initial, players = swapped)
+        assertEquals(project(original, players = swapped).observation, rebound.observation)
+        assertEquals(0, rebound.references.reusedCardDescriptors)
+        // Keep the first card's input unchanged while its neighbour changes. Global refinement
+        // must still change its reference; base-descriptor reuse cannot freeze the visible graph.
+        val graph = replace(replace(original, first.copy(attachedTo = second.entityId)),
+            second.copy(attachments = listOf(first.entityId)))
+        val graphBefore = project(graph)
+        val graphAfter = replace(graph, second.copy(attachments = listOf(first.entityId), tapped = !second.tapped))
+        val cachedGraph = project(graphAfter, graphBefore)
+        assertEquals(project(graphAfter).observation, cachedGraph.observation)
+        assertTrue(cachedGraph.references.reusedCardDescriptors > 0)
+        assertNotEquals(graphBefore.references.objectRef(first.entityId), cachedGraph.references.objectRef(first.entityId))
+        val stackId = EntityId.generate()
+        val stackGraph = replace(original, first.copy(attachedTo = stackId)).copy(stack = listOf(
+            StackItemView(stackId, env.playerIds[0], "Public graph", StackItemKind.TRIGGERED_ABILITY,
+                targets = listOf(second.entityId))))
+        val stackBefore = project(stackGraph)
+        val stackAfter = stackGraph.copy(stack = stackGraph.stack.map { it.copy(targets = listOf(env.playerIds[1])) })
+        val stackCached = project(stackAfter, stackBefore)
+        assertEquals(cards.size, stackCached.references.reusedCardDescriptors)
+        assertEquals(project(stackAfter).observation, stackCached.observation)
+        assertNotEquals(stackBefore.references.objectRef(first.entityId), stackCached.references.objectRef(first.entityId))
+        assertEquals(initial.observation, project(original, initial).observation)
+    }
+
+    @Test
     fun `incremental pure-priority projection is byte-identical to full projection`() {
         val env = environment()
         val viewer = env.playerIds[0]

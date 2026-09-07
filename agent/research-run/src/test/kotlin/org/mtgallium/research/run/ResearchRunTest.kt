@@ -8,6 +8,22 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class ResearchRunTest {
+    @Test fun `failed streaming publication preserves existing file and removes temporary`() {
+        val directory = createTempDirectory("research-run-stream")
+        val path = directory.resolve("result.json")
+        Files.writeString(path, "original")
+        assertFailsWith<IllegalStateException> {
+            ResearchRunFiles.atomicWrite(path) { output ->
+                output.write("incomplete".toByteArray())
+                error("producer failed")
+            }
+        }
+        assertEquals("original", Files.readString(path))
+        assertEquals(listOf(path), Files.list(directory).use { it.toList() })
+        ResearchRunFiles.atomicWrite(path) { it.write("complete".toByteArray()) }
+        assertEquals("complete", Files.readString(path))
+    }
+
     @Test
     fun `material bindings are deterministic and operational metadata is not identity`() {
         val first = ResearchRunBindings(protocol = "bounded-test-v1", material = mapOf("source" to "a", "seed" to "7"))

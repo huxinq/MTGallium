@@ -14,6 +14,97 @@ class PairedSequentialTestTest {
         falsePositiveRate = 0.05, falseNegativeRate = 0.05, maximumPairs = 100)
 
     @Test
+    fun `futility stops dispatch after the first unreachable prefix and retains completed overshoot`() {
+        val bounded = rule.copy(nullPointRate = .5, targetPointRate = .5,
+            falsePositiveRate = .025, falseNegativeRate = .025, maximumPairs = 12,
+            betFractions = listOf(.8), stopForFutility = true)
+        val calls = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val execution = executePairedSequentialSchedule(bounded, 40, 4) { index ->
+            calls += index
+            pair(index, if (index == 46) null else .5)
+        }
+        // Six remaining sweeps yield 1.8^6 < 40; seven could still cross.
+        assertEquals(PairedSequentialDisposition.FUTILITY, execution.result.disposition)
+        assertEquals(6, execution.result.inspectedPairs)
+        assertEquals(6, execution.result.validScoredPairs)
+        assertEquals((40..47).toList(), calls.sorted())
+        assertEquals(SearchTeacherSequentialPopulation(12, 8, 6, 4, 2, 0, 1), execution.population)
+        assertTrue(execution.valid)
+        assertFalse(execution.operationalValid)
+        assertTrue(execution.result.assumptions.any { "does not establish parity" in it })
+        val prefix = pairedSequentialTest(bounded, List(6) { PairedSequentialScore(40 + it, .5) }, 40)
+        assertEquals(prefix.orderedPrefixSha256, execution.result.orderedPrefixSha256)
+    }
+
+    @Test
+    fun `futility preserves reachable equality and existing crossing invalidity and cap precedence`() {
+        val bounded = rule.copy(nullPointRate = .5, targetPointRate = .5,
+            falsePositiveRate = 1 / 1.8.pow(3), falseNegativeRate = 1 / 1.8.pow(3),
+            maximumPairs = 4, betFractions = listOf(.8), stopForFutility = true)
+        assertEquals(PairedSequentialDisposition.CONTINUE,
+            pairedSequentialTest(bounded, listOf(PairedSequentialScore(0, .5)), 0).disposition)
+        for (value in listOf(0.0, 1.0)) {
+            val scores = List(4) { PairedSequentialScore(it, value) }
+            assertEquals(pairedSequentialTest(bounded.copy(stopForFutility = false), scores, 0).disposition,
+                pairedSequentialTest(bounded, scores, 0).disposition)
+        }
+        assertEquals(PairedSequentialDisposition.INVALID_PAIR,
+            pairedSequentialTest(bounded, listOf(PairedSequentialScore(0, null, listOf("stopped"))), 0).disposition)
+        assertEquals(PairedSequentialDisposition.BUDGET_EXHAUSTED,
+            pairedSequentialTest(bounded.copy(maximumPairs = 1), listOf(PairedSequentialScore(0, .5)), 0).disposition)
+    }
+
+    @Test
+    fun `exhaustive fractional continuations never hide an attainable directional crossing`() {
+        val bounded = rule.copy(nullPointRate = .4, targetPointRate = .6,
+            falsePositiveRate = .25, falseNegativeRate = .25, maximumPairs = 6,
+            betFractions = listOf(.2, .8))
+        var futile = 0
+        var crossed = 0
+        val crossing = setOf(PairedSequentialDisposition.ABOVE_NULL, PairedSequentialDisposition.BELOW_TARGET,
+            PairedSequentialDisposition.BOTH_BOUNDARIES_CROSSED)
+        // All five possible complete-pair scores, including one or two drawn games.
+        repeat(15_625) { encoded ->
+            var remaining = encoded
+            val scores = List(6) { index ->
+                PairedSequentialScore(17 + index, (remaining % 5) / 4.0).also { remaining /= 5 }
+            }
+            val original = pairedSequentialTest(bounded, scores, 17)
+            val enabled = pairedSequentialTest(bounded.copy(stopForFutility = true), scores, 17)
+            if (enabled.disposition == PairedSequentialDisposition.FUTILITY) {
+                futile++
+                assertFalse(original.disposition in crossing)
+            }
+            if (original.disposition in crossing) {
+                crossed++
+                assertEquals(original.disposition, enabled.disposition)
+                assertEquals(original.inspectedPairs, enabled.inspectedPairs)
+            }
+        }
+        assertTrue(futile > 0 && crossed > 0)
+    }
+
+    @Test
+    fun `large cap cancellation cannot prune a crossing reachable by repeated floating point updates`() {
+        val bounded = rule.copy(nullPointRate = .5, targetPointRate = .5,
+            falsePositiveRate = 0.024127886436643424, falseNegativeRate = 0.024127886436643424,
+            maximumPairs = 18_697, betFractions = listOf(.8))
+        val prefix = List(10_000) { PairedSequentialScore(it, (it % 2).toDouble()) }
+        // A multiplied cap plus a fixed 1e-10 margin incorrectly declared this prefix futile.
+        assertEquals(PairedSequentialDisposition.CONTINUE,
+            pairedSequentialTest(bounded.copy(stopForFutility = true), prefix, 0).disposition)
+        for ((score, expected) in listOf(1.0 to PairedSequentialDisposition.ABOVE_NULL,
+                0.0 to PairedSequentialDisposition.BELOW_TARGET)) {
+            val completed = prefix + List(8_697) { PairedSequentialScore(10_000 + it, score) }
+            val original = pairedSequentialTest(bounded, completed, 0)
+            val enabled = pairedSequentialTest(bounded.copy(stopForFutility = true), completed, 0)
+            assertEquals(expected, original.disposition)
+            assertEquals(original.disposition, enabled.disposition)
+            assertEquals(original.inspectedPairs, enabled.inspectedPairs)
+        }
+    }
+
+    @Test
     fun `normalized capital starts at one and split pairs are scored atomically`() {
         val empty = pairedSequentialTest(rule, emptyList(), 70)
         assertEquals(0.0, empty.logUpperMixture)

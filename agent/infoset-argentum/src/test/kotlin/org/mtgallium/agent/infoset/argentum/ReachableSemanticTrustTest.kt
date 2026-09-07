@@ -474,6 +474,56 @@ class ReachableSemanticTrustTest {
     }
 
     @Test
+    fun `remembered Temple keeps object continuity when its activated ability transforms it back`() {
+        val deck = mapOf("Mountain" to 16, "Ojer Axonil, Deepest Might" to 4)
+        val knownDecks = mapOf("p0" to deck, "p1" to deck)
+        val base = environment(deck)
+        val player = base.playerIds[0]
+        val ojer = findCard(base.state, player, "Ojer Axonil, Deepest Might")
+        val state = transformedTemple(mainPhase(base.state, player, redMana = 3), player, ojer)
+            .updateEntity(player) { it.with(RedNoncombatDamageDealtThisTurnComponent(4)) }
+        val before = move(state, ojer, ZoneKey(player, Zone.GRAVEYARD))
+        fun projections(snapshot: GameState) = base.playerIds.associateWith { viewer ->
+            SafeObservationProjector().project(
+                com.wingedsheep.gym.contract.ObservationBuilder(registry)
+                    .build(snapshot, viewer, emptyList()).observation as com.wingedsheep.gym.contract.TrainingObservation,
+            )
+        }
+        // Reconstruct its publicly observed return as Temple, then use real player decisions.
+        val history = PerspectiveHistory(base.playerIds)
+        history.recordEngineEvents(
+            listOf(com.wingedsheep.engine.core.ZoneChangeEvent(
+                ojer, "Temple of Power", Zone.GRAVEYARD, Zone.BATTLEFIELD, player,
+            )), player, before, state, projections(before), projections(state),
+        )
+        val world = world(base, state, "remembered-temple-transform", knownDecks)
+            .withRememberedHistoryForVerification(history)
+        val original = listOf("p0", "p1").associateWith { viewer ->
+            world.informationState(viewer).knowledge.knownObjects.single()
+        }
+        original.values.forEach { assertEquals("Temple of Power", it.cardName) }
+        val fork = world.fork() as ArgentumSearchWorld
+        val ability = registry.requireCard("Temple of Power").activatedAbilities.single { !it.isManaAbility }.id
+        assertTrue(world.step(activationChoice(world, ojer, ability)).accepted)
+        resolveStack(world)
+        assertEquals("Ojer Axonil, Deepest Might", cardName(world.authoritativeState(), ojer))
+        for (viewer in listOf("p0", "p1")) {
+            val information = world.informationState(viewer)
+            val remembered = information.knowledge.knownObjects.single()
+            assertEquals(original.getValue(viewer).copy(cardName = "Ojer Axonil, Deepest Might"), remembered)
+            assertNull(world.knowledgeSupportFailure(viewer, information))
+            val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
+                information, knownDecks, beliefSeed = 9022L, count = 2,
+            )
+            assertEquals(2, rebuilt.particles.size)
+            rebuilt.particles.forEach { particle ->
+                assertNull((particle.value as ArgentumSearchWorld).knowledgeSupportFailure(viewer, information))
+            }
+            assertEquals(original.getValue(viewer), fork.informationState(viewer).knowledge.knownObjects.single())
+        }
+    }
+
+    @Test
     fun `remaining land play is explicit during combat and controls the later main-phase action`() {
         val deck = mapOf("Mountain" to 20)
         val base = environment(deck)

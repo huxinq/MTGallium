@@ -15,7 +15,8 @@ For new head-to-head experiments, start with the
 [paired gameplay quick start](docs/real-game-screening.md#sequential-gameplay)
 and its [example plan](examples/search-teacher-sequential.json). The reusable
 runner supports prospective early stopping, complete seat-swapped pairs and
-explicit accounting for invalid games and work completed after stopping.
+explicit accounting for invalid games and work completed after stopping. Research
+launches can use the [technical preflight](docs/research-preflight.md).
 
 The [experimental learned outcome-value subsystem](docs/learned-outcome-value.md)
 includes checkpoint inference, training and admission, and research diagnostics.

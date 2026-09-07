@@ -1,3 +1,4 @@
+import java.io.File
 import org.gradle.api.tasks.testing.Test
 
 plugins {
@@ -197,4 +198,25 @@ tasks.register<Test>("neuralHeldOutGeneralizationPreflightTest") {
 
 tasks.named("run") {
     mustRunAfter("neuralHeldOutGeneralizationPreflightTest")
+}
+
+// Preserve Gradle's actual dependency order and every artifact even when two
+// modules have the same jar basename (agent and evaluation both use search-teacher).
+// The private build wrapper copies these with distinct ordinal names.
+val researchRuntimeClasspath = configurations.named("runtimeClasspath")
+tasks.register("researchRuntimeClasspath") {
+    group = "distribution"
+    description = "Builds and records the ordered jar runtime for a private attested research bundle."
+    dependsOn(tasks.named("jar"), researchRuntimeClasspath)
+    val destination = layout.buildDirectory.file("research/runtime-classpath.txt")
+    outputs.file(destination)
+    doLast {
+        val applicationJar = tasks.named<Jar>("jar").get().archiveFile.get().asFile
+        val artifacts = (listOf(applicationJar) + researchRuntimeClasspath.get().files).distinct()
+        require(artifacts.all { it.isFile && it.extension == "jar" })
+        destination.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(artifacts.joinToString(File.pathSeparator) { it.absolutePath } + "\n")
+        }
+    }
 }

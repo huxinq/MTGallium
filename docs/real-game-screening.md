@@ -37,6 +37,43 @@ sequential belief, then compares actual search choices on matched root/repetitio
 seeds. It records values, settlements, diagnostics and reconstruction/selection
 cost separately. The actual replayed hidden world never becomes a belief particle.
 
+`ACTION_CONDITIONAL` reconstructs the same legitimate information and belief,
+then spends the configured simulation budget on each initially admitted root
+action separately. Only the first edge is forced; normal tree selection,
+opponent decisions, rollout policies and horizon/settlement rules continue
+afterward. The complete represented candidate family remains intact. The
+diagnostic rejects trace reuse, wall-clock cutoffs and singleton-pass compression.
+Actions outside the initially admitted menu are refused; this is not a claim
+of exhaustive rules-legal coverage.
+
+Each action retains its adaptive mean backed value, visits, typed settlement
+counts and diagnostics in `rootActionEstimates`. A forced-action estimate is
+neither a policy recommendation nor a terminal outcome. The root/repetition
+seed and particle batch are shared across actions; divergent continuations
+need not consume corresponding chance events. Internal tree backups are not
+independent uncertainty samples. Use independent repetitions and preserve
+whole-game grouping when comparing values; more simulations do not remove
+evaluator or opponent-policy bias. A reference-valued comparison between
+baseline and modified search choices is a surrogate pending gameplay validation.
+Set a separate `searchSeedDomain` for reference scoring to avoid reusing the
+candidate-selection search randomness. Omission preserves historical seed
+derivation and plan bytes. Repetitions vary search sampling over the reconstructed
+particle batch; they do not independently rebuild that posterior approximation.
+
+Both search modes prepare a root once per policy and reuse its world/session
+across that policy's repetitions on one worker. Each search uses a fresh tree;
+no accepted action advances the prepared root. Different roots and policies
+remain separate. Preparation is held only for that worker group and is not a
+durable world snapshot. `reconstructionMillis` charges the work to repetition
+zero; later repetitions report zero and `reusedRootPreparation=true`. Selection
+time still includes each repetition's belief support check and search. A failed
+preparation refuses every requested repetition; it does not drop rows.
+
+Both search modes support the bound [research preflight](research-preflight.md)
+with `work.type = "position-screen"`. Reuse the finalized bank and reference
+estimates across candidates only while their source, configuration, action
+coverage and population meaning remain applicable.
+
 `MonoRedVisibleEvaluatorConfig` parameterizes the existing visible-v2 formula.
 Its default coefficients preserve that evaluator's numerical behavior; a
 configuration identity distinguishes overrides. Formula changes, learned labels,
@@ -85,11 +122,46 @@ bet mixture prospectively; do not tune it after seeing losses or wins. Early
 stopping is possible, not promised. Two workers can leave one extra completed
 pair beyond the first stopping prefix.
 
+For a practical acceptance objective, start from the
+[non-inferiority example](../examples/search-teacher-non-inferiority.json).
+It explicitly selects a two-percentage-point margin, `.48`/`.52` boundaries,
+and `practicalAcceptance.objective = "NON_INFERIOR"`. Acceptance establishes
+mean game score above `.48`; it does not establish superiority. Select
+`"EQUIVALENT"` to require both bounds inside `.48`–`.52`. The two `.025`
+directional error allocations yield a confidence sequence with at least 95%
+simultaneous coverage across repeated progress checks. Its maximum compatible
+distance from parity is an uncertainty bound, not a measured strength loss.
+The 24-pair example is a syntax/workflow example, not a powered design for
+this narrow margin. Choose the actual cap before executing the trial.
+
+Practical acceptance disables directional futility and retains the ordinary
+pair validity and overshoot rules. A faster implementation additionally needs
+a separately declared runtime comparison over the relevant workload; both
+policies share the elapsed duration of a head-to-head game, so that duration
+cannot itself attribute a speedup to either policy. Freeze this new protocol
+before observing its games. Historical superiority tests and games from an
+earlier candidate retain their original meaning.
+
+The example enables `stopForFutility`. After each complete valid pair, the rule
+checks whether even winning every remaining pair could cross the upper boundary,
+or losing every remaining pair could cross the lower boundary. If neither is
+reachable within the planned cap, it reports `FUTILITY`: an inconclusive result,
+not evidence of parity or equivalence. The scheduler finishes its already-running
+worker chunk, retains any pairs beyond that first stopping prefix as overshoot,
+and launches no further chunk. Borderline numerical bounds continue conservatively.
+The setting is prospectively bound into the run identity. Omitted or false keeps
+the historical behavior and serialized rule bytes; do not retrofit it onto a
+running or completed experiment's original report.
+
 After completion, verify the research-run manifest and checkpoints before using
-`report.json` or `report.md`. `sequentialResult` gives the stopping disposition;
+`report.json` or `report.md`. Read the compact `report.md` first: it includes
+policy configuration differences, W/L/draw counts, stopping disposition,
+confidence sequence, population accounting and scoped timing. Reserve the full
+JSON report for questions requiring individual games or decisions.
+`sequentialResult` gives the stopping disposition;
 `sequentialPopulation` separates planned, executed, inspected, unexecuted and
 overshoot pairs. `comparisons[0].pairs` owns the inference prefix, while
-`sequentialOvershootPairs` retains extra work. `BUDGET_EXHAUSTED` is inconclusive;
+`sequentialOvershootPairs` retains extra work. `BUDGET_EXHAUSTED` and `FUTILITY` are inconclusive;
 `INVALID_PAIR` stops inference without turning a software failure into a loss.
 
 The [plan and schedule](../evaluation/search-teacher/src/main/kotlin/org/mtgallium/evaluation/searchteacher/SearchTeacherSequentialPlan.kt),

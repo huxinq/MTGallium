@@ -323,6 +323,7 @@ class NeuralBehavioralCloningTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("public-source")
     fun `interaction policy fits a state-dependent candidate ranking and survives save load`() {
         val modelConfig = NeuralBcInteractionModelConfig(
             stateDimension = 8,
@@ -342,6 +343,23 @@ class NeuralBehavioralCloningTest {
             seed = 41L,
         )
         assertTrue(neuralBcAccuracy(trained.policy, examples) >= 0.95)
+        assertEquals((1..trainingConfig.maximumEpochs).toList(), trained.epochTrace.map { it.epoch })
+        assertEquals(trained.maximumTrainingAccuracy, trained.epochTrace.maxOf { it.trainingTeacherAgreement })
+        var selectedEpoch = 0
+        var selectedLoss = Double.POSITIVE_INFINITY
+        for (epoch in trained.epochTrace) {
+            assertTrue(epoch.trainingTeacherAgreement in 0.0..1.0)
+            assertTrue(epoch.validationCrossEntropy.isFinite())
+            if (epoch.validationCrossEntropy < selectedLoss - 1e-7) {
+                selectedEpoch = epoch.epoch
+                selectedLoss = epoch.validationCrossEntropy
+            }
+        }
+        assertEquals(trained.bestEpoch, selectedEpoch)
+        assertEquals(trained.bestValidationLoss, selectedLoss)
+        val encodedTrace = evidenceJson.encodeToString(trained.epochTrace)
+        assertEquals(trained.epochTrace,
+            evidenceJson.decodeFromString<List<NeuralBcInteractionEpochMetrics>>(encodedTrace))
 
         val path = createTempDirectory("neural-bc-interaction-model").resolve("model.json")
         trained.policy.save(path)

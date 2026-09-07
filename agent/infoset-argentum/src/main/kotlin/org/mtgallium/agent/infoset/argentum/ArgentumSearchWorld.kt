@@ -77,6 +77,13 @@ class ArgentumSearchWorld private constructor(
 
     override fun actorToAct(): String? = policyActor(environment)?.let(aliases::getValue)
 
+    /** Current safe-projection work counts; no referee state enters this diagnostic. */
+    internal fun observationDescriptorReuse(viewer: String): Int = project(rawPlayer(viewer)).references.reusedCardDescriptors
+
+    internal fun observationFragmentReuse(viewer: String): Pair<Int, Int> = project(rawPlayer(viewer)).canonicalFragments.let {
+        it.reusedCards to it.encodedCards
+    }
+
     /** Declared candidate-generation behavior used by this world and all of its ordinary forks. */
     fun semanticExpansionSpecification(): UnifiedSemanticExpansionSpecification =
         expander.behaviorSpecification
@@ -386,7 +393,7 @@ class ArgentumSearchWorld private constructor(
         // Keep the already-built Gym input as well as the safe projection. A pure priority
         // transfer changes only three visible priority fields, so the next inputs can be derived
         // exactly without rebuilding every zone/card view and StateDigest.
-        val beforePrepared = aliases.keys.associateWith(::preparedProjection)
+        val beforePrepared = aliases.keys.associateWith { preparedProjection(it) }
         val before = beforePrepared.mapValues { it.value.projection }
         val privateChoice = engineChoice is ArgentumEngineChoice.Decision &&
             environment.pendingDecision.isPrivateToChooser() ||
@@ -469,7 +476,7 @@ class ArgentumSearchWorld private constructor(
                 }
             }
         } else {
-            aliases.keys.associateWith(::project)
+            aliases.keys.associateWith { viewer -> project(viewer, before.getValue(viewer)) }
         }
         val semanticEvents = history.recordEngineEvents(
             engineEvents = environment.lastStepEvents,
@@ -642,14 +649,14 @@ class ArgentumSearchWorld private constructor(
         return expansion
     }
 
-    private fun project(viewer: EntityId): SafeObservationProjection {
+    private fun project(viewer: EntityId, previous: SafeObservationProjection? = null): SafeObservationProjection {
         cachedSafeProjections[viewer]?.takeIf {
             it.state === environment.state && it.decisionIndex == decisionIndex
         }?.let { return it.value }
-        return preparedProjection(viewer).projection
+        return preparedProjection(viewer, previous).projection
     }
 
-    private fun preparedProjection(viewer: EntityId): PreparedSemanticExpansionInput {
+    private fun preparedProjection(viewer: EntityId, previous: SafeObservationProjection? = null): PreparedSemanticExpansionInput {
         requireSupportedInformationState()
         cachedProjections[viewer]?.takeIf {
             it.state === environment.state && it.decisionIndex == decisionIndex
@@ -664,6 +671,7 @@ class ArgentumSearchWorld private constructor(
             aliases,
             ArgentumPolicyRuntimeProjector.project(environment.state, viewer, cardRegistry, observation),
             pendingDecision = environment.pendingDecision,
+            previous = previous,
         )
         return PreparedSemanticExpansionInput(
             actor = viewer,

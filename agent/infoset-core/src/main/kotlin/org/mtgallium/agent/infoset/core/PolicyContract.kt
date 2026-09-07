@@ -648,7 +648,7 @@ object PolicyJson {
     private fun StringBuilder.appendCanonical(element: JsonElement) {
         when (element) {
             JsonNull -> append("null")
-            is JsonPrimitive -> append(element)
+            is JsonPrimitive -> if (element.isString) appendQuoted(element.content) else append(element.content)
             is JsonArray -> {
                 append('[')
                 element.forEachIndexed { index, child ->
@@ -661,13 +661,41 @@ object PolicyJson {
                 append('{')
                 element.entries.sortedBy { it.key }.forEachIndexed { index, (key, value) ->
                     if (index > 0) append(',')
-                    append(format.encodeToString(key))
+                    appendQuoted(key)
                     append(':')
                     appendCanonical(value)
                 }
                 append('}')
             }
         }
+    }
+
+    /** Match JSON string escaping without a serializer/writer and temporary String per field. */
+    private fun StringBuilder.appendQuoted(value: String) {
+        append('"')
+        var start = 0
+        for (index in value.indices) {
+            val character = value[index]
+            if (character >= ' ' && character != '"' && character != '\\') continue
+            append(value, start, index)
+            when (character) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\b' -> append("\\b")
+                '\t' -> append("\\t")
+                '\n' -> append("\\n")
+                '\u000C' -> append("\\f")
+                '\r' -> append("\\r")
+                else -> {
+                    append("\\u00")
+                    append(LOWER_HEX[character.code ushr 4])
+                    append(LOWER_HEX[character.code and 0x0f])
+                }
+            }
+            start = index + 1
+        }
+        append(value, start, value.length)
+        append('"')
     }
 
     fun digest(element: JsonElement): String = sha256(canonical(element))

@@ -157,6 +157,10 @@ sealed interface PerspectiveEventDetail {
         val change: String,
         val value: String? = null,
         val relatedObjectRefs: List<String> = emptyList(),
+        /** Stable viewer-local continuity for a visible transformation; never an engine id. */
+        @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+        @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+        val knowledgeObjectKey: String? = null,
     ) : PerspectiveEventDetail
 
     /** Public cause-and-result structure that is not recoverable from a later board snapshot. */
@@ -393,6 +397,16 @@ class PolicyKnowledgeAccumulator private constructor(
                 val name = detail.sourceName
                 if (key != null && owner != null && zone != null && name != null) {
                     knownObjects[key] = PolicyKnownObject(key, owner, zone, name)
+                }
+            }
+            is PerspectiveEventDetail.ObjectState -> {
+                // A face change preserves the remembered object's owner, zone and continuity.
+                // Display references are observation-local and cannot identify historical objects.
+                val key = detail.knowledgeObjectKey
+                if (detail.change == "TRANSFORMED" && key != null && detail.objectName != null) {
+                    knownObjects[key]?.let { known ->
+                        knownObjects[key] = known.copy(cardName = detail.objectName)
+                    }
                 }
             }
             is PerspectiveEventDetail.Draw -> {

@@ -19,6 +19,11 @@ class InformationSetSearch(
         leafEvaluationStrategy.source.invokedEvaluatorConfigurationId
 
     init {
+        listOf(opponentPolicy, rolloutPolicy, rolloutOpponentPolicy).forEach { policy ->
+            require(!policy.requiresPolicyAnnotations || policy.requiresProductionAdmission) {
+                "Policy annotations require production admission"
+            }
+        }
         require(leafEvaluationStrategy.configuredEvaluatorId == config.leaf.evaluator.evaluatorId) {
             "Configured leaf ${config.leaf.evaluator.evaluatorId} does not match strategy " +
                 leafEvaluationStrategy.configuredEvaluatorId
@@ -81,7 +86,7 @@ class InformationSetSearch(
 
     /**
      * Continues an already-applied first edge to an actual engine terminal state with the exact
-     * production root/opponent rollout-policy pair and seed derivation. This diagnostic seam never
+     * configured root/opponent rollout-policy pair and seed derivation. This diagnostic seam never
      * invokes a leaf evaluator or converts exhaustion, missing choices, rejection, or policy
      * replacement into a payoff.
      */
@@ -96,7 +101,7 @@ class InformationSetSearch(
         require(childDepth > 0)
         require(maximumContinuationPolicyDecisions > 0)
         check(!config.compressPolicySingletonPasses) {
-            "Terminal evidence requires the production uncompressed rollout-policy decision path"
+            "Terminal evidence requires the configured uncompressed rollout-policy decision path"
         }
         val world = childWorld.fork()
         val rootAudit = OpponentPolicyDecisionCounter()
@@ -128,8 +133,8 @@ class InformationSetSearch(
                 } else {
                     expansion.candidates
                 }
-                val decision = policy.select(
-                    opponentInformation = world.informationState(actor),
+                val decision = policy.selectForRollout(
+                    opponentInformation = { world.informationState(actor) },
                     candidates = candidates,
                     policySeed = ComponentSeeds.derive(
                         searchSeed,
@@ -175,6 +180,42 @@ class InformationSetSearch(
         searchSeed: Long,
         beliefContinuityEpoch: Long = 0L,
         simulationWorldSchedule: SimulationWorldSchedule? = null,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
+    ): InformationSetSearchResult = searchInternal(
+        rootPlayer, belief, searchSeed, beliefContinuityEpoch, simulationWorldSchedule, null, rootSelectionGuidance,
+    )
+
+    /**
+     * Diagnostic search conditioned on an initially admitted root action. Every simulation takes
+     * that first edge, then uses normal information-set tree/rollout policies and settlement.
+     * The mean is an adaptive search estimate, not an observed game payoff or an uncertainty bound.
+     */
+    fun estimateRootAction(
+        rootPlayer: String,
+        belief: BeliefBatch<Weighted<SearchWorld>>,
+        rootActionSignature: String,
+        searchSeed: Long,
+        simulationWorldSchedule: SimulationWorldSchedule? = null,
+    ): RootActionSearchEstimate {
+        require(rootActionSignature.isNotBlank())
+        require(!reuseConfig.enabled) { "Action-conditional estimates cannot reuse ordinary search traces" }
+        require(!config.compressPolicySingletonPasses) { "Action-conditional estimates require uncompressed root-edge accounting" }
+        require(config.wallClockBudgetMillis == null) { "Action-conditional estimates require a fixed simulation budget" }
+        val result = searchInternal(rootPlayer, belief, searchSeed, 0L, simulationWorldSchedule, rootActionSignature)
+        val action = result.candidates.single { it.choice.signature == rootActionSignature }
+        check(action.visits == config.simulations && result.candidates.filterNot { it == action }.all { it.visits == 0 })
+        return RootActionSearchEstimate(action.choice, action.meanValue, action.visits,
+            result.settlementCountsFor(action.choice), result.diagnostics)
+    }
+
+    private fun searchInternal(
+        rootPlayer: String,
+        belief: BeliefBatch<Weighted<SearchWorld>>,
+        searchSeed: Long,
+        beliefContinuityEpoch: Long,
+        simulationWorldSchedule: SimulationWorldSchedule?,
+        rootActionSignature: String?,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): InformationSetSearchResult {
         require(belief.particles.isNotEmpty())
         require(simulationWorldSchedule == null || !reuseConfig.enabled) {
@@ -184,6 +225,26 @@ class InformationSetSearch(
             "A fixed simulation-world schedule must contain exactly ${config.simulations} worlds"
         }
         requireConformantRoot(rootPlayer, belief)
+        // Snapshot the caller's map so one immutable preference set owns the entire search.
+        val guidance = rootSelectionGuidance?.copy(scores = rootSelectionGuidance.scores.toMap())
+        guidance?.let {
+            require(!reuseConfig.enabled && !config.compressPolicySingletonPasses && rootActionSignature == null)
+            val representative = belief.particles.first().value
+            require(representative.actorToAct() == rootPlayer)
+            require(representative.informationState(rootPlayer).informationStateDigest == it.informationStateDigest) {
+                "Root guidance belongs to another information state"
+            }
+            val expansion = initialExpansion(representative)
+            require(expansion.isProfileExhaustive && expansion.candidates.map { choice -> choice.signature }.toSet() == it.scores.keys) {
+                "Root guidance requires the exact profile-exhaustive initial admitted menu"
+            }
+        }
+        val selectionGuidance = guidance?.takeIf { it.scores.values.any { score -> score != 0.0 } }
+        if (rootActionSignature != null) {
+            require(initialExpansion(belief.particles.first().value).candidates.any { it.signature == rootActionSignature }) {
+                "Conditioned root action is absent from the initial admitted menu"
+            }
+        }
         val rolloutTargetTurn = rolloutTargetTurn(config.rolloutTurnHorizon?.let {
             belief.particles.first().value.informationState(rootPlayer).observation.turnNumber
         })
@@ -275,6 +336,8 @@ class InformationSetSearch(
                 quiescenceMode = false,
                 quiescenceDepth = 0,
                 rolloutTargetTurn = rolloutTargetTurn,
+                rootActionSignature = rootActionSignature,
+                rootSelectionGuidance = selectionGuidance,
             )
             require(outcome.backedValue.isFinite()) { "Search produced a non-finite value" }
             recorder?.build(outcome)?.let(nextTraces::add)
@@ -347,6 +410,9 @@ class InformationSetSearch(
                 transitionCacheMisses = workAudit.transitionCacheMisses,
                 transitionCacheSnapshots = workAudit.transitionCacheSnapshots,
                 transitionCacheDerivedSnapshots = workAudit.transitionCacheDerivedSnapshots,
+                rolloutTransitionCacheHits = workAudit.rolloutTransitionCacheHits,
+                rolloutTransitionCacheSnapshots = workAudit.rolloutTransitionCacheSnapshots,
+                rolloutTransitionCacheBypasses = workAudit.rolloutTransitionCacheBypasses,
                 policyAnnotationCacheHits = workAudit.policyAnnotationCacheHits,
                 policyAnnotationCacheMisses = workAudit.policyAnnotationCacheMisses,
                 opponentDistributionCacheHits = workAudit.opponentDistributionCacheHits,
@@ -360,6 +426,7 @@ class InformationSetSearch(
                 evaluatorOutputChecksum = workAudit.evaluatorOutputChecksum(),
                 quiescenceUnresolvedBackups = quiescenceAudit.unresolvedBackups,
                 wallClockBudgetMillis = config.wallClockBudgetMillis,
+                rootSelectionGuidance = guidance,
             ),
         )
     }
@@ -382,6 +449,8 @@ class InformationSetSearch(
         quiescenceMode: Boolean,
         quiescenceDepth: Int,
         rolloutTargetTurn: Int?,
+        rootActionSignature: String? = null,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): SearchSettlement {
         onDepth(depth)
         world.terminalPayoff(rootPlayer)?.let {
@@ -417,6 +486,8 @@ class InformationSetSearch(
                 quiescenceAudit,
                 workAudit,
                 rolloutTargetTurn,
+                transitionCache,
+                transitionNode,
             )
             recorder?.finish(TraceCutoff.HORIZON, world, depth, transitionNode?.snapshot)
             return value
@@ -433,6 +504,7 @@ class InformationSetSearch(
                 leafValue(
                     world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
                     rolloutAudit, quiescenceAudit, workAudit, rolloutTargetTurn,
+                    transitionCache, transitionNode,
                 )
             }
         }
@@ -446,6 +518,7 @@ class InformationSetSearch(
                     leafValue(
                         world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
                         rolloutAudit, quiescenceAudit, workAudit, rolloutTargetTurn,
+                        transitionCache, transitionNode,
                     )
                 }
             }
@@ -476,8 +549,10 @@ class InformationSetSearch(
                     transitionCache?.annotatedExpansion(transitionNode) {
                         initialPolicyAnnotatedExpansion(world)
                     } ?: initialPolicyAnnotatedExpansion(world)
-                } else {
+                } else if (opponentPolicy.requiresProductionAdmission) {
                     initialPolicyAdmissionExpansion(world)
+                } else {
+                    expansion
                 }
             }
             val policySeed = ComponentSeeds.derive(searchSeed, simulationIndex, depth, "opponent")
@@ -578,7 +653,11 @@ class InformationSetSearch(
             }
         }
 
-        val edge = selectUct(node, searchSeed, simulationIndex, depth)
+        val edge = if (rootActionSignature == null) selectUct(node, searchSeed, simulationIndex, depth, rootSelectionGuidance)
+            else {
+                check(depth == 0 && actor == rootPlayer)
+                requireNotNull(node.edges[rootActionSignature]) { "Conditioned root action is absent from this world" }
+            }
         recorder?.choose(tracePoint, edge.choice)
         val advanced = advanceCached(world, edge.choice, transitionCache, transitionNode, workAudit)
         val value = if (quiescenceMode) {
@@ -615,6 +694,8 @@ class InformationSetSearch(
                 quiescenceAudit,
                 workAudit,
                 rolloutTargetTurn,
+                transitionCache,
+                advanced.node,
             )
         } else {
             simulate(
@@ -664,6 +745,8 @@ class InformationSetSearch(
         quiescenceAudit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
         rolloutTargetTurn: Int?,
+        transitionCache: SimulationTransitionCache? = null,
+        transitionNode: SimulationTransitionNode? = null,
     ): SearchSettlement = when (config.leaf.stateSource) {
         LeafStateSource.CURRENT_INFORMATION_STATE,
         LeafStateSource.CURRENT_SAMPLED_WORLD -> simulate(
@@ -695,6 +778,8 @@ class InformationSetSearch(
             quiescenceAudit,
             workAudit,
             rolloutTargetTurn,
+            transitionCache,
+            transitionNode,
         )
     }
 
@@ -806,10 +891,13 @@ class InformationSetSearch(
         quiescenceAudit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
         rolloutTargetTurn: Int? = null,
+        transitionCache: SimulationTransitionCache? = null,
+        startingTransitionNode: SimulationTransitionNode? = null,
     ): SearchSettlement {
         require((rolloutTargetTurn != null) == (config.rolloutTurnHorizon != null))
         workAudit.forks++
-        val world = startingWorld.fork()
+        var world = startingWorld.fork()
+        var transitionNode = startingTransitionNode
         var depth = startingDepth
         var rolloutDecisions = 0
         while (rolloutTargetTurn != null || depth < config.maxPolicyDecisions) {
@@ -835,6 +923,7 @@ class InformationSetSearch(
             val singleton = expansion.exactSingletonPassOrNull().takeIf {
                 config.compressPolicySingletonPasses
             }
+            var policyInformationUsed = false
             val selected = singleton ?: run {
                 // The outer opponent remains an independently configurable stochastic environment.
                 val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
@@ -843,8 +932,8 @@ class InformationSetSearch(
                 } else {
                     expansion.candidates
                 }
-                val decision = policy.select(
-                    opponentInformation = world.informationState(actor),
+                val decision = policy.selectForRollout(
+                    opponentInformation = { world.informationState(actor).also { policyInformationUsed = true } },
                     candidates = candidates,
                     policySeed = ComponentSeeds.derive(
                         searchSeed,
@@ -858,12 +947,16 @@ class InformationSetSearch(
                 audit.record(actor == rootPlayer, decision.diagnostic)
                 decision.choice
             }
-            workAudit.steps++
-            val result = world.step(selected)
-            if (!result.accepted) {
-                workAudit.rejectedTransitions++
-                throw RejectedSearchTransitionException(selected.signature, result.diagnostic)
-            }
+            // Cache exact world prefixes, never the rollout policy's distribution or sampled choice.
+            // The same node may later enter the tree with a different opponent policy or wider menu.
+            transitionCache?.retainDerived(
+                transitionNode, world,
+                DERIVED_BASE or (if (singleton == null) DERIVED_POLICY_EXPANSION else 0) or
+                    (if (policyInformationUsed) DERIVED_INFORMATION else 0),
+            )
+            val advanced = advanceCached(world, selected, transitionCache, transitionNode, workAudit, rollout = true)
+            world = advanced.world
+            transitionNode = advanced.node
             if (singleton != null) workAudit.compressedPolicySingletonPasses++
             depth++
             rolloutDecisions++
@@ -940,6 +1033,9 @@ class InformationSetSearch(
         var transitionCacheMisses = 0
         var transitionCacheSnapshots = 0
         var transitionCacheDerivedSnapshots = 0
+        var rolloutTransitionCacheHits = 0
+        var rolloutTransitionCacheSnapshots = 0
+        var rolloutTransitionCacheBypasses = 0
         var policyAnnotationCacheHits = 0
         var policyAnnotationCacheMisses = 0
         var opponentDistributionCacheHits = 0
@@ -962,6 +1058,7 @@ class InformationSetSearch(
     /** Exact per-root-particle prefix cache; keys are semantic paths, never lossy state hashes. */
     private class SimulationTransitionCache(private val audit: SearchWorkAudit) {
         private val roots = mutableMapOf<Int, SimulationTransitionNode>()
+        private var rolloutSnapshots = 0
 
         fun root(particleIndex: Int): SimulationTransitionNode =
             roots.getOrPut(particleIndex, ::SimulationTransitionNode)
@@ -1019,9 +1116,11 @@ class InformationSetSearch(
             world: SearchWorld,
             choice: SemanticChoice,
             node: SimulationTransitionNode,
+            rollout: Boolean,
         ): CachedAdvance {
             node.children[choice.signature]?.let { cached ->
                 audit.transitionCacheHits++
+                if (rollout) audit.rolloutTransitionCacheHits++
                 audit.forks++
                 return CachedAdvance(requireNotNull(cached.snapshot).fork(), cached)
             }
@@ -1031,6 +1130,16 @@ class InformationSetSearch(
             if (!result.accepted) {
                 audit.rejectedTransitions++
                 throw RejectedSearchTransitionException(choice.signature, result.diagnostic)
+            }
+            // Rollout branching can retain far more snapshots than tree traversal. A full cache
+            // falls back to ordinary stepping; existing exact-prefix hits remain usable.
+            if (rollout && rolloutSnapshots >= MAX_ROLLOUT_CACHE_SNAPSHOTS) {
+                audit.rolloutTransitionCacheBypasses++
+                return CachedAdvance(world, null)
+            }
+            if (rollout) {
+                rolloutSnapshots++
+                audit.rolloutTransitionCacheSnapshots++
             }
             audit.forks++
             audit.transitionCacheSnapshots++
@@ -1058,8 +1167,9 @@ class InformationSetSearch(
         cache: SimulationTransitionCache?,
         node: SimulationTransitionNode?,
         audit: SearchWorkAudit,
+        rollout: Boolean = false,
     ): CachedAdvance {
-        if (cache != null && node != null) return cache.advance(world, choice, node)
+        if (cache != null && node != null) return cache.advance(world, choice, node, rollout)
         audit.steps++
         val result = world.step(choice)
         if (!result.accepted) {
@@ -1315,8 +1425,8 @@ class InformationSetSearch(
                 } else {
                     expansion
                 }
-                val decision = policy.select(
-                    opponentInformation = world.informationState(actor),
+                val decision = policy.selectForRollout(
+                    opponentInformation = { world.informationState(actor) },
                     candidates = policyExpansion.candidates,
                     policySeed = ComponentSeeds.derive(
                         refreshSeed,
@@ -1389,8 +1499,10 @@ class InformationSetSearch(
     ): PolicyExpansion = if (policy.requiresPolicyAnnotations) {
         if (workAudit != null) workAudit.policyAnnotatedExpansions++
         initialPolicyAnnotatedExpansion(world)
-    } else {
+    } else if (policy.requiresProductionAdmission) {
         initialPolicyAdmissionExpansion(world)
+    } else {
+        initialExpansion(world)
     }
 
     private fun descriptor(
@@ -1410,17 +1522,26 @@ class InformationSetSearch(
         searchSeed: Long,
         simulationIndex: Int,
         depth: Int,
+        guidance: RootSelectionGuidance?,
     ): SearchEdge {
+        check(guidance == null || depth == 0)
         val unvisited = node.edges.values.filter { it.visits == 0 }
         if (unvisited.isNotEmpty()) {
-            return unvisited.minBy { edge ->
+            if (guidance == null) return unvisited.minBy { edge ->
                 PolicyJson.sha256("$searchSeed:$simulationIndex:$depth:${edge.choice.signature}")
             }
+            return unvisited.minWith(compareByDescending<SearchEdge> { edge ->
+                guidance.scores.getValue(edge.choice.signature)
+            }.thenBy { edge ->
+                PolicyJson.sha256("$searchSeed:$simulationIndex:$depth:${edge.choice.signature}")
+            })
         }
         val logParent = ln((node.visits + 1).toDouble())
         return node.edges.values.maxWith(
             compareBy<SearchEdge> { edge ->
-                edge.meanValue() + config.explorationConstant * sqrt(logParent / edge.visits)
+                val uct = edge.meanValue() + config.explorationConstant * sqrt(logParent / edge.visits)
+                val score = guidance?.scores?.getValue(edge.choice.signature) ?: 0.0
+                if (score == 0.0) uct else uct + score / (1.0 + edge.visits)
             }.thenByDescending { it.choice.signature }
         )
     }
@@ -1491,6 +1612,7 @@ class InformationSetSearch(
         private const val DERIVED_BASE = 1
         private const val DERIVED_POLICY_EXPANSION = 2
         private const val DERIVED_INFORMATION = 4
+        private const val MAX_ROLLOUT_CACHE_SNAPSHOTS = 4096
 
         private fun normalize(weights: List<Double>): List<Double> {
             require(weights.all { it.isFinite() && it >= 0.0 })
@@ -1580,3 +1702,12 @@ class InformationSetSearch(
         }
     }
 }
+
+/** Defer only the full state; supplied menus, selection seeds and attribution remain unchanged. */
+private fun OpponentPolicy.selectForRollout(
+    opponentInformation: () -> PolicyInformationState,
+    candidates: List<SemanticChoice>,
+    policySeed: Long,
+    sampleSeed: Long,
+): OpponentPolicyDecision = selectFromCandidates(candidates, policySeed, sampleSeed)
+    ?: select(opponentInformation(), candidates, policySeed, sampleSeed)

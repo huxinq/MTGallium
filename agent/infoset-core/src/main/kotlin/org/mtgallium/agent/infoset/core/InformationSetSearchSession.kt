@@ -23,11 +23,13 @@ class InformationSetSearchSession(
         belief: BeliefBatch<Weighted<SearchWorld>>,
         searchSeed: Long,
         beliefContinuityEpoch: Long,
+        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): InformationSetSearchResult = delegate.search(
         rootPlayer = rootPlayer,
         belief = belief,
         searchSeed = searchSeed,
         beliefContinuityEpoch = beliefContinuityEpoch,
+        rootSelectionGuidance = rootSelectionGuidance,
     )
 
     fun invalidate() = delegate.invalidateReuse()

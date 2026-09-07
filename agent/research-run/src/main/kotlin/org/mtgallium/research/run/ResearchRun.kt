@@ -1,5 +1,6 @@
 package org.mtgallium.research.run
 
+import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -237,11 +238,14 @@ object ResearchRunFiles {
 
     fun atomicWrite(path: Path, content: String): Path = atomicWrite(path, content.toByteArray(StandardCharsets.UTF_8))
 
-    fun atomicWrite(path: Path, content: ByteArray): Path {
+    fun atomicWrite(path: Path, content: ByteArray): Path = atomicWrite(path) { it.write(content) }
+
+    /** Publish only after the stream is closed successfully; failed writers leave the old file intact. */
+    fun atomicWrite(path: Path, write: (OutputStream) -> Unit): Path {
         Files.createDirectories(requireNotNull(path.parent))
         val temporary = Files.createTempFile(path.parent, ".${path.fileName}.", ".tmp")
         try {
-            Files.write(temporary, content)
+            Files.newOutputStream(temporary).buffered().use(write)
             runCatching { Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING) }
                 .getOrElse { Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING) }
         } finally {

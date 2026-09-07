@@ -3,6 +3,8 @@ package org.mtgallium.agent.searchteacher
 import org.mtgallium.agent.infoset.argentum.ARGENTUM_HEURISTIC_CHOICE_TAG_V1
 import org.mtgallium.agent.infoset.core.MixtureOpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicy
+import org.mtgallium.agent.infoset.core.OpponentPolicyDecision
+import org.mtgallium.agent.infoset.core.sampleOpponentPolicyDistribution
 import org.mtgallium.agent.infoset.core.OpponentPolicyBehaviorSpecification
 import org.mtgallium.agent.infoset.core.OpponentPolicyComponentSpecification
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionDiagnostic
@@ -24,10 +26,12 @@ const val ARGENTUM_HEURISTIC_ANNOTATION_UNAVAILABLE_TRIGGER_V1: String =
 /** Safe approximation of Argentum's proactive heuristic using only projected choice metadata. */
 class SemanticHeuristicOpponentPolicy(
     override val id: String = "semantic-argentum-heuristic-v2",
+    override val requiresProductionAdmission: Boolean = true,
 ) : OpponentPolicy {
     override val distributionIsSeedInvariant: Boolean = true
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification =
         OpponentPolicyBehaviorSpecification(
+            requiresProductionAdmission = requiresProductionAdmission,
             implementationId = "semantic-typed-action-intent-score-table-v2",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,
@@ -41,20 +45,32 @@ class SemanticHeuristicOpponentPolicy(
         opponentInformation: PolicyInformationState,
         candidates: List<SemanticChoice>,
         policySeed: Long,
-    ): ProbabilityDistribution<SemanticChoice> = softScores(candidates) { choice ->
-        when (choice.actionIntent.kind) {
-            SemanticActionIntentKind.PLAY_LAND -> 7.0
-            SemanticActionIntentKind.CAST_SPELL -> 6.0
-            SemanticActionIntentKind.ACTIVATE_ABILITY -> 5.0
-            SemanticActionIntentKind.DECLARE_ATTACKERS,
-            SemanticActionIntentKind.DECLINE_ATTACK -> 4.0
-            SemanticActionIntentKind.DECLARE_BLOCKERS,
-            SemanticActionIntentKind.DECLINE_BLOCK -> 4.0
-            SemanticActionIntentKind.KEEP_HAND -> 3.0
-            SemanticActionIntentKind.PASS_PRIORITY -> 1.0
-            else -> 2.0
+    ): ProbabilityDistribution<SemanticChoice> = candidateDistribution(candidates)
+
+    override fun selectFromCandidates(
+        candidates: List<SemanticChoice>,
+        policySeed: Long,
+        sampleSeed: Long,
+    ): OpponentPolicyDecision = OpponentPolicyDecision(
+        sampleOpponentPolicyDistribution(candidateDistribution(candidates), sampleSeed),
+        OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = id),
+    )
+
+    private fun candidateDistribution(candidates: List<SemanticChoice>): ProbabilityDistribution<SemanticChoice> =
+        softScores(candidates) { choice ->
+            when (choice.actionIntent.kind) {
+                SemanticActionIntentKind.PLAY_LAND -> 7.0
+                SemanticActionIntentKind.CAST_SPELL -> 6.0
+                SemanticActionIntentKind.ACTIVATE_ABILITY -> 5.0
+                SemanticActionIntentKind.DECLARE_ATTACKERS,
+                SemanticActionIntentKind.DECLINE_ATTACK -> 4.0
+                SemanticActionIntentKind.DECLARE_BLOCKERS,
+                SemanticActionIntentKind.DECLINE_BLOCK -> 4.0
+                SemanticActionIntentKind.KEEP_HAND -> 3.0
+                SemanticActionIntentKind.PASS_PRIORITY -> 1.0
+                else -> 2.0
+            }
         }
-    }
 }
 
 /** Consumes the trusted adapter's information-safe determinized heuristic annotation. */
