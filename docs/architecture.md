@@ -53,6 +53,37 @@ whose meaning requires private historical evidence remains separate; generic
 invariants should use synthetic or public-safe fixtures rather than treating a
 private fixture as a substitute for history.
 
+### Practical strength acceptance
+
+Sequential gameplay can prospectively select `practicalAcceptance` with an
+explicit absolute score margin and objective. A `.02` margin binds the lower
+and upper mean-score boundaries to `.48` and `.52`. `NON_INFERIOR` accepts a
+lower-bound crossing; `EQUIVALENT` requires both bounds at the same inspected
+prefix. The resulting dispositions are `NON_INFERIOR` and
+`PRACTICALLY_EQUIVALENT`, distinct from superiority and from exact equality.
+Budget exhaustion remains inconclusive. Directional futility is disabled for
+this objective; crossing the upper band alone cannot stop an equivalence test.
+
+Each observation is one complete independent-seed, seat-swapped pair's mean
+game score, with a draw worth half a point. Inverting the frozen nonnegative
+betting mixtures supplies a confidence sequence for the common conditional
+mean. Its simultaneous coverage is at least one minus the two directional
+error allocations; `.025` each gives `.95`. The maximum compatible distance
+from parity is `max(.5 - lower, upper - .5)`, an uncertainty bound rather than
+an estimated effect. Bootstrap intervals remain descriptive. Invalid pairs
+stop inference without becoming scores, and completed worker overshoot cannot
+change the first stopping prefix.
+
+This is a new prospective protocol. Omission preserves the historical rule and
+result serialization; adding it to an already inspected tournament does not
+retroactively establish equivalence. Freeze the candidate, control, budget,
+seeds, margin, bets and error allocations before new evaluation. In particular,
+evidence for an earlier rollout policy cannot validate a new fast continuation.
+An engineering acceptance decision additionally needs a separately declared,
+measured runtime improvement over the relevant workload. Non-inferiority alone
+does not pass the existing stronger-learned-play milestone or its superiority
+gate. Per-process error control does not cover selecting among many candidates.
+
 ```text
 agent/research-run
         ↑

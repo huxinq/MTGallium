@@ -29,6 +29,9 @@ internal data class PairedSequentialRule(
     /** Prospectively opt in; omitted false preserves existing rule bytes and run bindings. */
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val stopForFutility: Boolean = false,
+    /** A new prospective objective; null preserves historical directional rules and their bytes. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val practicalAcceptance: PairedPracticalAcceptance? = null,
 ) {
     init {
         require(schemaVersion == 1 && populationModel == "independent-seed-pair-mean-v1")
@@ -40,6 +43,13 @@ internal data class PairedSequentialRule(
         require(betFractions.all { it.isFinite() && it > 0 && it < 1 })
         require(betFractions.all { (it / nullPointRate).isFinite() && (it / (1 - targetPointRate)).isFinite() }) {
             "Sequential betting factors must remain finite at the declared boundaries"
+        }
+        practicalAcceptance?.let {
+            require(nullPointRate == 0.5 - it.margin && targetPointRate == 0.5 + it.margin) {
+                "Practical acceptance requires boundaries at parity minus/plus its declared margin"
+            }
+            require(falsePositiveRate + falseNegativeRate < 1)
+            require(!stopForFutility) { "Directional futility is not a practical-acceptance stopping rule" }
         }
     }
 }
@@ -61,9 +71,11 @@ internal data class PairedSequentialScore(
 internal enum class PairedSequentialDisposition {
     CONTINUE, ABOVE_NULL, BELOW_TARGET, BOTH_BOUNDARIES_CROSSED, BUDGET_EXHAUSTED, INVALID_PAIR,
     FUTILITY,
+    NON_INFERIOR, PRACTICALLY_EQUIVALENT,
 }
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 internal data class PairedSequentialResult(
     val rule: PairedSequentialRule,
     val disposition: PairedSequentialDisposition,
@@ -85,9 +97,14 @@ internal data class PairedSequentialResult(
         "ABOVE_NULL rejects mean <= nullPointRate; BELOW_TARGET rejects mean >= targetPointRate. Equal boundaries are opposing directional tests around their common reference. Neither is itself a game result or automatic policy promotion.",
         "Error guarantees are per test; exploratory multiple-candidate selection needs separate independent confirmation or explicit error allocation.",
         "BUDGET_EXHAUSTED is inconclusive. This rule does not guarantee earlier stopping or quantify a cost improvement.",
-    ) + if (rule.stopForFutility) listOf(
+    ) + (if (rule.stopForFutility) listOf(
         "FUTILITY is inconclusive: after a complete valid pair, neither directional boundary can be reached within the remaining pair cap, even with its most favorable continuation. It does not establish parity or equivalence.",
-    ) else emptyList(),
+    ) else emptyList()) + (if (rule.practicalAcceptance != null) listOf(
+        "Practical acceptance uses a prospectively declared margin around 0.5. NON_INFERIOR rejects mean <= the lower boundary; PRACTICALLY_EQUIVALENT rejects both mean <= the lower and mean >= the upper boundary. Neither establishes exact equality, superiority, or a runtime improvement.",
+        "The reported confidence sequence has simultaneous coverage at least 1 - falsePositiveRate - falseNegativeRate under the common conditional-mean model. These are directional error allocations, not a power guarantee. No game outcome or selected historical treatment may be substituted into this new protocol.",
+    ) else emptyList()),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val confidenceSequence: PairedMeanConfidenceSequence? = null,
 )
 
 /**
@@ -128,7 +145,16 @@ internal fun pairedSequentialTest(
         }
         val above = logMeanExp(upper) >= -ln(rule.falsePositiveRate)
         val below = logMeanExp(lower) >= -ln(rule.falseNegativeRate)
-        disposition = when {
+        disposition = if (rule.practicalAcceptance != null) when {
+            // A lower-bound crossing alone is not equivalence. Keep the same current-prefix
+            // processes for both bounds; do not combine independently selected favorable prefixes.
+            above && rule.practicalAcceptance.objective == PairedPracticalObjective.NON_INFERIOR ->
+                PairedSequentialDisposition.NON_INFERIOR
+            above && below && rule.practicalAcceptance.objective == PairedPracticalObjective.EQUIVALENT ->
+                PairedSequentialDisposition.PRACTICALLY_EQUIVALENT
+            inspected == rule.maximumPairs -> PairedSequentialDisposition.BUDGET_EXHAUSTED
+            else -> PairedSequentialDisposition.CONTINUE
+        } else when {
             above && below -> PairedSequentialDisposition.BOTH_BOUNDARIES_CROSSED
             above -> PairedSequentialDisposition.ABOVE_NULL
             below -> PairedSequentialDisposition.BELOW_TARGET
@@ -143,7 +169,10 @@ internal fun pairedSequentialTest(
         scores.take(inspected).lastOrNull()?.pairIndex,
         sha256(evidenceJson.encodeToString(scores.take(inspected))),
         logMeanExp(upper), logMeanExp(lower), upper.toList(), lower.toList(),
-        scores.size - inspected, invalid)
+        scores.size - inspected, invalid,
+        confidenceSequence = rule.practicalAcceptance?.let {
+            pairedMeanConfidenceSequence(rule, scores.take(valid).map { requireNotNull(it.pointRate) })
+        })
 }
 
 /**

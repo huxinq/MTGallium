@@ -122,6 +122,26 @@ bet mixture prospectively; do not tune it after seeing losses or wins. Early
 stopping is possible, not promised. Two workers can leave one extra completed
 pair beyond the first stopping prefix.
 
+For a practical acceptance objective, start from the
+[non-inferiority example](../examples/search-teacher-non-inferiority.json).
+It explicitly selects a two-percentage-point margin, `.48`/`.52` boundaries,
+and `practicalAcceptance.objective = "NON_INFERIOR"`. Acceptance establishes
+mean game score above `.48`; it does not establish superiority. Select
+`"EQUIVALENT"` to require both bounds inside `.48`–`.52`. The two `.025`
+directional error allocations yield a confidence sequence with at least 95%
+simultaneous coverage across repeated progress checks. Its maximum compatible
+distance from parity is an uncertainty bound, not a measured strength loss.
+The 24-pair example is a syntax/workflow example, not a powered design for
+this narrow margin. Choose the actual cap before executing the trial.
+
+Practical acceptance disables directional futility and retains the ordinary
+pair validity and overshoot rules. A faster implementation additionally needs
+a separately declared runtime comparison over the relevant workload; both
+policies share the elapsed duration of a head-to-head game, so that duration
+cannot itself attribute a speedup to either policy. Freeze this new protocol
+before observing its games. Historical superiority tests and games from an
+earlier candidate retain their original meaning.
+
 The example enables `stopForFutility`. After each complete valid pair, the rule
 checks whether even winning every remaining pair could cross the upper boundary,
 or losing every remaining pair could cross the lower boundary. If neither is

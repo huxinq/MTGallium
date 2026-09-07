@@ -488,6 +488,12 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     appendLine("Worker threads: ${report.workerThreads}. Timing describes this concurrent arena workload.")
     report.sequentialResult?.let { result ->
         appendLine("Sequential rule: ${result.disposition} after ${result.inspectedPairs} inspected pairs; ${result.operationalOvershootPairs} completed overshoot pairs.")
+        result.confidenceSequence?.let { interval ->
+            val acceptance = requireNotNull(result.rule.practicalAcceptance)
+            appendLine("Practical objective=${acceptance.objective}; margin=${acceptance.margin}; score floor=${result.rule.nullPointRate}; equivalence band=(${result.rule.nullPointRate}, ${result.rule.targetPointRate}).")
+            appendLine("Anytime confidence sequence (${interval.simultaneousCoverageAtLeast} simultaneous coverage): [${interval.lower}, ${interval.upper}] over ${interval.validScoredPairs} valid pairs; maximum compatible distance from parity=${interval.maximumCompatibleDistanceFromParity}.")
+            appendLine("This strength criterion does not establish a runtime improvement or stronger learned play. Invalid execution prevents acceptance; the interval alone cannot override it.")
+        }
         if (result.disposition == PairedSequentialDisposition.FUTILITY) {
             appendLine("Stopped for futility: neither directional boundary remains reachable within the planned pair cap. Inconclusive; parity or equivalence is not established.")
         }
