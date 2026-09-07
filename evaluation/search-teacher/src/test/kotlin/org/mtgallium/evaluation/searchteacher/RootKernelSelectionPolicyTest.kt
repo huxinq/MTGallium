@@ -82,6 +82,7 @@ class RootKernelSelectionPolicyTest {
         val model = RootActionKernelModel(ridge = .001, centers = listOf(f), coefficients = listOf(.2))
         val valid = fixture(model)
         valid.load()
+        valid.loadRootRolloutPolicy()
         assertFails { valid.copy(manifestSha256 = "0".repeat(64)).load() }
         assertFails { valid.copy(researchRunIdentity = "research-run-v1-sha256:" + "0".repeat(64)).load() }
         assertFails { fixture(model, protocol = "wrong-protocol").load() }
@@ -89,6 +90,26 @@ class RootKernelSelectionPolicyTest {
         assertFails { fixture(model, bindWrongPlan = true).load() }
         Files.writeString(Path.of(valid.directory).resolve("model.json"), "changed")
         assertFails { valid.load() }
+        assertFails { valid.loadRootRolloutPolicy() }
+    }
+
+    @Test fun `kernel rollout binding preserves opponent continuation and rejects competing root policies`() {
+        val f = RootActionKernelFeatures(RootActionKernelVector(listOf(0), listOf(1.0)), RootActionKernelVector(listOf(0), listOf(1.0)))
+        val reference = fixture(RootActionKernelModel(ridge = .001, centers = listOf(f), coefficients = listOf(.2)), terminal = true)
+        val baseline = SearchTeacherCalibrationPolicy("control", 8, 64, 32, 1.4, true, 1.0)
+        assertFalse("rootKernelRolloutFit" in evidenceJson.encodeToString(baseline))
+        val candidate = baseline.copy(id = "kernel", rootKernelRolloutFit = reference)
+        assertEquals(candidate, evidenceJson.decodeFromString<SearchTeacherCalibrationPolicy>(evidenceJson.encodeToString(candidate)))
+        val policy = candidate.policy(1L)
+        assertEquals(baseline.parameters(1L), policy.effectiveParameters(1L))
+        assertEquals(baseline.policy(1L).effectiveOpponentRolloutPolicy().behaviorSpecification,
+            policy.effectiveOpponentRolloutPolicy().behaviorSpecification)
+        assertEquals(reference.researchRunIdentity, policy.effectiveRootRolloutPolicy().behaviorSpecification.parameters["fitIdentity"])
+        assertNotEquals(baseline.policy(1L).effectiveRootRolloutPolicy().behaviorSpecification,
+            policy.effectiveRootRolloutPolicy().behaviorSpecification)
+        assertFails { candidate.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM) }
+        assertFails { candidate.copy(rolloutHeuristicProbability = .5) }
+        assertFails { candidate.copy(rootCloningFit = CloningFitReference(reference.directory, reference.researchRunIdentity, reference.manifestSha256)) }
     }
 
     @Test fun `terminal fit has distinct authenticated target protocol and retains frozen model`() {

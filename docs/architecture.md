@@ -85,6 +85,14 @@ admitted semantic menu to match the saved menu and refuse evidence-invalidating
 policy replacements. These selections neither advance the game nor produce
 search backups, values, or accepted-action evidence.
 
+The experimental kernel root rollout scores the supplied acting-player view
+when its admitted menu contains a cast-spell choice. It uses raw-score argmax
+and delegates other menus to the production continuation, preserving its
+annotation requirements and replacement diagnostics. The fit, scorer, scope,
+and delegated policy are part of policy identity. Opponent continuation and
+leaf evaluation remain separately configured; learned preferences are not
+payoff labels.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout

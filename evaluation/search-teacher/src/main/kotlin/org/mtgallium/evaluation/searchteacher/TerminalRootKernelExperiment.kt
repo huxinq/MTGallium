@@ -27,6 +27,7 @@ internal data class TerminalRootKernelExperimentPlan(
             val policy = screen.policies.single().search
             require(policy.rolloutHeuristicProbability == 1.0 && policy.rootCloningFit == null)
             require(policy.rootRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
+            require(policy.rootKernelRolloutFit == null) { "Production terminal targets cannot silently use a learned continuation" }
             require(policy.opponentRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
         }
         require(development.policies == validation.policies && development.repetitions == validation.repetitions)

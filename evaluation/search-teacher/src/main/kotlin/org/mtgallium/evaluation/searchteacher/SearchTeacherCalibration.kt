@@ -81,6 +81,9 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val tacticalEvaluator: MonoRedTacticalEvaluatorSettings? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootKernelRolloutFit: RootKernelFitReference? = null,
 ) {
     init {
         require(evaluator == null || tacticalEvaluator == null) { "Only one evaluator may be configured" }
@@ -90,6 +93,10 @@ internal data class SearchTeacherCalibrationPolicy(
         require(rolloutHeuristicProbability.isFinite() && rolloutHeuristicProbability > 0 && rolloutHeuristicProbability <= 1)
         require(rootCloningFit == null || (rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
             "A learned root rollout must not silently override another root-policy configuration"
+        }
+        require(rootKernelRolloutFit == null ||
+            (rootCloningFit == null && rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
+            "A kernel root rollout must not silently override another root-policy configuration"
         }
     }
 
@@ -104,7 +111,7 @@ internal data class SearchTeacherCalibrationPolicy(
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
-        rootRolloutPolicy = rootCloningFit?.let {
+        rootRolloutPolicy = rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
             it.load()
         } ?: configuredRolloutPolicy(
             "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),

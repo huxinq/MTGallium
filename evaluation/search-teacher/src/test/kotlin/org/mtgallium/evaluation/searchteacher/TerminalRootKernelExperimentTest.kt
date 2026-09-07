@@ -57,6 +57,7 @@ class TerminalRootKernelExperimentTest {
         assertFails { plan.copy(validation = validation.copy(searchSeedDomain = "different")) }
         assertFails { plan.copy(development = dev.copy(policies = listOf(policy.copy(search = policy.search.copy(rolloutHeuristicProbability = .5))))) }
         assertFails { plan.copy(development = dev.copy(policies = listOf(policy.copy(search = policy.search.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM))))) }
+        assertFails { plan.copy(development = dev.copy(policies = listOf(policy.copy(search = policy.search.copy(rootKernelRolloutFit = plan.baselineFit))))) }
     }
 
     @Test fun `direct terminal action ordering uses raw scores rather than saturation ties`() {
