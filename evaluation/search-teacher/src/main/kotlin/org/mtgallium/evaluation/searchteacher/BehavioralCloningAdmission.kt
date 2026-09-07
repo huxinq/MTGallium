@@ -78,8 +78,8 @@ internal class BehavioralCloningAdmissionScope private constructor(
             val control = report.teacher
             require(control.policy.kind == ArenaPolicyKind.SEARCH && control.policy.searchPlanner == SearchPlannerKind.SHARED_TREE)
             require(control.descriptor.evaluator == null) { "This admission path supports the recorded default evaluator only" }
-            require(control.search.simulations == control.descriptor.simulations)
-            val leaf = control.search.leaf
+            require(requireNotNull(control.search).simulations == control.descriptor.simulations)
+            val leaf = requireNotNull(control.search).leaf
             return BehavioralCloningAdmissionScope(
                 expectedOuterRevision = report.sourceProvenance.outer.revision,
                 expectedArgentumRevision = report.sourceProvenance.argentum.revision,

@@ -174,7 +174,7 @@ internal fun renderRetainedGameplayLengths(runs: List<RetainedGameplayLengths>):
         run.comparisons.forEach { comparison ->
             appendLine("\nControl `${comparison.control.id}` versus candidate `${comparison.candidate.id}`.")
             for ((role, policy) in listOf("Control" to comparison.control, "Candidate" to comparison.candidate))
-                appendLine("$role: particles=${policy.particles}, simulations=${policy.simulations}, decision horizon=${policy.maxPolicyDecisions}; descriptor SHA256 `${sha256(evidenceJson.encodeToString(policy))}`.")
+                appendLine("$role: ${gameplayPolicyDescription(policy)}; descriptor SHA256 `${sha256(evidenceJson.encodeToString(policy))}`.")
             appendLine("Changed configuration fields: ${gameplayChangedFields(comparison.control, comparison.candidate).ifEmpty { listOf("none") }.joinToString()}.")
             append(renderGameplayLengths(comparison.rows, comparison.inspectedPairs, comparison.firstPairIndex))
         }
@@ -209,3 +209,7 @@ private fun gameplayChangedFields(a: SearchTeacherCalibrationPolicy, b: SearchTe
     val right = evidenceJson.parseToJsonElement(evidenceJson.encodeToString(b)).jsonObject
     return (left.keys + right.keys).filter { it != "id" && left[it] != right[it] }.sorted()
 }
+
+internal fun gameplayPolicyDescription(policy: SearchTeacherCalibrationPolicy): String =
+    if (policy.directArgentumHeuristic) "original direct Argentum heuristic; no search, evaluator or rollout policy"
+    else "particles=${policy.particles}, simulations=${policy.simulations}, decision horizon=${policy.maxPolicyDecisions}"

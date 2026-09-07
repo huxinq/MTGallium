@@ -187,7 +187,7 @@ internal fun deriveReplayReferenceCloning(
                     byIndex[index]?.let { detail ->
                         require(actual.actorToAct() == seat)
                         require(detail.searchDiagnostics.particles == teacher.descriptor.particles &&
-                            detail.searchDiagnostics.simulations == teacher.search.simulations && detail.searchDiagnostics.leaf == teacher.search.leaf)
+                            detail.searchDiagnostics.simulations == requireNotNull(teacher.search).simulations && detail.searchDiagnostics.leaf == requireNotNull(teacher.search).leaf)
                         val row = replayReferenceCloningExample(gameId, group, seat, actual.informationState(seat),
                             actual.expandChoices(), detail, replay.decisions[index].choice)
                         if (row == null) limited = true else collected += row

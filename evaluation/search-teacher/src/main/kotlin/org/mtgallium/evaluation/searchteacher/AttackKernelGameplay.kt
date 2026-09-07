@@ -115,8 +115,8 @@ internal class AttackKernelGameplayRunner(private val root: Path) {
                     val label = "${game.gameId}:${decision.decisionIndex}"
                     if (d.freshSimulations != 56 || d.reusedSimulations != 0 || d.rootSelectionGuidance != null)
                         issues += "$label: budget/reuse/guidance mismatch"
-                    if (d.rootRolloutPolicyId != expected.rootRolloutPolicy.declaredId ||
-                        d.opponentRolloutPolicyId != expected.opponentRolloutPolicy.declaredId)
+                    if (d.rootRolloutPolicyId != requireNotNull(expected.rootRolloutPolicy).declaredId ||
+                        d.opponentRolloutPolicyId != requireNotNull(expected.opponentRolloutPolicy).declaredId)
                         issues += "$label: continuation policy mismatch"
                     try { requireValidScreenSearch(d) } catch (e: IllegalArgumentException) { issues += "$label: ${e.message}" }
                     if (seat.policyId == candidate.id) attackSelections +=

@@ -102,6 +102,14 @@ class GameplayLengthsTest {
         assertFails { loadRetainedGameplayLengths(directory) }
     }
 
+    @Test fun `direct incumbent description does not advertise inactive search budgets`() {
+        val direct = SearchTeacherCalibrationPolicy("direct", 8, 64, 32, 1.4, false, 1.0,
+            directArgentumHeuristic = true)
+        assertContains(gameplayPolicyDescription(direct), "no search")
+        assertFalse("simulations=" in gameplayPolicyDescription(direct))
+        assertContains(gameplayPolicyDescription(direct.copy(directArgentumHeuristic = false)), "simulations=64")
+    }
+
     @Test fun `cli accepts one or two directories including spaces and refuses output or an unbounded list`() {
         fun parse(vararg args: String) = SearchTeacherCli.parse(arrayOf("--suite", "gameplay-summary", *args))
         assertEquals(listOf(Path.of("/tmp/first run"), Path.of("/tmp/second")),
