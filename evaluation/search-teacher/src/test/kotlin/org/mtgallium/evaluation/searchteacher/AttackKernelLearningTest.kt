@@ -10,9 +10,28 @@ import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.searchteacher.SemanticHeuristicOpponentPolicy
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
+import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 
 @Tag("public-source")
 class AttackKernelLearningTest {
+    @Test fun `new target plans bind the primary bank while retained pilot identity stays unchanged`() {
+        val pilot = PositionBankScreenPlan(bankDirectory = "/tmp/pilot-bank", expectedBankIdentity = "pilot-bank",
+            partition = PositionBankScreenPartition.DEVELOPMENT, mode = PositionBankScreenMode.TERMINAL_CONTINUATIONS,
+            rootLimit = 2, repetitions = 2, policies = listOf(PositionBankScreenPolicy(
+                SearchTeacherCalibrationPolicy("incumbent", 8, 56, 16, 1.4, true, 1.0), MonoRedVisibleEvaluatorConfig())),
+            rootIds = listOf("old-a", "old-b"), searchSeedDomain = "pilot-seeds",
+            terminalContinuation = TerminalRootContinuationConfig(8, maximumTotalContinuations = 25000))
+        val main = attackLearningScreenPlan(pilot, CloningComparisonInput("/tmp/primary-bank", "primary-bank"),
+            PositionBankScreenPartition.VALIDATION, listOf("new-a"), "new-seeds")
+        assertEquals("/tmp/primary-bank", main.bankDirectory)
+        assertEquals("primary-bank", main.expectedBankIdentity)
+        assertEquals(listOf("new-a"), main.rootIds)
+        assertEquals("new-seeds", main.searchSeedDomain)
+        assertEquals(pilot.policies, main.policies)
+        assertEquals(pilot.terminalContinuation, main.terminalContinuation)
+        assertEquals("pilot-bank", pilot.expectedBankIdentity)
+        assertEquals(listOf("old-a", "old-b"), pilot.rootIds)
+    }
     @Test fun `validation requires both repetitions and six positive groups without group duplication`() {
         fun rows(positive: Int, second: Double = .1) = (0 until 48).map { i ->
             AttackValidationRow("r$i", "g${i / 4}", "a", listOf(.5, .5),
@@ -42,6 +61,9 @@ class AttackKernelLearningTest {
                 val menu = expansion.candidates
                 val features = rootActionKernelFeatures(info, menu)
                 assertEquals(menu.size, features.distinct().size)
+                assertFalse(attackKernelScope(menu, false))
+                val mandatory = menu.filter { it.actionIntent.kind != SemanticActionIntentKind.DECLINE_ATTACK }
+                assertFalse(attackKernelScope(mandatory, true))
                 val preferred = menu.indexOfFirst { it.actionIntent.kind != SemanticActionIntentKind.DECLINE_ATTACK }
                 val model = RootActionKernelModel(ridge = .001, centers = features,
                     coefficients = features.indices.map { if (it == preferred) 10.0 else 0.0 })

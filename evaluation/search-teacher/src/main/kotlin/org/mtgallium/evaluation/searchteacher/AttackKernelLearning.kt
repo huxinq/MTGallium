@@ -16,6 +16,7 @@ internal data class AttackKernelLearningPlan(
     val pilot: SavedRootPolicyInput,
     val control: SearchTeacherCalibrationPolicy,
     val targetSeedDomain: String,
+    val pilotBank: CloningComparisonInput = bank,
     val workers: Int = 8,
     val maximumContinuations: Int = 25000,
     val ridge: Double = .001,
@@ -72,6 +73,11 @@ internal fun requireAttackAllocation(bank: RealGamePositionBankReport) {
     }
 }
 
+internal fun attackLearningScreenPlan(pilot: PositionBankScreenPlan, bank: CloningComparisonInput,
+    partition: PositionBankScreenPartition, roots: List<String>, seedDomain: String): PositionBankScreenPlan =
+    pilot.copy(bankDirectory = bank.directory, expectedBankIdentity = bank.researchRunIdentity,
+        partition = partition, rootIds = roots, rootLimit = roots.size, searchSeedDomain = seedDomain)
+
 internal class AttackKernelLearningRunner(private val repository: Path) {
     fun run(plan: AttackKernelLearningPlan, output: Path, deckPath: Path): AttackKernelLearningReport {
         val source = ResearchRunProvenance.capture(repository).also { it.requireReady() }
@@ -79,10 +85,17 @@ internal class AttackKernelLearningRunner(private val repository: Path) {
         verifyResearchBuild(plan.build, source)
         val bank = loadVerifiedRealGamePositionBank(Path.of(plan.bank.directory), plan.bank.researchRunIdentity)
         requireAttackAllocation(bank)
-        val pilot = loadTerminalRootScreen(plan.pilot, bank)
-        val pilotCount = terminalRootScreenAccounting(pilot, bank)
+        val pilotBank = if (plan.pilotBank == plan.bank) bank else
+            loadVerifiedRealGamePositionBank(Path.of(plan.pilotBank.directory), plan.pilotBank.researchRunIdentity)
+        require(pilotBank.sourceProvenance.argentum.revision == bank.sourceProvenance.argentum.revision)
+        val pilot = loadTerminalRootScreen(plan.pilot, pilotBank)
+        val pilotCount = terminalRootScreenAccounting(pilot, pilotBank)
         require(pilot.valid && pilotCount.completedTerminalSamples == pilotCount.requestedContinuations)
         require(pilot.plan.partition == PositionBankScreenPartition.DEVELOPMENT && pilot.plan.rootIds.size == 2)
+        val pilotRoots = pilot.plan.rootIds.map { id -> pilotBank.roots.single { it.rootId == id } }
+        require(pilotRoots.map { it.seedGroupId }.distinct().size == 2)
+        require(pilotRoots.all { it.partition == RealGamePositionPartition.DEVELOPMENT &&
+            attackKernelScope(it.reconstructedCandidates, it.profileExpansionExhaustive) })
         require(pilot.plan.policies.single().search == plan.control && pilot.plan.repetitions == 2)
         require(pilot.plan.searchSeedDomain != plan.targetSeedDomain)
         val config = requireNotNull(pilot.plan.terminalContinuation)
@@ -95,6 +108,7 @@ internal class AttackKernelLearningRunner(private val repository: Path) {
             "source" to sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), source)),
             "bank-manifest" to researchSha256File(Path.of(plan.bank.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
             "pilot-manifest" to researchSha256File(Path.of(plan.pilot.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+            "pilot-bank-manifest" to researchSha256File(Path.of(plan.pilotBank.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
         ))
         val directory = EvidenceStore(repository).requireDiagnosticOutput(output, "attack kernel learning")
         require(!Files.exists(directory)) { "One fit only; inspect retained output instead of rerunning" }
@@ -107,8 +121,7 @@ internal class AttackKernelLearningRunner(private val repository: Path) {
             val completed = mutableListOf<Pair<SavedRootPolicyInput, PositionBankScreenReport>>()
             // Only one worker-sized batch is dispatched. A failed batch cannot launch later roots.
             for ((index, chunk) in ids.chunked(plan.workers).withIndex()) {
-                val screenPlan = pilot.plan.copy(partition = partition, rootIds = chunk, rootLimit = chunk.size,
-                    searchSeedDomain = plan.targetSeedDomain)
+                val screenPlan = attackLearningScreenPlan(pilot.plan, plan.bank, partition, chunk, plan.targetSeedDomain)
                 val path = directory.resolve("${partition.name.lowercase()}-$index")
                 val report = runner.run(screenPlan, path, plan.workers)
                 val ref = SavedRootPolicyInput(path.toString(), report.researchRunIdentity, plan.control.id)
