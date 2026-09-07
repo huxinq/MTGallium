@@ -193,3 +193,18 @@ explicit allocation across tests.
 The original fixed-size calibration suite remains available. Existing source
 plans omit the new optional evaluator and stopping-rule fields, preserving
 their research identities.
+
+### Fixed pairs against the original Argentum heuristic
+
+The `search-teacher-calibration` suite executes the complete configured pair
+count without a sequential stopping rule. A policy descriptor may set
+`directArgentumHeuristic: true` to dispatch the existing direct Argentum
+heuristic adapter. Its required numeric search fields are inactive; evaluator
+and rollout interventions must be absent. The report records no search or
+rollout configuration for this policy and zero configured simulations. Omission
+preserves existing search policy behavior and serialized plan identity.
+
+At least one policy in each matchup must use search. Safe trajectory and planner
+evidence follow the search seat (`p0` when both seats use search), with the seat
+in each artifact filename. Original-heuristic adapter replacement remains a
+reported evidence failure rather than an accepted original-policy result.

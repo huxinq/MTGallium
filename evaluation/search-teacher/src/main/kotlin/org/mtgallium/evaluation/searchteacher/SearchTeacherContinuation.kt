@@ -190,7 +190,7 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
                     if (d.freshSimulations != descriptor.simulations || d.reusedSimulations != 0 || d.rootSelectionGuidance != null)
                         issues += "$label: budget/reuse/guidance mismatch"
                     val expected = report.policies.single { it.descriptor.id == seat.policyId }
-                    if (d.rootRolloutPolicyId != expected.rootRolloutPolicy.declaredId || d.opponentRolloutPolicyId != expected.opponentRolloutPolicy.declaredId)
+                    if (d.rootRolloutPolicyId != requireNotNull(expected.rootRolloutPolicy).declaredId || d.opponentRolloutPolicyId != requireNotNull(expected.opponentRolloutPolicy).declaredId)
                         issues += "$label: continuation policy mismatch"
                     try { requireValidScreenSearch(d) } catch (e: IllegalArgumentException) { issues += "$label: ${e.message}" }
                 }

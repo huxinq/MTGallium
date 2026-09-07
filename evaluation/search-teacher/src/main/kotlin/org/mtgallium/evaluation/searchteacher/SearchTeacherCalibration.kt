@@ -93,8 +93,18 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val attackRootKernelRolloutFit: RootKernelFitReference? = null,
+    /** Direct original Argentum policy; the search fields are inactive in this mode. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directArgentumHeuristic: Boolean = false,
 ) {
     init {
+        require(!directArgentumHeuristic || (evaluator == null && tacticalEvaluator == null &&
+            rootRolloutPolicy == null && opponentRolloutPolicy == null && rolloutTurnHorizon == null &&
+            rootCloningFit == null && rootKernelRolloutFit == null && fastRootKernelRolloutFit == null &&
+            fastOpponentKernelRolloutFit == null && attackRootKernelRolloutFit == null)) {
+            "Direct Argentum heuristic cannot carry inactive evaluator or learned rollout interventions"
+        }
         require(attackRootKernelRolloutFit == null || fastRootKernelRolloutFit != null) {
             "Attack root rollout requires the frozen fast casting continuation"
         }
@@ -130,7 +140,7 @@ internal data class SearchTeacherCalibrationPolicy(
             if (tacticalEvaluator == null) LeafEvaluator.MTGALLIUM_VISIBLE_V2 else LeafEvaluator.MTGALLIUM_TACTICAL_V3),
     )
 
-    fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
+    fun policy(baseSeed: Long) = if (directArgentumHeuristic) ArenaPolicySpec(id, ArenaPolicyKind.HEURISTIC) else ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
         rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy()?.let { incumbent ->
             attackRootKernelRolloutFit?.loadAttackRolloutPolicy(incumbent) ?: incumbent
@@ -176,6 +186,7 @@ internal data class SearchTeacherCalibrationPlan(
         require(schemaVersion == 1)
         require(pairOffset >= 0 && pairCount > 0 && pairOffset.toLong() + pairCount <= Int.MAX_VALUE)
         require(candidates.isNotEmpty())
+        require(!control.directArgentumHeuristic || candidates.none { it.directArgentumHeuristic })
         require((candidates.map { it.id } + control.id).distinct().size == candidates.size + 1)
     }
 
@@ -213,10 +224,10 @@ internal fun retainedCalibrationBindings(
 internal data class SearchTeacherCalibrationPolicyReport(
     val descriptor: SearchTeacherCalibrationPolicy,
     val policy: TournamentPolicyDescription,
-    val search: InformationSetSearchConfig,
+    val search: InformationSetSearchConfig?,
     val binding: PolicyBehaviorBinding,
-    val rootRolloutPolicy: OpponentPolicyBehaviorSpecification,
-    val opponentRolloutPolicy: OpponentPolicyBehaviorSpecification,
+    val rootRolloutPolicy: OpponentPolicyBehaviorSpecification?,
+    val opponentRolloutPolicy: OpponentPolicyBehaviorSpecification?,
 )
 
 @Serializable
@@ -269,7 +280,7 @@ internal data class SearchTeacherCalibrationReport(
         "Development selection is exploratory. Confirmation requires a separately frozen plan and disjoint explicit pair offset.",
         "Paired bootstrap intervals are descriptive and unadjusted for multiple candidates; no automatic promotion is made.",
         "Search latency omits non-search selection cost. Whole-game elapsed includes both policies and host overhead.",
-        "Valid games require a verified private canonical replay, one p0-safe trajectory and planner sidecar; stopped or failed games retain only emitted artifacts.",
+        "Valid games require a verified private canonical replay, one search-seat-safe trajectory and planner sidecar; stopped or failed games retain only emitted artifacts.",
     ),
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
@@ -314,14 +325,21 @@ internal fun loadSearchTeacherCalibrationCheckpoint(
     return checkpoint.game
 }
 
-private fun calibrationGameArtifacts(gameId: String) = listOf(
-    "replays/$gameId.privileged.replay.jsonl.gz", "public/$gameId.p0.jsonl.gz",
-    "public/planner/$gameId.p0.planner.json.gz",
+internal fun calibrationEvidencePerspective(p0: ArenaPolicyKind, p1: ArenaPolicyKind): String {
+    require(p0 == ArenaPolicyKind.SEARCH || p1 == ArenaPolicyKind.SEARCH) {
+        "Calibration evidence requires at least one search policy"
+    }
+    return if (p0 == ArenaPolicyKind.SEARCH) "p0" else "p1"
+}
+
+private fun calibrationGameArtifacts(gameId: String, perspective: String) = listOf(
+    "replays/$gameId.privileged.replay.jsonl.gz", "public/$gameId.$perspective.jsonl.gz",
+    "public/planner/$gameId.$perspective.planner.json.gz",
 )
 
 /** Failed games may end before sidecar emission. Present files must remain ordinary, hash-bound artifacts. */
 internal fun calibrationArtifactHashes(directory: Path, game: GameRunResult): Map<String, String> {
-    val expected = calibrationGameArtifacts(game.gameId)
+    val expected = calibrationGameArtifacts(game.gameId, calibrationEvidencePerspective(game.p0Policy, game.p1Policy))
     val emitted = expected.mapNotNull { relative ->
         val path = ResearchRunFiles.resolveBelow(directory, relative)
         if (!Files.exists(path)) null else {
@@ -398,10 +416,11 @@ internal class SearchTeacherCalibrationRunner(
                 val checkpointPath = directory.resolve("checkpoints/$gameId.json")
                 loadSearchTeacherCalibrationCheckpoint(checkpointPath, directory, identity, pairIndex, leg, seed,
                     p0.id, p1.id, gameId) ?: run {
-                    val paths = calibrationGameArtifacts(gameId).map { ResearchRunFiles.resolveBelow(directory, it) }
+                    val perspective = calibrationEvidencePerspective(p0.kind, p1.kind)
+                    val paths = calibrationGameArtifacts(gameId, perspective).map { ResearchRunFiles.resolveBelow(directory, it) }
                     val game = arena.playWithPolicies(gameId, seed, p0, p1,
                         evidence = GameEvidenceOptions(publicTrajectory = paths[1], plannerEvidence = paths[2],
-                            publicTrajectoryPerspective = "p0", publicTrajectoryReference = root.relativize(paths[1]).toString(),
+                            publicTrajectoryPerspective = perspective, publicTrajectoryReference = root.relativize(paths[1]).toString(),
                             researchRunIdentity = identity, outerCommit = sourceRun.outerCommit,
                             argentumCommit = sourceRun.checkedOutArgentumCommit,
                             profileHash = sha256(evidenceJson.encodeToString(plan)), sourceProvenance = source),
@@ -435,9 +454,9 @@ internal class SearchTeacherCalibrationRunner(
             sourceProvenance = source, deckHash = manifest.deckHash(), cardPoolHash = manifest.cardPoolHash(),
             plan = plan, workerThreads = workerThreads, currentAttemptElapsedMillis = (System.nanoTime() - started) / 1_000_000.0,
             policies = descriptors.map { SearchTeacherCalibrationPolicyReport(it, describeTournamentPolicy(policies.getValue(it.id)),
-                it.parameters(plan.baseSeed).searchConfig(), bindings.getValue(it.id),
-                policies.getValue(it.id).effectiveRootRolloutPolicy().behaviorSpecification,
-                policies.getValue(it.id).effectiveOpponentRolloutPolicy().behaviorSpecification) }, comparisons = comparisons,
+                it.takeUnless { it.directArgentumHeuristic }?.parameters(plan.baseSeed)?.searchConfig(), bindings.getValue(it.id),
+                policies.getValue(it.id).takeUnless { it.kind == ArenaPolicyKind.HEURISTIC }?.effectiveRootRolloutPolicy()?.behaviorSpecification,
+                policies.getValue(it.id).takeUnless { it.kind == ArenaPolicyKind.HEURISTIC }?.effectiveOpponentRolloutPolicy()?.behaviorSpecification) }, comparisons = comparisons,
             valid = if (sequential == null) comparisons.all { it.validPairs == plan.pairCount }
                 else sequential.valid,
             sequentialRule = sequentialRule, sequentialResult = sequential?.result,
@@ -478,6 +497,7 @@ internal fun calibrationComparison(plan: SearchTeacherCalibrationPlan, candidate
         scores.takeIf { it.isNotEmpty() }?.map { it.value }?.average(), interval?.first, interval?.second,
         listOf(plan.control, candidate).map { policy ->
             val search = searchBudgetFrontierOperational(policy.id, policy.parameters(plan.baseSeed), games)
+                .let { if (policy.directArgentumHeuristic) it.copy(configuredSimulations = 0) else it }
             val counts = games.flatMap { it.seatDiagnostics.values }.filter { it.policyId == policy.id }
                 .flatMap { it.selectionCounts.entries }.groupBy({ it.key }, { it.value }).mapValues { it.value.sum() }
             val selected = counts.values.sum()
@@ -496,7 +516,8 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     appendLine("Worker threads: ${report.workerThreads}. Timing describes this concurrent arena workload.")
     appendLine("Current calibration attempt through report construction: ${report.currentAttemptElapsedMillis / 1_000.0} seconds; excludes caller setup, prior resumed attempts and subsequent report writing/finalization/verification.")
     (listOf(report.plan.control) + report.plan.candidates).forEach { policy ->
-        appendLine("Policy `${policy.id}`: particles=${policy.particles}, simulations=${policy.simulations}, decision horizon=${policy.maxPolicyDecisions}.")
+        if (policy.directArgentumHeuristic) appendLine("Policy `${policy.id}`: original direct Argentum heuristic; no search, evaluator or rollout policy.")
+        else appendLine("Policy `${policy.id}`: particles=${policy.particles}, simulations=${policy.simulations}, decision horizon=${policy.maxPolicyDecisions}.")
     }
     val controlFields = evidenceJson.encodeToJsonElement(SearchTeacherCalibrationPolicy.serializer(), report.plan.control) as kotlinx.serialization.json.JsonObject
     report.plan.candidates.forEach { candidate ->

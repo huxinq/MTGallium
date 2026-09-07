@@ -64,6 +64,59 @@ class SearchTeacherCalibrationTest {
     private val source = PolicySourceProvenance(expectedArgentumRevision = "source", outer = tree, argentum = tree)
 
     @Test
+    fun `direct heuristic dispatch binds distinct behavior without search or inactive interventions`() {
+        assertEquals("p0", calibrationEvidencePerspective(ArenaPolicyKind.SEARCH, ArenaPolicyKind.HEURISTIC))
+        assertEquals("p1", calibrationEvidencePerspective(ArenaPolicyKind.HEURISTIC, ArenaPolicyKind.SEARCH))
+        assertEquals("p0", calibrationEvidencePerspective(ArenaPolicyKind.SEARCH, ArenaPolicyKind.SEARCH))
+        assertFails { calibrationEvidencePerspective(ArenaPolicyKind.HEURISTIC, ArenaPolicyKind.HEURISTIC) }
+        val direct = control.copy(directArgentumHeuristic = true)
+        assertEquals(ArenaPolicySpec(control.id, ArenaPolicyKind.HEURISTIC), direct.policy(71))
+        assertFalse(evidenceJson.encodeToString(SearchTeacherCalibrationPolicy.serializer(), control)
+            .contains("directArgentumHeuristic"))
+        val encoded = evidenceJson.encodeToString(SearchTeacherCalibrationPolicy.serializer(), direct)
+        assertEquals(direct, evidenceJson.decodeFromString<SearchTeacherCalibrationPolicy>(encoded))
+        assertFails { direct.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM) }
+        assertFails { direct.copy(evaluator = MonoRedVisibleEvaluatorConfig()) }
+        val directPlan = plan.copy(control = direct, pairCount = 100)
+        val comparison = calibrationComparison(directPlan, candidate, emptyList())
+        assertEquals(100, comparison.assignedPairs)
+        assertEquals(0, comparison.operationalByPolicy.first().search.configuredSimulations)
+        assertEquals(32, comparison.operationalByPolicy.last().search.configuredSimulations)
+        val ids = mapOf("control" to "c", "candidate" to "t")
+        assertNotEquals(searchTeacherCalibrationBindings(plan, source, ids, "deck", "pool", 8).identity,
+            searchTeacherCalibrationBindings(plan.copy(control = direct), source, ids, "deck", "pool", 8).identity)
+    }
+
+    @Test
+    fun `direct heuristic seat swaps retain evidence from the search seat`() {
+        val directory = Files.createTempDirectory("heuristic-seat-evidence-")
+        val registry = buildRegistry()
+        val deck = SearchTeacherDeckManifest("heuristic-evidence-test", "Synthetic", "synthetic", "2026-09-08",
+            "public synthetic fixture", mapOf("Mountain" to 60), emptyMap())
+        val search = candidate.copy(particles = 1, simulations = 1, maxPolicyDecisions = 1).policy(71)
+        val heuristic = control.copy(directArgentumHeuristic = true).policy(71)
+        val arena = SearchTeacherArena(registry, deck, calibrationPresentationProfile(source), 71)
+        for ((leg, seats) in listOf(heuristic to search, search to heuristic).withIndex()) {
+            val perspective = calibrationEvidencePerspective(seats.first.kind, seats.second.kind)
+            val gameId = "heuristic-seat-$leg"
+            val trajectory = directory.resolve("public/$gameId.$perspective.jsonl.gz")
+            val planner = directory.resolve("public/planner/$gameId.$perspective.planner.json.gz")
+            val replay = directory.resolve("replays/$gameId.privileged.replay.jsonl.gz")
+            val result = arena.playWithPolicies(gameId, 71, seats.first, seats.second,
+                evidence = GameEvidenceOptions(publicTrajectory = trajectory, plannerEvidence = planner,
+                    publicTrajectoryPerspective = perspective, publicTrajectoryReference = directory.relativize(trajectory).toString(),
+                    researchRunIdentity = "test", outerCommit = "source", argentumCommit = "source",
+                    profileHash = "test", sourceProvenance = source),
+                replay = GameReplayOptions(replay, directory.relativize(replay).toString(), "test", "source", "source"),
+                maxSearchDecisions = 1)
+            assertNull(result.exception)
+            assertEquals(perspective, result.searchSeat)
+            assertEquals(3, calibrationArtifactHashes(directory, result).size)
+            assertTrue(Files.size(trajectory) > 0 && Files.size(planner) > 0 && Files.size(replay) > 0)
+        }
+    }
+
+    @Test
     fun `plan binds source full interventions and explicit schedule`() {
         fun identity(p: SearchTeacherCalibrationPlan = plan, s: PolicySourceProvenance = source,
             policies: Map<String, String> = mapOf("control" to "c", "candidate" to "t"), deck: String = "deck", workers: Int = 1) =
