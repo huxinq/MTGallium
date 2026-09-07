@@ -44,11 +44,14 @@ internal data class RealGamePositionBankPlan(
     val selectionSeed: Long,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val selectionPartition: RealGamePositionPartition? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rootIds: List<String> = emptyList(),
 ) {
     init {
         require(schemaVersion == 1 && sources.isNotEmpty())
         require(sources.map { it.expectedRunIdentity }.distinct().size == sources.size)
         require(rootLimit > 0 && maxRootsPerGame > 0)
+        require(rootIds.isEmpty() || (rootIds.size == rootLimit && rootIds == rootIds.distinct().sorted()))
         require(validationFraction == REAL_GAME_POSITION_BANK_VALIDATION_FRACTION) {
             "Position bank v1 freezes a quarter of library-seed groups for validation"
         }
@@ -203,13 +206,27 @@ internal fun realGamePositionFamily(candidates: List<SemanticChoice>): RealGameP
     }
 }
 
-/** Result-blind round robin across available decision families, with deterministic within-family ranks. */
+/** Exact declared eligible roots, or the default family round robin; neither bypasses partitions or game caps. */
 internal fun selectRealGamePositionAssignments(plan: RealGamePositionBankPlan,
     assignments: List<RealGamePositionBankAssignment>): List<RealGamePositionBankAssignment> {
     require(assignments.map { it.rootId }.distinct().size == assignments.size)
     val admitted = assignments.map { row ->
         if (row.reasons.isEmpty() && plan.selectionPartition != null && row.partition != plan.selectionPartition)
             row.copy(status = RealGamePositionAssignmentStatus.EXCLUDED, reasons = listOf("unselected-partition")) else row
+    }
+    if (plan.rootIds.isNotEmpty()) {
+        val eligible = admitted.filter { it.reasons.isEmpty() }.associateBy { it.rootId }
+        require(plan.rootIds.all { it in eligible }) { "An explicit bank root is absent or ineligible in the declared partition" }
+        val requested = plan.rootIds.map(eligible::getValue)
+        require(requested.groupingBy { it.sourceRunIdentity to it.sourceGameId }.eachCount().values.all { it <= plan.maxRootsPerGame }) {
+            "Explicit bank roots exceed the declared per-game cap"
+        }
+        val selected = plan.rootIds.toSet()
+        return admitted.map { row -> when {
+            row.reasons.isNotEmpty() -> row
+            row.rootId in selected -> row.copy(status = RealGamePositionAssignmentStatus.SELECTED)
+            else -> row.copy(status = RealGamePositionAssignmentStatus.EXCLUDED, reasons = listOf("unselected-explicit-root"))
+        } }
     }
     val queues = admitted.filter { it.reasons.isEmpty() }.groupBy { it.decisionFamily }.toSortedMap()
         .mapValues { (_, rows) -> ArrayDeque(rows.sortedBy { sha256("real-game-position-selection-v1:${plan.selectionSeed}:${it.rootId}") }) }

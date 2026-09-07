@@ -36,6 +36,28 @@ class RealGamePositionBankTest {
     }
 
     @Test
+    fun `explicit roots preserve eligibility partition and per-game cap without filling missing requests`() {
+        val a = row("a", "g1", RealGamePositionDecisionFamily.PRIORITY).copy(partition = RealGamePositionPartition.DEVELOPMENT)
+        val b = row("b", "g2", RealGamePositionDecisionFamily.PRIORITY).copy(partition = RealGamePositionPartition.DEVELOPMENT)
+        val c = row("c", "g3", RealGamePositionDecisionFamily.ATTACKERS).copy(partition = RealGamePositionPartition.DEVELOPMENT)
+        val explicit = plan.copy(rootLimit = 2, rootIds = listOf("a", "b"), selectionPartition = RealGamePositionPartition.DEVELOPMENT)
+        val selected = selectRealGamePositionAssignments(explicit, listOf(c, b, a))
+        assertEquals(setOf("a", "b"), selected.filter { it.status == RealGamePositionAssignmentStatus.SELECTED }.map { it.rootId }.toSet())
+        assertEquals(listOf("unselected-explicit-root"), selected.first().reasons)
+        assertEquals(3, selected.size)
+        assertFailsWith<IllegalArgumentException> { selectRealGamePositionAssignments(explicit, listOf(a, c)) }
+        assertFailsWith<IllegalArgumentException> { selectRealGamePositionAssignments(explicit, listOf(a, b.copy(reasons = listOf("invalid-source-pair")))) }
+        assertFailsWith<IllegalArgumentException> { selectRealGamePositionAssignments(explicit, listOf(a, b.copy(partition = RealGamePositionPartition.VALIDATION))) }
+        assertFailsWith<IllegalArgumentException> { selectRealGamePositionAssignments(explicit, listOf(a, b.copy(sourceGameId = "g1"))) }
+        assertFailsWith<IllegalArgumentException> { explicit.copy(rootIds = listOf("b", "a")) }
+        assertFailsWith<IllegalArgumentException> { explicit.copy(rootIds = listOf("a", "a")) }
+        assertFailsWith<IllegalArgumentException> { explicit.copy(rootIds = listOf("a")) }
+        val encoded = evidenceJson.encodeToString(RealGamePositionBankPlan.serializer(), explicit)
+        assertEquals(explicit, evidenceJson.decodeFromString<RealGamePositionBankPlan>(encoded))
+        assertTrue(!evidenceJson.encodeToString(RealGamePositionBankPlan.serializer(), plan).contains("rootIds"))
+    }
+
+    @Test
     fun `library seed groups keep all comparisons seats and roots in the same split`() {
         val group = realGamePositionSeedGroup("deck", "pool", 72)
         val partition = realGamePositionPartition(group, .25)
