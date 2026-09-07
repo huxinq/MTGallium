@@ -569,6 +569,8 @@ internal object PerspectiveEventProjector {
                     objectName = event.newFaceName,
                     change = "TRANSFORMED",
                     value = event.intoBackFace.toString(),
+                    schemaVersion = org.mtgallium.agent.infoset.core.PERSPECTIVE_EVENT_SCHEMA_V2,
+                    knowledgeObjectKey = ref(event.entityId)?.let { knowledgeObjectKey(event.entityId) },
                 )
                 kind = PolicyHistoryEventKind.OBJECT_STATE
                 actor = alias(event.controllerId)

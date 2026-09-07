@@ -15,6 +15,30 @@ class KnowledgeStateTest {
     )
 
     @Test
+    fun `transform updates only an existing continuity handle and preserves legacy object-state bytes`() {
+        val legacy = """{"type":"object_state","schemaVersion":1,"objectRef":"view-ref","objectName":"Mountain","change":"TRANSFORMED","value":null,"relatedObjectRefs":[]}"""
+        val oldDetail = PolicyJson.format.decodeFromString<PerspectiveEventDetail>(legacy)
+        assertEquals(legacy, PolicyJson.format.encodeToString(PerspectiveEventDetail.serializer(), oldDetail))
+        val remembered = event(1, PerspectiveEventDetail.ZoneChange(
+            ownerId = "p1", fromZone = "HAND", toZone = "GRAVEYARD",
+            cardName = "Shock", knowledgeObjectKey = "remembered",
+        ))
+        fun reduce(detail: PerspectiveEventDetail) = PolicyKnowledgeReducer.reduce(
+            "p0", decks, observation(), listOf(remembered, event(2, detail)),
+        ).knownObjects.single()
+        val transform = (oldDetail as PerspectiveEventDetail.ObjectState).copy(
+            schemaVersion = PERSPECTIVE_EVENT_SCHEMA_V2, knowledgeObjectKey = "remembered",
+        )
+        assertEquals("Mountain", reduce(transform).cardName)
+        assertEquals("p1", reduce(transform).ownerId)
+        assertEquals("GRAVEYARD", reduce(transform).zone)
+        assertEquals("Shock", reduce(oldDetail).cardName)
+        assertEquals("Shock", reduce(transform.copy(knowledgeObjectKey = "unrelated")).cardName)
+        assertEquals("Shock", reduce(transform.copy(objectName = null)).cardName)
+        assertEquals("Shock", reduce(transform.copy(change = "CONTROLLER_CHANGED")).cardName)
+    }
+
+    @Test
     fun `current visible cards are exact and hidden remainder preserves deck conservation`() {
         val knowledge = PolicyKnowledgeReducer.reduce("p0", decks, observation(), emptyList())
 
