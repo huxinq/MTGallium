@@ -96,3 +96,10 @@ complete development rows, removes root-wide offsets, and freezes the fixed-ridg
 model before generating held-out terminal targets. The target comparison holds
 the prior model's development roots and safe features fixed and requires disjoint
 held-out seed groups. It measures conditional action ordering, not deployed strength.
+
+A terminal-target coverage comparison can reuse authenticated development labels
+and append disjoint development roots with identical sampling and continuation
+settings. It retains each input manifest, rejects duplicate root weighting and
+validation group overlap, and freezes the expanded fit before reading reused
+validation targets. Added positions within existing groups do not create new
+independent game or seed-group evidence.

@@ -4,6 +4,7 @@ import com.wingedsheep.engine.registry.CardRegistry
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.research.run.*
@@ -35,7 +36,12 @@ internal data class TerminalRootKernelExperimentPlan(
 }
 
 @Serializable
-internal data class TerminalRootKernelFitPlan(val bank: CloningComparisonInput, val terminal: SavedRootPolicyInput, val ridge: Double) {
+internal data class TerminalRootKernelTrainingInput(val bank: CloningComparisonInput, val terminal: SavedRootPolicyInput)
+
+@Serializable
+internal data class TerminalRootKernelFitPlan(val bank: CloningComparisonInput, val terminal: SavedRootPolicyInput, val ridge: Double,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val additional: List<TerminalRootKernelTrainingInput> = emptyList(),
+) {
     init { require(ridge.isFinite() && ridge > 0) }
 }
 
@@ -43,6 +49,7 @@ internal data class TerminalRootKernelFitPlan(val bank: CloningComparisonInput, 
 internal data class TerminalRootKernelFitReport(
     val researchRunIdentity: String, val source: ResearchRunProvenance, val plan: TerminalRootKernelFitPlan,
     val development: RootActionKernelFitMetrics, val accounting: TerminalRootScreenAccounting,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val additionalAccounting: List<TerminalRootScreenAccounting> = emptyList(),
     val interpretation: String = "Centered conditional terminal payoff after each forced root action and the declared continuation policies; not authoritative hidden truth, observed gameplay, search backups or optimal value. Fit only complete DEVELOPMENT roots with equal group/root/action weighting and fixed ridge.",
 )
 
@@ -114,7 +121,15 @@ internal fun fitTerminalRootKernel(repository: Path, plan: TerminalRootKernelFit
     require(!Files.exists(destination))
     val bank = loadVerifiedRealGamePositionBank(Path.of(plan.bank.directory), plan.bank.researchRunIdentity)
     val screen = loadTerminalRootScreen(plan.terminal, bank)
-    val development = terminalRootTrainingData(bank, screen, PositionBankScreenPartition.DEVELOPMENT)
+    val additions = plan.additional.map { input ->
+        val extraBank = loadVerifiedRealGamePositionBank(Path.of(input.bank.directory), input.bank.researchRunIdentity)
+        val extra = loadTerminalRootScreen(input.terminal, extraBank)
+        requireSameTerminalTarget(screen.plan, extra.plan)
+        require(screen.sourceProvenance.argentum.revision == extra.sourceProvenance.argentum.revision)
+        extraBank to extra
+    }
+    val development = combineTerminalTrainingRoots(listOf(terminalRootTrainingData(bank, screen, PositionBankScreenPartition.DEVELOPMENT)) +
+        additions.map { (b, r) -> terminalRootTrainingData(b, r, PositionBankScreenPartition.DEVELOPMENT) })
     require(development.map { it.seedGroupId }.distinct().size >= 2)
     val bindings = ResearchRunBindings(protocol = "terminal-root-action-kernel-fit-v1", material = mapOf(
         "source" to sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), source)),
@@ -126,7 +141,10 @@ internal fun fitTerminalRootKernel(repository: Path, plan: TerminalRootKernelFit
         "target" to "conditional-terminal-payoff-equal-repetition-mean-root-centered-v1",
         "fit" to "equal-group-root-action-centered-mse-plus-ridge-kernel-norm-cholesky-v1",
         "scorer" to COMPILED_ROOT_ACTION_KERNEL_ID,
-    ))
+    ) + plan.additional.flatMapIndexed { index, input -> listOf(
+        "additional-bank-$index-manifest" to researchSha256File(Path.of(input.bank.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+        "additional-terminal-$index-manifest" to researchSha256File(Path.of(input.terminal.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+    ) }.toMap())
     Files.createDirectories(destination)
     writeJsonAtomically(destination.resolve("bindings.json"), bindings); writeJsonAtomically(destination.resolve("plan.json"), plan)
     val model = fitRootActionKernel(development, plan.ridge)
@@ -135,7 +153,8 @@ internal fun fitTerminalRootKernel(repository: Path, plan: TerminalRootKernelFit
     require(model == restored)
     val scorer = CompiledRootActionKernel(restored)
     writeJsonAtomically(destination.resolve("development.json"), development)
-    val report = TerminalRootKernelFitReport(bindings.identity, source, plan, rootKernelMetrics(scorer, development), terminalRootScreenAccounting(screen, bank))
+    val report = TerminalRootKernelFitReport(bindings.identity, source, plan, rootKernelMetrics(scorer, development), terminalRootScreenAccounting(screen, bank),
+        additions.map { (b, r) -> terminalRootScreenAccounting(r, b) })
     writeJsonAtomically(destination.resolve("report.json"), report)
     ResearchRunArtifacts(destination, bindings.identity).also { artifacts ->
         listOf("bindings.json", "plan.json", "model.json", "development.json", "report.json").forEach(artifacts::register); artifacts.finalize()

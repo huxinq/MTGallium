@@ -53,7 +53,10 @@ internal data class RootKernelFitReference(val directory: String, val researchRu
                 require(bindings.material["plan"] == sha256(evidenceJson.encodeToString(TerminalRootKernelFitPlan.serializer(), report.plan)))
                 require(bindings.material["target"] == "conditional-terminal-payoff-equal-repetition-mean-root-centered-v1")
                 require(model.ridge == report.plan.ridge && model.centers.size == report.development.actions)
-                require(report.accounting.refusedRows == 0 && report.accounting.completedTerminalSamples == report.accounting.requestedContinuations)
+                require(report.additionalAccounting.size == report.plan.additional.size)
+                require((listOf(report.accounting) + report.additionalAccounting).all {
+                    it.refusedRows == 0 && it.completedTerminalSamples == it.requestedContinuations
+                })
             }
             else -> error("Unsupported root kernel fit protocol: ${bindings.protocol}")
         }

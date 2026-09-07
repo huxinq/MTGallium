@@ -83,4 +83,29 @@ class TerminalRootKernelExperimentTest {
         assertEquals(metrics.equalGroupCenteredMeanSquaredError, shifted.equalGroupCenteredMeanSquaredError, 1e-15)
         assertEquals(metrics.equalRootReferenceRegret, shifted.equalRootReferenceRegret)
     }
+    @Test fun `coverage retains the full old population and refuses duplicate weighting`() {
+        val features = listOf(RootActionKernelFeatures(RootActionKernelVector(emptyList(), emptyList()), RootActionKernelVector(emptyList(), emptyList())))
+        val a = RootActionKernelTrainingRoot("a", "g", features + features, listOf(.5, -.5))
+        val b = a.copy(rootId = "b", actionMeans = listOf(-.5, .5))
+        assertEquals(listOf(a, b), combineTerminalTrainingRoots(listOf(listOf(b), listOf(a))))
+        assertFails { combineTerminalTrainingRoots(listOf(listOf(a), listOf(a))) }
+        assertFails { combineTerminalTrainingRoots(listOf(listOf(a), emptyList())) }
+    }
+
+    @Test fun `coverage refuses a different sampling target and retains old fit plan serialization`() {
+        val policy = PositionBankScreenPolicy(SearchTeacherCalibrationPolicy("terminal", 8, 64, 32, 1.4, true, 1.0), MonoRedVisibleEvaluatorConfig())
+        val first = PositionBankScreenPlan(bankDirectory = "/tmp/a", expectedBankIdentity = "synthetic", partition = PositionBankScreenPartition.DEVELOPMENT,
+            mode = PositionBankScreenMode.TERMINAL_CONTINUATIONS, rootLimit = 1, repetitions = 2, policies = listOf(policy), rootIds = listOf("a"),
+            terminalContinuation = TerminalRootContinuationConfig(8, maximumTotalContinuations = 25000))
+        requireSameTerminalTarget(first, first.copy(bankDirectory = "/tmp/b", rootIds = listOf("b")))
+        assertFails { requireSameTerminalTarget(first, first.copy(repetitions = 1)) }
+        assertFails { requireSameTerminalTarget(first, first.copy(searchSeedDomain = "changed")) }
+        assertFails { requireSameTerminalTarget(first, first.copy(terminalContinuation = first.terminalContinuation!!.copy(samplesPerAction = 16))) }
+        assertFails { requireSameTerminalTarget(first, first.copy(policies = listOf(policy.copy(search = policy.search.copy(particles = 16))))) }
+        val plan = TerminalRootKernelFitPlan(CloningComparisonInput("/tmp/a", "synthetic"), SavedRootPolicyInput("/tmp/t", "synthetic", "terminal"), .001)
+        val encoded = evidenceJson.encodeToString(plan)
+        assertFalse(encoded.contains("additional"))
+        assertEquals(plan, evidenceJson.decodeFromString<TerminalRootKernelFitPlan>(encoded))
+    }
+
 }
