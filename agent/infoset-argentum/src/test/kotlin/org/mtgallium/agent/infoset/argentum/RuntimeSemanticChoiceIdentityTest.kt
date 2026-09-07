@@ -296,7 +296,7 @@ class RuntimeSemanticChoiceIdentityTest {
         phase = Phase.PRECOMBAT_MAIN,
         step = Step.PRECOMBAT_MAIN,
         priorityPassedBy = emptySet(),
-        pendingDecision = null,
+        continuationStack = emptyList(),
     ).updateEntity(player) { it.with(ManaPoolComponent(red = redMana)) }
 
     private fun putInHand(state: GameState, player: EntityId, card: EntityId): GameState {

@@ -743,7 +743,7 @@ internal class TacticalHorizonScenarioFactory(
         state = state.copy(
             phase = phase, step = step, activePlayerId = activeId,
             priorityPlayerId = priorityId, priorityPassedBy = emptySet(), stack = emptyList(),
-            pendingDecision = null, continuationStack = emptyList(), winnerId = null, gameOver = false,
+            continuationStack = emptyList(), winnerId = null, gameOver = false,
         )
         environment.restore(state, ids)
         return ArgentumSearchWorld.create(

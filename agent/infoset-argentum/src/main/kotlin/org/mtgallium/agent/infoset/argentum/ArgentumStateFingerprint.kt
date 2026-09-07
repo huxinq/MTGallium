@@ -72,11 +72,11 @@ object ArgentumStateFingerprint {
         normalizeRoutingIds(json.encodeToJsonElement(state))
 
     /**
-     * Decision ids and delayed-trigger ids are generated correlation tokens. A replay constructs
-     * fresh UUIDs even when it reaches the same rules state. Both kinds can be copied into linked
+     * Decision ids and delayed-trigger ids are generated correlation tokens. Their spelling is
+     * excluded even when engine allocation is deterministic. Both kinds can be copied into linked
      * state, so canonicalize each distinct id by stable serialized occurrence/list order and then
      * replace every reference to it. This preserves ordering, uniqueness, and reference equality
-     * while removing only the UUID spelling. Everything else remains byte-for-byte in the digest,
+     * while removing only the token spelling. Everything else remains byte-for-byte in the digest,
      * including all hidden zones, RNG state, delayed-trigger rules payloads, and continuations.
      */
     private fun normalizeRoutingIds(element: JsonElement): JsonElement {
@@ -86,6 +86,7 @@ object ArgentumStateFingerprint {
                 ?.content
                 ?.let(::add)
             collectValuesForKey(element, "decisionId", this)
+            root?.get("continuationStack")?.let { collectSuspensionQuestionIds(it, this) }
         }.distinct()
         val decisionRouting = decisionIds
             .mapIndexed { index, id -> id to "<decision-routing-id:$index>" }
@@ -99,6 +100,21 @@ object ArgentumStateFingerprint {
             .mapIndexed { index, id -> id to "<delayed-trigger-routing-id:$index>" }
             .toMap()
         return normalizeRoutingIds(element, decisionRouting + delayedTriggerRouting)
+    }
+
+    /** Includes saved suspensions nested inside automatic mana-payment continuation frames. */
+    private fun collectSuspensionQuestionIds(element: JsonElement, destination: MutableList<String>) {
+        when (element) {
+            is JsonArray -> element.forEach { collectSuspensionQuestionIds(it, destination) }
+            is JsonObject -> {
+                if ("answer" in element) {
+                    ((element["question"] as? JsonObject)?.get("id") as? JsonPrimitive)
+                        ?.content?.let(destination::add)
+                }
+                element.values.forEach { collectSuspensionQuestionIds(it, destination) }
+            }
+            is JsonPrimitive -> Unit
+        }
     }
 
     private fun normalizeRoutingIds(

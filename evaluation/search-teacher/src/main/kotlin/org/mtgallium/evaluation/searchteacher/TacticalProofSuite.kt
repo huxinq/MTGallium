@@ -555,7 +555,6 @@ internal class TacticalProofScenarioFactory(
             priorityPlayerId = priorityId,
             priorityPassedBy = emptySet(),
             stack = emptyList(),
-            pendingDecision = null,
             continuationStack = emptyList(),
             winnerId = null,
             gameOver = false,

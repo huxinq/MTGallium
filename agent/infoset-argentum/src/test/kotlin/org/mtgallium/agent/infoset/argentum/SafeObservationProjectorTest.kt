@@ -13,6 +13,9 @@ import com.wingedsheep.engine.core.ChooseTargetsDecision
 import com.wingedsheep.engine.core.ReorderLibraryDecision
 import com.wingedsheep.engine.core.SearchCardInfo
 import com.wingedsheep.engine.core.SearchLibraryDecision
+import com.wingedsheep.engine.core.SelectFromCollectionContinuation
+import com.wingedsheep.engine.core.MoveCollectionOrderContinuation
+import com.wingedsheep.engine.core.suspendForDecision
 import com.wingedsheep.engine.core.SelectCardsDecision
 import com.wingedsheep.engine.core.TargetRequirementInfo
 import com.wingedsheep.engine.core.ZoneChangeEvent
@@ -682,7 +685,20 @@ class SafeObservationProjectorTest {
         )
 
         for (decision in decisions) {
-            val state = env.state.copy(pendingDecision = decision)
+            val state = env.state.suspendForDecision(
+                question = { id -> when (decision) {
+                    is SearchLibraryDecision -> decision.copy(id = id)
+                    is ReorderLibraryDecision -> decision.copy(id = id)
+                    else -> error("Unexpected fixture decision")
+                } },
+                answer = when (decision) {
+                    is SearchLibraryDecision -> SelectFromCollectionContinuation(
+                        chooser, null, context.sourceName, ids, "selected", null)
+                    is ReorderLibraryDecision -> MoveCollectionOrderContinuation(
+                        chooser, null, context.sourceName, ids, Zone.LIBRARY, chooser)
+                    else -> error("Unexpected fixture decision")
+                },
+            ).state
             val unauthorized = ObservationBuilder(cardRegistry).build(state, observer, emptyList())
                 .observation as TrainingObservation
             val authorized = ObservationBuilder(cardRegistry).build(state, chooser, emptyList())
@@ -692,13 +708,13 @@ class SafeObservationProjectorTest {
                 unauthorized,
                 playerAliases = null,
                 runtime = ArgentumPolicyRuntimeProjection.EMPTY,
-                pendingDecision = decision,
+                pendingDecision = state.pendingDecision,
             ).observation.pendingDecision
             val visible = SafeObservationProjector().project(
                 authorized,
                 playerAliases = null,
                 runtime = ArgentumPolicyRuntimeProjection.EMPTY,
-                pendingDecision = decision,
+                pendingDecision = state.pendingDecision,
             ).observation.pendingDecision
 
             assertFalse(assertNotNull(hidden).canRespond)

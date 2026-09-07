@@ -697,7 +697,7 @@ class ReachableSemanticTrustTest {
             phase = Phase.PRECOMBAT_MAIN,
             step = Step.PRECOMBAT_MAIN,
             priorityPassedBy = emptySet(),
-            pendingDecision = null,
+            continuationStack = emptyList(),
         ).updateEntity(player) { it.with(ManaPoolComponent(red = redMana)) }
 
     private fun combatPhase(state: GameState, player: EntityId, redMana: Int = 0): GameState =
@@ -708,7 +708,7 @@ class ReachableSemanticTrustTest {
             phase = Phase.COMBAT,
             step = Step.BEGIN_COMBAT,
             priorityPassedBy = emptySet(),
-            pendingDecision = null,
+            continuationStack = emptyList(),
         ).updateEntity(player) { it.with(ManaPoolComponent(red = redMana)) }
 
     private fun exiledNovaState(

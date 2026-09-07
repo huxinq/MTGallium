@@ -1,7 +1,8 @@
 # Argentum performance integration
 
 The gitlink pins upstream commit
-`5021faf88093a93091e4de7914fbe0f411499d58`, which includes all five
+`3757f6bd064e2f057401fac2a4226c5afa5cd011`. It descends from
+`5021faf88093a93091e4de7914fbe0f411499d58`, which integrated all five
 reviewed performance contributions:
 
 | Contribution | Upstream PR |
@@ -14,14 +15,23 @@ reviewed performance contributions:
 
 All 19 files changed by the former local performance integration
 `f8874f795f54543e98b0e9602ca8eea73a986df6` relative to `12589ae4a22e`
-are byte-identical at this upstream revision. The pin also incorporates
+were byte-identical at `5021faf`. That revision also incorporated
 upstream Lorwyn/Ravnica work, including linked-exile state and draw replacement
-changes; it is not a performance-only engine update.
+changes. The current pin additionally incorporates structural suspension and
+paired question/answer continuations, object incarnation and paused-spell
+lifecycle handling, deterministic routing and response freshness protections,
+and further card/rules fixes. It is not a performance-only engine update.
 
 The canonical remote in `.gitmodules` can supply this commit directly.
 No local integration ref or owner-provided bundle is required.
 MTGallium's factory reuse and opt-in singleton-selection configuration remain
 unchanged by this convergence.
+
+Authoritative fingerprints normalize question routing IDs inside active and
+saved nested suspensions. Question/answer payloads, distinct routing
+relationships, object incarnations, and allocator state remain fingerprinted.
+Synthetic scenario setup now clears the continuation stack that owns a paused
+question instead of assigning the removed `pendingDecision` field.
 
 Existing performance measurements retain their original MTGallium revision,
 engine revision, configuration, and runtime-bundle identities. They do not

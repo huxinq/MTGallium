@@ -506,7 +506,6 @@ internal class TacticalScenarioFactory(
             priorityPlayerId = if (step == Step.DECLARE_BLOCKERS) playerIds[1] else playerIds[0],
             priorityPassedBy = emptySet(),
             stack = emptyList(),
-            pendingDecision = null,
             continuationStack = emptyList(),
             winnerId = null,
             gameOver = false,

@@ -9,6 +9,9 @@ import com.wingedsheep.engine.core.DecisionSubmittedEvent
 import com.wingedsheep.engine.core.GameEvent
 import com.wingedsheep.engine.core.PassPriority
 import com.wingedsheep.engine.core.SubmitDecision
+import com.wingedsheep.engine.core.MayAbilityContinuation
+import com.wingedsheep.engine.core.suspendForDecision
+import com.wingedsheep.engine.handlers.EffectContext
 import com.wingedsheep.engine.core.YesNoDecision
 import com.wingedsheep.engine.core.YesNoResponse
 import com.wingedsheep.engine.core.ZoneChangeEvent
@@ -273,8 +276,8 @@ class OutcomeStateCorpusTest {
             prompt = "Choose carefully",
             context = DecisionContext(),
         )
-        val recordedBefore = base.withPendingDecision(pending(recordedId))
-        val reconstructedBefore = base.withPendingDecision(pending(reconstructedId))
+        val recordedBefore = base.withFixtureQuestion(pending(recordedId))
+        val reconstructedBefore = base.withFixtureQuestion(pending(reconstructedId))
         val recordedSubmit = SubmitDecision(p0, YesNoResponse(recordedId, choice = true))
         val reconstructedSubmit = SubmitDecision(p0, YesNoResponse(reconstructedId, choice = true))
         fun submittedDifference(
@@ -342,8 +345,8 @@ class OutcomeStateCorpusTest {
         assertTrue(submittedDifference(listOf(recordedSubmitted), emptyList()) != null)
 
         val pass = PassPriority(p0)
-        val recordedAfter = base.withPendingDecision(pending(recordedId))
-        val reconstructedAfter = base.withPendingDecision(pending(reconstructedId))
+        val recordedAfter = base.withFixtureQuestion(pending(recordedId))
+        val reconstructedAfter = base.withFixtureQuestion(pending(reconstructedId))
         val recordedRequested = DecisionRequestedEvent(recordedId, p0, "YES_NO", "Choose carefully")
         fun requestedDifference(
             actualEvent: DecisionRequestedEvent,
@@ -757,12 +760,8 @@ class OutcomeStateCorpusTest {
         )
         assertEquals(1, equivalence.admittedSyntheticAbilityMappings, "removed mappings remain tombstones")
 
-        val expectedReuse = expectedRemoved.copy(
-            pendingDecision = syntheticPendingDecision(SYNTHETIC_EXPECTED_ABILITY_ID),
-        )
-        val actualReuse = actualRemoved.copy(
-            pendingDecision = syntheticPendingDecision(SYNTHETIC_ACTUAL_ABILITY_ID),
-        )
+        val expectedReuse = expectedRemoved.withFixtureQuestion(syntheticPendingDecision(SYNTHETIC_EXPECTED_ABILITY_ID))
+        val actualReuse = actualRemoved.withFixtureQuestion(syntheticPendingDecision(SYNTHETIC_ACTUAL_ABILITY_ID))
         val reused = equivalence.transitionDifference(
             expectedAction = creation.action,
             actualAction = creation.action,
@@ -778,7 +777,7 @@ class OutcomeStateCorpusTest {
         )
         assertTrue(reused != null)
         assertEquals("before", reused.boundary)
-        assertEquals("/pendingDecision/prompt", reused.path)
+        assertEquals("/continuationStack/0/question/prompt", reused.path)
     }
 
     @Test
@@ -799,12 +798,8 @@ class OutcomeStateCorpusTest {
         val creation = syntheticDelayedAbilityTransition()
         val promptEquivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
         assertEquals(null, creation.difference(promptEquivalence, rawOrdinal = 0))
-        val expectedPrompt = creation.expectedAfter.copy(
-            pendingDecision = syntheticPendingDecision(SYNTHETIC_EXPECTED_ABILITY_ID),
-        )
-        val actualPrompt = creation.actualAfter.copy(
-            pendingDecision = syntheticPendingDecision(SYNTHETIC_ACTUAL_ABILITY_ID),
-        )
+        val expectedPrompt = creation.expectedAfter.withFixtureQuestion(syntheticPendingDecision(SYNTHETIC_EXPECTED_ABILITY_ID))
+        val actualPrompt = creation.actualAfter.withFixtureQuestion(syntheticPendingDecision(SYNTHETIC_ACTUAL_ABILITY_ID))
         val promptDifference = promptEquivalence.transitionDifference(
             expectedAction = creation.action,
             actualAction = creation.action,
@@ -819,7 +814,7 @@ class OutcomeStateCorpusTest {
             rawOrdinal = 1,
         )
         assertTrue(promptDifference != null)
-        assertEquals("/pendingDecision/prompt", promptDifference.path)
+        assertEquals("/continuationStack/0/question/prompt", promptDifference.path)
 
         val yieldEquivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
         assertEquals(null, creation.difference(yieldEquivalence, rawOrdinal = 0))
@@ -924,9 +919,7 @@ class OutcomeStateCorpusTest {
         assertEquals(0, submitted.admittedSyntheticAbilityMappings)
 
         val initialPrefix = RecordedReplayStateEquivalence(historicalProjectionAuthority())
-        val initialWithFutureId = syntheticState(null, null).copy(
-            pendingDecision = syntheticPendingDecision(SYNTHETIC_EXPECTED_ABILITY_ID),
-        )
+        val initialWithFutureId = syntheticState(null, null).withFixtureQuestion(syntheticPendingDecision(SYNTHETIC_EXPECTED_ABILITY_ID))
         assertEquals(null, initialPrefix.initialDifference(initialWithFutureId, initialWithFutureId))
         val initialPrefixDifference = creation.difference(initialPrefix, rawOrdinal = 0)
         assertTrue(initialPrefixDifference != null)
@@ -1612,6 +1605,18 @@ class OutcomeStateCorpusTest {
             )
         ),
     )
+
+    private fun GameState.withFixtureQuestion(question: YesNoDecision): GameState {
+        val state = suspendForDecision(
+            question = { id -> question.copy(id = id) },
+            answer = MayAbilityContinuation(question.playerId, null, null, null,
+                EffectContext(sourceId = null, controllerId = question.playerId)),
+        ).state
+        // Imported routing spellings differ while both snapshots retain the same allocation state.
+        return CanonicalReplayJson.decodeFromString<GameState>(CanonicalReplayJson.encodeToString(state).replace(
+            CanonicalReplayJson.encodeToString(state.pendingDecision!!.id),
+            CanonicalReplayJson.encodeToString(question.id)))
+    }
 
     private fun syntheticPendingDecision(prompt: String) = YesNoDecision(
         id = "synthetic-pending-id",
