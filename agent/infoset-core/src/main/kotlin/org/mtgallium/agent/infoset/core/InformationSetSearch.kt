@@ -128,14 +128,15 @@ class InformationSetSearch(
             }
             val selected = singleton ?: run {
                 val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
-                val candidates = if (world is PolicyAnnotatedSearchWorld) {
-                    initialPolicyExpansion(world, policy).candidates
+                val policyExpansion = if (world is PolicyAnnotatedSearchWorld) {
+                    initialPolicyExpansion(world, policy)
                 } else {
-                    expansion.candidates
+                    expansion
                 }
-                val decision = policy.selectForRollout(
+                val decision = policy.selectForExpansion(
                     opponentInformation = { world.informationState(actor) },
-                    candidates = candidates,
+                    candidates = policyExpansion.candidates,
+                    isProfileExhaustive = policyExpansion.isProfileExhaustive,
                     policySeed = ComponentSeeds.derive(
                         searchSeed,
                         simulationIndex,
@@ -927,14 +928,15 @@ class InformationSetSearch(
             val selected = singleton ?: run {
                 // The outer opponent remains an independently configurable stochastic environment.
                 val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
-                val candidates = if (world is PolicyAnnotatedSearchWorld) {
-                    initialPolicyExpansion(world, policy, workAudit).candidates
+                val policyExpansion = if (world is PolicyAnnotatedSearchWorld) {
+                    initialPolicyExpansion(world, policy, workAudit)
                 } else {
-                    expansion.candidates
+                    expansion
                 }
-                val decision = policy.selectForRollout(
+                val decision = policy.selectForExpansion(
                     opponentInformation = { world.informationState(actor).also { policyInformationUsed = true } },
-                    candidates = candidates,
+                    candidates = policyExpansion.candidates,
+                    isProfileExhaustive = policyExpansion.isProfileExhaustive,
                     policySeed = ComponentSeeds.derive(
                         searchSeed,
                         simulationIndex,
@@ -1425,9 +1427,10 @@ class InformationSetSearch(
                 } else {
                     expansion
                 }
-                val decision = policy.selectForRollout(
+                val decision = policy.selectForExpansion(
                     opponentInformation = { world.informationState(actor) },
                     candidates = policyExpansion.candidates,
+                    isProfileExhaustive = policyExpansion.isProfileExhaustive,
                     policySeed = ComponentSeeds.derive(
                         refreshSeed,
                         refreshDepth,
@@ -1702,12 +1705,3 @@ class InformationSetSearch(
         }
     }
 }
-
-/** Defer only the full state; supplied menus, selection seeds and attribution remain unchanged. */
-private fun OpponentPolicy.selectForRollout(
-    opponentInformation: () -> PolicyInformationState,
-    candidates: List<SemanticChoice>,
-    policySeed: Long,
-    sampleSeed: Long,
-): OpponentPolicyDecision = selectFromCandidates(candidates, policySeed, sampleSeed)
-    ?: select(opponentInformation(), candidates, policySeed, sampleSeed)

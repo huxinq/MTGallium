@@ -142,6 +142,16 @@ Existing policies still request Production admission by default. Annotation
 consumers must also request admission; mixtures retain the requirements of their
 positive-weight components.
 
+The optional attack kernel changes only root rollout selection on profile-complete,
+pure attack/decline menus with two through eight choices. Rollout selection carries
+the adapter's completeness boolean alongside the supplied menu; menu size alone
+does not certify completeness. Incomplete, larger and other menus use the frozen
+fast casting/semantic continuation. Opponent continuation is separately configured.
+The attack role refuses selection without that witness. Its fixed-kernel study
+uses fresh terminal targets under frozen fast continuations, one development fit,
+and held-out comparison against the incumbent's stochastic action distribution.
+Passing that comparison requires subsequent fresh gameplay; it is not strength evidence.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout

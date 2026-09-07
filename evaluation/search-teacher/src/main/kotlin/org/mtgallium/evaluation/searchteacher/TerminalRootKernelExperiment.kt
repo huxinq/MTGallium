@@ -14,6 +14,7 @@ internal fun requireProductionTerminalTarget(screen: PositionBankScreenPlan) {
     require(screen.mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS && screen.policies.size == 1)
     val policy = screen.policies.single().search
     require(policy.rolloutHeuristicProbability == 1.0 && policy.rootCloningFit == null && policy.rootKernelRolloutFit == null)
+    require(policy.fastRootKernelRolloutFit == null && policy.fastOpponentKernelRolloutFit == null && policy.attackRootKernelRolloutFit == null)
     require(policy.rootRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
     require(policy.opponentRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
 }

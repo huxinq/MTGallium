@@ -355,16 +355,18 @@ internal fun selectPositionScreenRollout(
     val information = world.informationState(actor)
     require(world.actorToAct() == actor && information.actingPlayerId == actor)
     require(!policy.requiresPolicyAnnotations || policy.requiresProductionAdmission)
-    val menu = (if (policy.requiresPolicyAnnotations) world.expandChoicesWithPolicyAnnotations()
+    val expansion = (if (policy.requiresPolicyAnnotations) world.expandChoicesWithPolicyAnnotations()
         else if (policy.requiresProductionAdmission) world.expandChoicesForPolicyAdmission()
-        else world.expandChoices()).candidates
+        else world.expandChoices())
+    val menu = expansion.candidates
     // An admission anchor or a changed semantic payload would make retained all-action targets incomplete.
     val saved = savedMenu.associateBy { it.signature }
     require(saved.size == savedMenu.size && menu.size == savedMenu.size &&
         menu.map { it.signature }.toSet() == saved.keys && menu.all { choice ->
             choice.copy(display = saved.getValue(choice.signature).display) == saved.getValue(choice.signature)
         }) { "Rollout admission differs from the saved semantic menu" }
-    val selected = policy.select(information, menu, seed, ComponentSeeds.derive(seed, "position-screen-rollout-sample-v1"))
+    val selected = policy.selectForExpansion({ information }, menu, expansion.isProfileExhaustive,
+        seed, ComponentSeeds.derive(seed, "position-screen-rollout-sample-v1"))
     require(selected.diagnostic.replacement?.invalidatesEvidence != true) {
         "Rollout selection contains an evidence-invalidating policy replacement"
     }

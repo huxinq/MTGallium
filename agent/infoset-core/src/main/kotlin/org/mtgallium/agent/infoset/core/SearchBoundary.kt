@@ -224,6 +224,16 @@ interface OpponentPolicy {
         sampleSeed: Long,
     ): OpponentPolicyDecision? = null
 
+    /** Rollout selection with the caller's authoritative menu-completeness witness. */
+    fun selectForExpansion(
+        opponentInformation: () -> PolicyInformationState,
+        candidates: List<SemanticChoice>,
+        isProfileExhaustive: Boolean,
+        policySeed: Long,
+        sampleSeed: Long,
+    ): OpponentPolicyDecision = selectFromCandidates(candidates, policySeed, sampleSeed)
+        ?: select(opponentInformation(), candidates, policySeed, sampleSeed)
+
     /** Samples one action and returns the component/replacement record for that exact site. */
     fun select(
         opponentInformation: PolicyInformationState,

@@ -90,8 +90,14 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val fastOpponentKernelRolloutFit: RootKernelFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val attackRootKernelRolloutFit: RootKernelFitReference? = null,
 ) {
     init {
+        require(attackRootKernelRolloutFit == null || fastRootKernelRolloutFit != null) {
+            "Attack root rollout requires the frozen fast casting continuation"
+        }
         require(evaluator == null || tacticalEvaluator == null) { "Only one evaluator may be configured" }
         require(id.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_-]*")))
         require(particles > 0 && simulations > 0 && maxPolicyDecisions > 0)
@@ -126,7 +132,9 @@ internal data class SearchTeacherCalibrationPolicy(
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
-        rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy() ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
+        rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy()?.let { incumbent ->
+            attackRootKernelRolloutFit?.loadAttackRolloutPolicy(incumbent) ?: incumbent
+        } ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
             it.load()
         } ?: configuredRolloutPolicy(
             "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),

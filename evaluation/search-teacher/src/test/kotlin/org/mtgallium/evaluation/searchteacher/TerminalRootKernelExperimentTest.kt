@@ -52,6 +52,10 @@ class TerminalRootKernelExperimentTest {
         val plan = TerminalRootKernelExperimentPlan(dev, validation,
             RootKernelFitReference("/tmp/model", "research-run-v1-sha256:" + "a".repeat(64), "b".repeat(64)))
         assertEquals(plan, evidenceJson.decodeFromString<TerminalRootKernelExperimentPlan>(evidenceJson.encodeToString(plan)))
+        assertFails { requireProductionTerminalTarget(dev.copy(policies = listOf(policy.copy(
+            search = policy.search.copy(fastRootKernelRolloutFit = plan.baselineFit))))) }
+        assertFails { requireProductionTerminalTarget(dev.copy(policies = listOf(policy.copy(
+            search = policy.search.copy(fastOpponentKernelRolloutFit = plan.baselineFit))))) }
         assertFails { plan.copy(development = validation) }
         assertFails { plan.copy(validation = validation.copy(repetitions = 1)) }
         assertFails { plan.copy(validation = validation.copy(searchSeedDomain = "different")) }

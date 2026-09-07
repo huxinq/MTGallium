@@ -10,6 +10,35 @@ import kotlin.test.assertFailsWith
 class InformationSetSearchTest {
 
     @Test
+    fun `bounded and terminal rollouts retain the actual incomplete menu witness`() {
+        class IncompleteWorld(private val wrapped: SearchWorld) : SearchWorld by wrapped {
+            override fun fork(): SearchWorld = IncompleteWorld(wrapped.fork())
+            override fun expandChoices() = wrapped.expandChoices().copy(isExhaustive = false,
+                isProfileExhaustive = false, omissionReasons = setOf(PolicyExpansionOmissionReason.SOURCE_NON_EXHAUSTIVE))
+        }
+        val seen = mutableListOf<Boolean>()
+        val policy = object : OpponentPolicy {
+            override val id = "completeness-probe"
+            override fun distribution(opponentInformation: PolicyInformationState, candidates: List<SemanticChoice>,
+                policySeed: Long): ProbabilityDistribution<SemanticChoice> = error("Witness was dropped")
+            override fun selectForExpansion(opponentInformation: () -> PolicyInformationState,
+                candidates: List<SemanticChoice>, isProfileExhaustive: Boolean, policySeed: Long,
+                sampleSeed: Long): OpponentPolicyDecision {
+                seen += isProfileExhaustive
+                return UniformOpponentPolicy.selectForExpansion(opponentInformation, candidates, isProfileExhaustive, policySeed, sampleSeed)
+            }
+        }
+        val search = coreSearch(InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 4,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1)),
+            UniformOpponentPolicy, rolloutPolicy = policy, rolloutOpponentPolicy = policy)
+        search.search("p0", batch(listOf(IncompleteWorld(FakeWorld(terminalAtDepth = 5)))), 71L)
+        assertTrue(seen.isNotEmpty() && seen.none { it })
+        seen.clear()
+        search.continueFirstUnvisitedEdgeToTerminal(IncompleteWorld(FakeWorld(terminalAtDepth = 3)), "p0", 72L, 0)
+        assertEquals(listOf(false, false, false), seen)
+    }
+
+    @Test
     fun `root guidance accepts complete declared profiles despite intentional legal action omissions`() {
         val world = ProfilePrunedWorld(FakeWorld())
         val expansion = world.expandChoices()
