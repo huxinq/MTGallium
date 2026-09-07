@@ -98,6 +98,16 @@ current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout
 settlement have different meanings.
 
+Within one search, the exact per-particle semantic-prefix transition cache also
+serves bounded rollouts. It reuses world snapshots and their derived projections,
+while recomputing rollout distributions, sampling seeds and policy diagnostics.
+Rollout traversal itself does not record trace points or frontiers. A cached
+snapshot becomes eligible for retained evidence only after tree traversal
+reaches the same exact prefix.
+At most 4,096 new rollout snapshots are retained per search; after that, a new
+prefix proceeds uncached. Existing tree cache behavior and genuine decision
+boundaries remain unchanged.
+
 Terminal root-continuation evidence is separate from adaptive search estimates:
 it forces an admitted root action in a support-checked hypothesis and follows
 the declared rollout policies to terminal payoff, without leaf evaluation.

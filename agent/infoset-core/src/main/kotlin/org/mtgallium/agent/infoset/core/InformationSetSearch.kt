@@ -405,6 +405,9 @@ class InformationSetSearch(
                 transitionCacheMisses = workAudit.transitionCacheMisses,
                 transitionCacheSnapshots = workAudit.transitionCacheSnapshots,
                 transitionCacheDerivedSnapshots = workAudit.transitionCacheDerivedSnapshots,
+                rolloutTransitionCacheHits = workAudit.rolloutTransitionCacheHits,
+                rolloutTransitionCacheSnapshots = workAudit.rolloutTransitionCacheSnapshots,
+                rolloutTransitionCacheBypasses = workAudit.rolloutTransitionCacheBypasses,
                 policyAnnotationCacheHits = workAudit.policyAnnotationCacheHits,
                 policyAnnotationCacheMisses = workAudit.policyAnnotationCacheMisses,
                 opponentDistributionCacheHits = workAudit.opponentDistributionCacheHits,
@@ -478,6 +481,8 @@ class InformationSetSearch(
                 quiescenceAudit,
                 workAudit,
                 rolloutTargetTurn,
+                transitionCache,
+                transitionNode,
             )
             recorder?.finish(TraceCutoff.HORIZON, world, depth, transitionNode?.snapshot)
             return value
@@ -494,6 +499,7 @@ class InformationSetSearch(
                 leafValue(
                     world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
                     rolloutAudit, quiescenceAudit, workAudit, rolloutTargetTurn,
+                    transitionCache, transitionNode,
                 )
             }
         }
@@ -507,6 +513,7 @@ class InformationSetSearch(
                     leafValue(
                         world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
                         rolloutAudit, quiescenceAudit, workAudit, rolloutTargetTurn,
+                        transitionCache, transitionNode,
                     )
                 }
             }
@@ -680,6 +687,8 @@ class InformationSetSearch(
                 quiescenceAudit,
                 workAudit,
                 rolloutTargetTurn,
+                transitionCache,
+                advanced.node,
             )
         } else {
             simulate(
@@ -729,6 +738,8 @@ class InformationSetSearch(
         quiescenceAudit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
         rolloutTargetTurn: Int?,
+        transitionCache: SimulationTransitionCache? = null,
+        transitionNode: SimulationTransitionNode? = null,
     ): SearchSettlement = when (config.leaf.stateSource) {
         LeafStateSource.CURRENT_INFORMATION_STATE,
         LeafStateSource.CURRENT_SAMPLED_WORLD -> simulate(
@@ -760,6 +771,8 @@ class InformationSetSearch(
             quiescenceAudit,
             workAudit,
             rolloutTargetTurn,
+            transitionCache,
+            transitionNode,
         )
     }
 
@@ -871,10 +884,13 @@ class InformationSetSearch(
         quiescenceAudit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
         rolloutTargetTurn: Int? = null,
+        transitionCache: SimulationTransitionCache? = null,
+        startingTransitionNode: SimulationTransitionNode? = null,
     ): SearchSettlement {
         require((rolloutTargetTurn != null) == (config.rolloutTurnHorizon != null))
         workAudit.forks++
-        val world = startingWorld.fork()
+        var world = startingWorld.fork()
+        var transitionNode = startingTransitionNode
         var depth = startingDepth
         var rolloutDecisions = 0
         while (rolloutTargetTurn != null || depth < config.maxPolicyDecisions) {
@@ -923,12 +939,15 @@ class InformationSetSearch(
                 audit.record(actor == rootPlayer, decision.diagnostic)
                 decision.choice
             }
-            workAudit.steps++
-            val result = world.step(selected)
-            if (!result.accepted) {
-                workAudit.rejectedTransitions++
-                throw RejectedSearchTransitionException(selected.signature, result.diagnostic)
-            }
+            // Cache exact world prefixes, never the rollout policy's distribution or sampled choice.
+            // The same node may later enter the tree with a different opponent policy or wider menu.
+            transitionCache?.retainDerived(
+                transitionNode, world,
+                DERIVED_BASE or (if (singleton == null) DERIVED_POLICY_EXPANSION or DERIVED_INFORMATION else 0),
+            )
+            val advanced = advanceCached(world, selected, transitionCache, transitionNode, workAudit, rollout = true)
+            world = advanced.world
+            transitionNode = advanced.node
             if (singleton != null) workAudit.compressedPolicySingletonPasses++
             depth++
             rolloutDecisions++
@@ -1005,6 +1024,9 @@ class InformationSetSearch(
         var transitionCacheMisses = 0
         var transitionCacheSnapshots = 0
         var transitionCacheDerivedSnapshots = 0
+        var rolloutTransitionCacheHits = 0
+        var rolloutTransitionCacheSnapshots = 0
+        var rolloutTransitionCacheBypasses = 0
         var policyAnnotationCacheHits = 0
         var policyAnnotationCacheMisses = 0
         var opponentDistributionCacheHits = 0
@@ -1027,6 +1049,7 @@ class InformationSetSearch(
     /** Exact per-root-particle prefix cache; keys are semantic paths, never lossy state hashes. */
     private class SimulationTransitionCache(private val audit: SearchWorkAudit) {
         private val roots = mutableMapOf<Int, SimulationTransitionNode>()
+        private var rolloutSnapshots = 0
 
         fun root(particleIndex: Int): SimulationTransitionNode =
             roots.getOrPut(particleIndex, ::SimulationTransitionNode)
@@ -1084,9 +1107,11 @@ class InformationSetSearch(
             world: SearchWorld,
             choice: SemanticChoice,
             node: SimulationTransitionNode,
+            rollout: Boolean,
         ): CachedAdvance {
             node.children[choice.signature]?.let { cached ->
                 audit.transitionCacheHits++
+                if (rollout) audit.rolloutTransitionCacheHits++
                 audit.forks++
                 return CachedAdvance(requireNotNull(cached.snapshot).fork(), cached)
             }
@@ -1096,6 +1121,16 @@ class InformationSetSearch(
             if (!result.accepted) {
                 audit.rejectedTransitions++
                 throw RejectedSearchTransitionException(choice.signature, result.diagnostic)
+            }
+            // Rollout branching can retain far more snapshots than tree traversal. A full cache
+            // falls back to ordinary stepping; existing exact-prefix hits remain usable.
+            if (rollout && rolloutSnapshots >= MAX_ROLLOUT_CACHE_SNAPSHOTS) {
+                audit.rolloutTransitionCacheBypasses++
+                return CachedAdvance(world, null)
+            }
+            if (rollout) {
+                rolloutSnapshots++
+                audit.rolloutTransitionCacheSnapshots++
             }
             audit.forks++
             audit.transitionCacheSnapshots++
@@ -1123,8 +1158,9 @@ class InformationSetSearch(
         cache: SimulationTransitionCache?,
         node: SimulationTransitionNode?,
         audit: SearchWorkAudit,
+        rollout: Boolean = false,
     ): CachedAdvance {
-        if (cache != null && node != null) return cache.advance(world, choice, node)
+        if (cache != null && node != null) return cache.advance(world, choice, node, rollout)
         audit.steps++
         val result = world.step(choice)
         if (!result.accepted) {
@@ -1565,6 +1601,7 @@ class InformationSetSearch(
         private const val DERIVED_BASE = 1
         private const val DERIVED_POLICY_EXPANSION = 2
         private const val DERIVED_INFORMATION = 4
+        private const val MAX_ROLLOUT_CACHE_SNAPSHOTS = 4096
 
         private fun normalize(weights: List<Double>): List<Double> {
             require(weights.all { it.isFinite() && it >= 0.0 })

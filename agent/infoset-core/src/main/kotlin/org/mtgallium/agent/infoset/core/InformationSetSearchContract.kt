@@ -276,6 +276,14 @@ data class InformationSetSearchDiagnostics(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
     val rootSelectionGuidance: RootSelectionGuidance? = null,
     val wallClockBudgetMillis: Long? = null,
+    /** Exact within-search rollout-prefix hits; policy choices are still sampled afresh. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheHits: Int = 0,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheSnapshots: Int = 0,
+    /** Prefixes whose new snapshot was refused by the runtime memory cap; execution continues. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheBypasses: Int = 0,
 ) {
     val evaluatorId: String get() = leaf.evaluator.evaluatorId
 }

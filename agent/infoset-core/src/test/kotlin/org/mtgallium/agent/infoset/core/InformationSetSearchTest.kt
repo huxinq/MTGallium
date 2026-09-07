@@ -512,6 +512,115 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `bounded rollout prefix caching preserves seed-sensitive choices and settlement accounting`() {
+        fun run(cache: Boolean): Pair<InformationSetSearchResult, List<String>> {
+            val decisions = mutableListOf<String>()
+            fun policy(name: String) = object : OpponentPolicy {
+                override val id = name
+                override val distributionIsSeedInvariant = false
+                override fun distribution(opponentInformation: PolicyInformationState,
+                    candidates: List<SemanticChoice>, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
+                    ProbabilityDistribution.normalized(candidates.mapIndexed { index, choice ->
+                        ProbabilityMass(choice, if ((policySeed and 1L).toInt() == index) 3.0 else 1.0)
+                    })
+                override fun decisionDiagnostic(opponentInformation: PolicyInformationState,
+                    candidates: List<SemanticChoice>, chosen: SemanticChoice, policySeed: Long,
+                    attributionSeed: Long): OpponentPolicyDecisionDiagnostic {
+                    decisions += "$id:${opponentInformation.informationStateDigest}:$policySeed:$attributionSeed:${chosen.signature}"
+                    return OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = id)
+                }
+            }
+            val result = coreSearch(InformationSetSearchConfig(simulations = 96, maxPolicyDecisions = 16,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+                cacheSimulationTransitions = cache), UniformOpponentPolicy,
+                rolloutPolicy = policy("root-seeded"), rolloutOpponentPolicy = policy("opponent-seeded"))
+                .search("p0", batch(List(2) { FakeWorld() }), searchSeed = 7571L)
+            return result to decisions
+        }
+        val (plain, plainDecisions) = run(false)
+        val (cached, cachedDecisions) = run(true)
+        assertEquals(plainDecisions, cachedDecisions)
+        assertEquals(plain.chosen, cached.chosen)
+        assertEquals(plain.rootValue, cached.rootValue)
+        assertEquals(plain.candidates, cached.candidates)
+        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        assertEquals(plain.diagnostics.rootRolloutPolicyDecisions, cached.diagnostics.rootRolloutPolicyDecisions)
+        assertEquals(plain.diagnostics.opponentRolloutPolicyDecisions, cached.diagnostics.opponentRolloutPolicyDecisions)
+        assertTrue(cached.diagnostics.rolloutTransitionCacheHits > 0)
+        assertTrue(cached.diagnostics.searchWorldSteps < plain.diagnostics.searchWorldSteps)
+        assertEquals(0, plain.diagnostics.rolloutTransitionCacheSnapshots)
+    }
+
+    @Test
+    fun `bounded rollout cache caps snapshots and continues uncached without changing the result`() {
+        fun run(cache: Boolean) = coreSearch(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 128,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+            cacheSimulationTransitions = cache), UniformOpponentPolicy)
+            .search("p0", batch(listOf(FakeWorld())), searchSeed = 7572L)
+        val plain = run(false)
+        val cached = run(true)
+        assertEquals(plain.chosen, cached.chosen)
+        assertEquals(plain.rootValue, cached.rootValue)
+        assertEquals(plain.candidates, cached.candidates)
+        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        assertEquals(4096, cached.diagnostics.rolloutTransitionCacheSnapshots)
+        assertTrue(cached.diagnostics.rolloutTransitionCacheBypasses > 0)
+    }
+
+    @Test
+    fun `rollout prefixes remain separate across scheduled worlds and rejected transitions still fail`() {
+        fun search(cache: Boolean) = coreSearch(InformationSetSearchConfig(simulations = 16, maxPolicyDecisions = 8,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+            cacheSimulationTransitions = cache), UniformOpponentPolicy)
+        val schedule = SimulationWorldSchedule(List(16) { i ->
+            FakeWorld(valueForA = i / 16.0, valueForB = -i / 16.0, terminalAtDepth = if (i % 2 == 0) 4 else null)
+        })
+        val plain = search(false).search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
+        val cached = search(true).search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
+        assertEquals(plain.chosen, cached.chosen)
+        assertEquals(plain.rootValue, cached.rootValue)
+        assertEquals(plain.candidates, cached.candidates)
+        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        assertEquals(0, cached.diagnostics.rolloutTransitionCacheHits)
+        for (enabled in listOf(false, true)) {
+            assertFailsWith<RejectedSearchTransitionException> {
+                search(enabled).search("p0", batch(listOf(FakeWorld(rejectAtDepth = 3))), 7573L)
+            }
+        }
+    }
+
+    @Test
+    fun `rollout cache prefixes can enter widened trees without changing retained trace frontiers`() {
+        fun run(cache: Boolean): List<InformationSetSearchResult> {
+            val session = coreSession(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 10,
+                initialExpansionLimit = 2, wideningThresholds = listOf(2, 4), wideningLimits = listOf(3, 4),
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1),
+                cacheSimulationTransitions = cache), UniformOpponentPolicy,
+                reuseConfig = InformationSetSearchReuseConfig(enabled = true))
+            val roots = List(2) { FakeWorld(candidateCount = 4, hiddenVariant = "same") }
+            val first = session.search("p0", batch(roots), 7574L, beliefContinuityEpoch = 0L)
+            val promoted = roots.map { original -> (original.fork() as FakeWorld).also { world ->
+                repeat(2) { assertTrue(world.step(world.expandChoices().candidates.first()).accepted) }
+            } }
+            return listOf(first, session.search("p0", batch(promoted), 7575L, beliefContinuityEpoch = 0L))
+        }
+        val plain = run(false)
+        val cached = run(true)
+        assertTrue(cached.first().diagnostics.wideningEvents > 0)
+        assertTrue(cached.first().diagnostics.rolloutTransitionCacheHits > 0)
+        plain.zip(cached).forEach { (a, b) ->
+            assertEquals(a.chosen, b.chosen)
+            assertEquals(a.rootValue, b.rootValue)
+            assertEquals(a.candidates, b.candidates)
+            assertEquals(a.candidateSettlementCounts, b.candidateSettlementCounts)
+            assertEquals(a.diagnostics.retainedTraceCount, b.diagnostics.retainedTraceCount)
+            assertEquals(a.diagnostics.retainedSnapshotCount, b.diagnostics.retainedSnapshotCount)
+            assertEquals(a.diagnostics.reusedSimulations, b.diagnostics.reusedSimulations)
+            assertEquals(a.diagnostics.refreshedSimulations, b.diagnostics.refreshedSimulations)
+        }
+    }
+
+    @Test
     fun `exact semantic prefix cache preserves the search result and removes repeated world steps`() {
         fun run(cache: Boolean) = coreSearch(
             InformationSetSearchConfig(
