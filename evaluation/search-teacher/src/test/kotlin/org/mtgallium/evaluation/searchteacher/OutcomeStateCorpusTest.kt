@@ -748,8 +748,8 @@ class OutcomeStateCorpusTest {
         assertEquals(null, equivalence.safeInspectionBundleDifference(fixtureInspectionBundle()))
         val audit = equivalence.completedAudit()
         assertEquals(0, audit.syntheticAbilityMappingCount)
-        assertEquals(1, audit.activatedResolutionKeyMappings.size)
-        val episode = audit.activatedResolutionKeyMappings.single()
+        assertEquals(0, audit.activatedResolutionKeyMappings.size)
+        val episode = audit.activatedResolutionScopes.single().members.single()
         assertEquals(0, episode.creationRawOrdinal)
         assertEquals(1, episode.retirementRawOrdinal)
         assertTrue(episode.normalizedStatePath.endsWith("ActivatedAbilityOnStackComponent/objectReferences/resolutionKey"))
@@ -761,6 +761,164 @@ class OutcomeStateCorpusTest {
         assertFailsWith<IllegalArgumentException> {
             audit.copy(algorithm = OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE)
         }
+    }
+
+    @Test
+    fun `repeated activation shares one key scope with independently retiring members`() {
+        val creation = syntheticRepeatedActivationTransition()
+        val equivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
+        assertEquals(null, creation.difference(equivalence, 0))
+        val firstRemoved = creation.copy(
+            action = PassPriority(SYNTHETIC_CONTROLLER_ID),
+            expectedEvents = emptyList(), actualEvents = emptyList(),
+            expectedBefore = creation.expectedAfter, actualBefore = creation.actualAfter,
+            expectedAfter = creation.expectedAfter.withoutSyntheticStackAbility(),
+            actualAfter = creation.actualAfter.withoutSyntheticStackAbility(),
+        )
+        assertEquals(null, firstRemoved.difference(equivalence, 1))
+        val lastRemoved = firstRemoved.copy(
+            expectedBefore = firstRemoved.expectedAfter, actualBefore = firstRemoved.actualAfter,
+            expectedAfter = firstRemoved.expectedAfter.withoutRepeatedStackAbility(),
+            actualAfter = firstRemoved.actualAfter.withoutRepeatedStackAbility(),
+        )
+        assertEquals(null, lastRemoved.difference(equivalence, 2))
+        assertEquals(null, equivalence.finalDifference(lastRemoved.expectedAfter, lastRemoved.actualAfter, 3))
+        assertEquals(null, equivalence.safeInspectionBundleDifference(fixtureInspectionBundle()))
+        val audit = equivalence.completedAudit()
+        audit.requireForRawTransitionCount(3)
+        val scope = audit.activatedResolutionScopes.single()
+        assertEquals(0, scope.creationRawOrdinal)
+        assertEquals(2, scope.retirementRawOrdinal)
+        assertEquals(listOf(SYNTHETIC_STACK_ID.value, SYNTHETIC_SECOND_STACK_ID.value),
+            scope.members.map { it.stackEntityId })
+        assertEquals(listOf(1, 2), scope.members.map { it.retirementRawOrdinal })
+        assertEquals(emptyList(), audit.activatedResolutionKeyMappings)
+        assertEquals(0, audit.syntheticAbilityMappingCount)
+        val encoded = evidenceJson.encodeToString(audit)
+        assertFalse(encoded.contains(SYNTHETIC_EXPECTED_ABILITY_ID))
+        assertFalse(encoded.contains(SYNTHETIC_ACTUAL_ABILITY_ID))
+        listOf(OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE,
+            OUTCOME_STATE_CORPUS_SINGLE_ACTIVATION_TRANSITION_STATE_EQUIVALENCE).forEach { oldAlgorithm ->
+            assertFailsWith<IllegalArgumentException> { audit.copy(algorithm = oldAlgorithm) }
+        }
+        assertFailsWith<IllegalArgumentException> { scope.copy(retirementRawOrdinal = 1) }
+        assertFailsWith<IllegalArgumentException> { scope.copy(members = scope.members + scope.members.first()) }
+        assertFailsWith<IllegalArgumentException> { audit.copy(activatedResolutionScopes = listOf(scope, scope)) }
+        assertFailsWith<IllegalArgumentException> { audit.requireForRawTransitionCount(2) }
+    }
+
+    @Test
+    fun `repeated activation refuses mismatched grouping counts identities and member metadata`() {
+        val creation = syntheticRepeatedActivationTransition()
+        fun refused(candidate: SyntheticDelayedAbilityTransition) {
+            assertTrue(candidate.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0) != null)
+        }
+        listOf(0, 1, 3).forEach { count ->
+            refused(creation.copy(action = (creation.action as ActivateAbility).copy(repeatCount = count)))
+        }
+        refused(creation.copy(expectedEvents = listOf(creation.expectedEvents.first(), creation.expectedEvents.first()),
+            actualEvents = listOf(creation.actualEvents.first(), creation.actualEvents.first())))
+        refused(creation.copy(actualAfter = creation.actualAfter.changeRepeatedActivation {
+            copy(objectReferences = objectReferences.copy(resolutionKey = "different-actual-scope"))
+        }))
+        refused(creation.copy(expectedAfter = creation.expectedAfter.changeRepeatedActivation {
+            copy(objectReferences = objectReferences.copy(resolutionKey = "different-expected-scope"))
+        }, actualAfter = creation.actualAfter.changeRepeatedActivation {
+            copy(objectReferences = objectReferences.copy(resolutionKey = "different-actual-scope"))
+        }))
+        refused(creation.copy(actualAfter = creation.actualAfter.changeRepeatedActivation {
+            copy(sourceBattlefieldTimestamp = 38)
+        }))
+        refused(creation.copy(actualAfter = creation.actualAfter.changeRepeatedActivation { copy(effect = GainLifeEffect(3)) }))
+        refused(creation.copy(expectedBefore = creation.expectedBefore.copy(entities = creation.expectedBefore.entities +
+            (SYNTHETIC_SECOND_STACK_ID to ComponentContainer.of(SYNTHETIC_CARD))),
+            actualBefore = creation.actualBefore.copy(entities = creation.actualBefore.entities +
+                (SYNTHETIC_SECOND_STACK_ID to ComponentContainer.of(SYNTHETIC_CARD)))))
+        refused(creation.copy(actualAfter = creation.actualAfter.copy(stack = creation.actualAfter.stack + SYNTHETIC_SECOND_STACK_ID)))
+        fun GameState.unlistedMember() = copy(entities = entities +
+            (EntityId.of("unlisted-member") to requireNotNull(getEntity(SYNTHETIC_SECOND_STACK_ID))))
+        refused(creation.copy(expectedAfter = creation.expectedAfter.unlistedMember(),
+            actualAfter = creation.actualAfter.unlistedMember()))
+    }
+
+    @Test
+    fun `activation scope refuses partial retirement reuse continuation leaks and scope collisions`() {
+        val creation = syntheticRepeatedActivationTransition()
+        fun started() = RecordedReplayStateEquivalence(historicalProjectionAuthority()).also {
+            assertEquals(null, creation.difference(it, 0))
+        }
+        val firstRemoved = creation.copy(
+            action = PassPriority(SYNTHETIC_CONTROLLER_ID), expectedEvents = emptyList(), actualEvents = emptyList(),
+            expectedBefore = creation.expectedAfter, actualBefore = creation.actualAfter,
+            expectedAfter = creation.expectedAfter.withoutSyntheticStackAbility(),
+            actualAfter = creation.actualAfter.withoutSyntheticStackAbility(),
+        )
+        assertTrue(started().finalDifference(creation.expectedAfter, creation.actualAfter, 1) != null)
+        assertTrue(firstRemoved.copy(actualAfter = creation.actualAfter).difference(started(), 1) != null)
+        val partial = started()
+        assertEquals(null, firstRemoved.difference(partial, 1))
+        assertTrue(partial.finalDifference(firstRemoved.expectedAfter, firstRemoved.actualAfter, 2) != null)
+        val retired = started()
+        assertEquals(null, firstRemoved.difference(retired, 1))
+        assertTrue(firstRemoved.copy(expectedBefore = firstRemoved.expectedAfter, actualBefore = firstRemoved.actualAfter,
+            expectedAfter = creation.expectedAfter, actualAfter = creation.actualAfter).difference(retired, 2) != null)
+        assertTrue(firstRemoved.copy(
+            expectedAfter = creation.expectedAfter.withFixtureQuestion(syntheticPendingDecision("ordinary prompt")),
+            actualAfter = creation.actualAfter.withFixtureQuestion(syntheticPendingDecision("ordinary prompt")),
+        ).difference(started(), 1) != null)
+        val newIds = listOf(EntityId.of("new-scope-first"), EntityId.of("new-scope-second"))
+        fun GameState.collidingScope(): GameState = copy(entities = entities +
+            (newIds[0] to requireNotNull(getEntity(SYNTHETIC_STACK_ID))) +
+            (newIds[1] to requireNotNull(getEntity(SYNTHETIC_SECOND_STACK_ID))), stack = stack + newIds)
+        val newEvents = creation.expectedEvents.mapIndexed { i, event ->
+            (event as AbilityActivatedEvent).copy(abilityEntityId = newIds[i])
+        }
+        assertTrue(creation.copy(expectedBefore = creation.expectedAfter, actualBefore = creation.actualAfter,
+            expectedAfter = creation.expectedAfter.collidingScope(), actualAfter = creation.actualAfter.collidingScope(),
+            expectedEvents = newEvents, actualEvents = newEvents,
+        ).difference(started(), 1) != null)
+        val leakage = started()
+        assertEquals(null, firstRemoved.difference(leakage, 1))
+        val lastRemoved = firstRemoved.copy(
+            expectedBefore = firstRemoved.expectedAfter, actualBefore = firstRemoved.actualAfter,
+            expectedAfter = firstRemoved.expectedAfter.withoutRepeatedStackAbility(),
+            actualAfter = firstRemoved.actualAfter.withoutRepeatedStackAbility(),
+        )
+        assertEquals(null, lastRemoved.difference(leakage, 2))
+        assertEquals(null, leakage.finalDifference(lastRemoved.expectedAfter, lastRemoved.actualAfter, 3))
+        assertTrue(leakage.safeInspectionBundleDifference(
+            fixtureInspectionBundle().copy(policyVersion = SYNTHETIC_ACTUAL_ABILITY_ID)) != null)
+    }
+
+    private fun GameState.changeRepeatedActivation(
+        change: ActivatedAbilityOnStackComponent.() -> ActivatedAbilityOnStackComponent,
+    ): GameState {
+        val container = requireNotNull(getEntity(SYNTHETIC_SECOND_STACK_ID))
+        return copy(entities = entities + (SYNTHETIC_SECOND_STACK_ID to
+            container.with(requireNotNull(container.get<ActivatedAbilityOnStackComponent>()).change())))
+    }
+
+    private fun GameState.withoutRepeatedStackAbility(): GameState = copy(
+        entities = entities - SYNTHETIC_SECOND_STACK_ID,
+        stack = stack - SYNTHETIC_SECOND_STACK_ID,
+    )
+
+    private fun syntheticRepeatedActivationTransition(): SyntheticDelayedAbilityTransition {
+        val base = syntheticActivatedTransition()
+        fun GameState.repeated(): GameState {
+            val container = requireNotNull(getEntity(SYNTHETIC_STACK_ID))
+            val component = requireNotNull(container.get<ActivatedAbilityOnStackComponent>())
+            // The engine intentionally records different metadata for the first and repeat.
+            return copy(entities = entities +
+                (SYNTHETIC_STACK_ID to container.with(component.copy(sourceBattlefieldTimestamp = 38))) +
+                (SYNTHETIC_SECOND_STACK_ID to container),
+                stack = listOf(SYNTHETIC_STACK_ID, SYNTHETIC_SECOND_STACK_ID))
+        }
+        val secondEvent = (base.expectedEvents.single() as AbilityActivatedEvent)
+            .copy(abilityEntityId = SYNTHETIC_SECOND_STACK_ID)
+        return base.copy(action = (base.action as ActivateAbility).copy(repeatCount = 2),
+            expectedEvents = base.expectedEvents + secondEvent, actualEvents = base.actualEvents + secondEvent,
+            expectedAfter = base.expectedAfter.repeated(), actualAfter = base.actualAfter.repeated())
     }
 
     @Test
@@ -918,7 +1076,20 @@ class OutcomeStateCorpusTest {
         assertEquals(OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE, decoded.algorithm)
         assertEquals(emptyList(), decoded.activatedResolutionKeyMappings)
         decoded.requireForRawTransitionCount(0)
-        assertEquals(evidenceJson.parseToJsonElement(literal), evidenceJson.parseToJsonElement(evidenceJson.encodeToString(decoded)))
+        assertEquals(evidenceJson.encodeToString(evidenceJson.parseToJsonElement(literal)), evidenceJson.encodeToString(decoded))
+    }
+
+    @Test
+    fun `v3 single activation audit retains its literal fields and refuses a scope claim`() {
+        val literal = """{"schemaVersion":2,"algorithm":"argentum-boundary-correlated-delayed-ability-activated-resolution-key-and-time-lord-lki-v3","eventEquivalenceAlgorithm":"argentum-boundary-correlated-decision-routing-and-fixed-3eda-time-lord-type-line-events-v2","syntheticAbilityMappings":[],"syntheticAbilityMappingCount":0,"activatedResolutionKeyMappings":[{"creationRawOrdinal":0,"retirementRawOrdinal":1,"stackEntityId":"old-stack","normalizedStatePath":"/entities/old-stack/com.wingedsheep.engine.state.components.stack.ActivatedAbilityOnStackComponent/objectReferences/resolutionKey"}],"legacyTimeLordTypeLineNormalizations":[],"legacyTimeLordTypeLineNormalizationCount":0,"activeLegacyTimeLordTypeLineMappingsAtFinal":0,"activeMappingsAtFinal":0,"forbiddenOccurrenceCount":0}"""
+        val decoded = evidenceJson.decodeFromString<OutcomeStateReplayCompatibilityAudit>(literal)
+        assertEquals(OUTCOME_STATE_CORPUS_SINGLE_ACTIVATION_TRANSITION_STATE_EQUIVALENCE, decoded.algorithm)
+        assertEquals(1, decoded.activatedResolutionKeyMappings.size)
+        assertEquals(emptyList(), decoded.activatedResolutionScopes)
+        decoded.requireForRawTransitionCount(2)
+        assertEquals(evidenceJson.encodeToString(evidenceJson.parseToJsonElement(literal)), evidenceJson.encodeToString(decoded))
+        val scope = OutcomeStateActivatedResolutionScopeAudit(0, 1, decoded.activatedResolutionKeyMappings)
+        assertFailsWith<IllegalArgumentException> { decoded.copy(activatedResolutionScopes = listOf(scope)) }
     }
 
     private fun GameState.changeActivation(

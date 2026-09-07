@@ -35,12 +35,15 @@ it.
 Replay reconstruction compares captured object references as part of the full
 state. A uniquely consumed END-step delayed trigger must carry the same references
 onto its new stack component. A fresh activated-ability resolution key may be
-matched only at an equal accepted activation with one corresponding non-mana
-stack event and otherwise equal components. Its spelling must remain confined to
-that component, with no continuation frames, action or event occurrences, or
-later reuse. New audits record these resolution-key episodes separately under
-the v3 correspondence algorithm; historical v2 audits retain their original
-algorithm and bytes. Unsupported correspondence remains a reconstruction refusal.
+matched only at an equal accepted activation whose ordered non-mana stack events
+match its repeat count. The corresponding fresh stack entries must share one
+reference scope on each side, with every other component field equal. Its spelling
+must remain confined to the live members of that scope, with no continuation
+frames, action or event occurrences, or reuse after a member retires. The scope
+ends only when every member has retired. New audits record the scope and its
+ordered members under the v4 correspondence algorithm; historical v2 and v3 audits
+retain their original algorithms and bytes. Unsupported correspondence remains a
+reconstruction refusal.
 
 ### Source and evidence authority
 

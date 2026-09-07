@@ -102,11 +102,14 @@ internal const val OUTCOME_STATE_CORPUS_EVENT_EQUIVALENCE =
     "argentum-boundary-correlated-decision-routing-and-fixed-3eda-time-lord-type-line-events-v2"
 internal const val OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE =
     "argentum-fixed-historical-boundary-correlated-step-delayed-ability-and-time-lord-lki-v2"
-internal const val OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE =
+internal const val OUTCOME_STATE_CORPUS_SINGLE_ACTIVATION_TRANSITION_STATE_EQUIVALENCE =
     "argentum-boundary-correlated-delayed-ability-activated-resolution-key-and-time-lord-lki-v3"
+internal const val OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE =
+    "argentum-boundary-correlated-delayed-ability-activated-resolution-scope-and-time-lord-lki-v4"
 
 private fun supportedReplayStateEquivalence(algorithm: String): Boolean = algorithm in setOf(
     OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE,
+    OUTCOME_STATE_CORPUS_SINGLE_ACTIVATION_TRANSITION_STATE_EQUIVALENCE,
     OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE,
 )
 
@@ -387,6 +390,21 @@ internal data class OutcomeStateActivatedResolutionKeyMappingAudit(
     }
 }
 
+/** One captured activation scope; members retain creation-event order and their own retirement. */
+@Serializable
+internal data class OutcomeStateActivatedResolutionScopeAudit(
+    val creationRawOrdinal: Int,
+    val retirementRawOrdinal: Int,
+    val members: List<OutcomeStateActivatedResolutionKeyMappingAudit>,
+) {
+    init {
+        require(members.isNotEmpty())
+        require(members.map { it.stackEntityId }.distinct().size == members.size)
+        require(members.all { it.creationRawOrdinal == creationRawOrdinal })
+        require(retirementRawOrdinal == members.maxOf { it.retirementRawOrdinal })
+    }
+}
+
 @Serializable
 internal data class OutcomeStateLegacyTypeLineNormalizationAudit(
     val rawOrdinal: Int,
@@ -424,6 +442,8 @@ internal data class OutcomeStateReplayCompatibilityAudit(
     val syntheticAbilityMappingCount: Int = syntheticAbilityMappings.size,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val activatedResolutionKeyMappings: List<OutcomeStateActivatedResolutionKeyMappingAudit> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val activatedResolutionScopes: List<OutcomeStateActivatedResolutionScopeAudit> = emptyList(),
     val legacyTimeLordTypeLineNormalizations: List<OutcomeStateLegacyTypeLineNormalizationAudit> =
         emptyList(),
     val legacyTimeLordTypeLineNormalizationCount: Int =
@@ -443,6 +463,15 @@ internal data class OutcomeStateReplayCompatibilityAudit(
         require(eventEquivalenceAlgorithm == OUTCOME_STATE_CORPUS_EVENT_EQUIVALENCE)
         require(algorithm != OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE ||
             activatedResolutionKeyMappings.isEmpty())
+        require(algorithm == OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE || activatedResolutionScopes.isEmpty())
+        require(activatedResolutionScopes == activatedResolutionScopes.sortedWith(
+            compareBy<OutcomeStateActivatedResolutionScopeAudit> { it.creationRawOrdinal }
+                .thenBy { it.members.first().stackEntityId }
+        ))
+        val activatedMembers = activatedResolutionKeyMappings + activatedResolutionScopes.flatMap { it.members }
+        require(activatedMembers.map { it.stackEntityId }.distinct().size == activatedMembers.size)
+        require((activatedMembers.map { it.stackEntityId } + syntheticAbilityMappings.map { it.stackEntityId })
+            .distinct().size == activatedMembers.size + syntheticAbilityMappings.size)
         require(activatedResolutionKeyMappings.map { it.stackEntityId }.distinct().size ==
             activatedResolutionKeyMappings.size)
         require(activatedResolutionKeyMappings == activatedResolutionKeyMappings.sortedWith(
@@ -495,7 +524,7 @@ internal data class OutcomeStateReplayCompatibilityAudit(
         require(syntheticAbilityMappings.all {
             it.creationRawOrdinal < rawTransitionCount && it.retirementRawOrdinal < rawTransitionCount
         })
-        require(activatedResolutionKeyMappings.all {
+        require((activatedResolutionKeyMappings + activatedResolutionScopes.flatMap { it.members }).all {
             it.creationRawOrdinal < rawTransitionCount && it.retirementRawOrdinal < rawTransitionCount
         })
         require(legacyTimeLordTypeLineNormalizations.all { it.rawOrdinal < rawTransitionCount })
@@ -590,6 +619,12 @@ internal data class OutcomeStateCorpusReplayCompatibilityAudit(
     val gamesWithActivatedResolutionKeyMappings: Int = 0,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val activatedResolutionKeyMappingCount: Int = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val gamesWithActivatedResolutionScopes: Int = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val activatedResolutionScopeCount: Int = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val activatedResolutionScopeMemberCount: Int = 0,
     val gamesWithLegacyTimeLordTypeLineNormalizations: Int,
     val legacyTimeLordTypeLineNormalizationCount: Int,
     val activeLegacyTimeLordTypeLineMappingsAtFinal: Int,
@@ -604,6 +639,13 @@ internal data class OutcomeStateCorpusReplayCompatibilityAudit(
         )
         require(transitionStateEquivalenceAlgorithm != OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE ||
             activatedResolutionKeyMappingCount == 0)
+        require(transitionStateEquivalenceAlgorithm == OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE ||
+            activatedResolutionScopeCount == 0)
+        require(gamesWithActivatedResolutionScopes in 0..gameCount)
+        require(activatedResolutionScopeCount >= gamesWithActivatedResolutionScopes)
+        require(activatedResolutionScopeMemberCount >= activatedResolutionScopeCount)
+        require((activatedResolutionScopeCount == 0) == (gamesWithActivatedResolutionScopes == 0))
+        require((activatedResolutionScopeCount == 0) == (activatedResolutionScopeMemberCount == 0))
         require(gamesWithActivatedResolutionKeyMappings in 0..gameCount)
         require(activatedResolutionKeyMappingCount >= gamesWithActivatedResolutionKeyMappings)
         require((activatedResolutionKeyMappingCount == 0) == (gamesWithActivatedResolutionKeyMappings == 0))
@@ -631,10 +673,17 @@ internal data class OutcomeStateCorpusReplayCompatibilityAudit(
                 transitionStateEquivalenceAlgorithm = if (audits.all {
                     it.algorithm == OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE
                 }) OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE
+                else if (audits.none { it.algorithm == OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE })
+                    OUTCOME_STATE_CORPUS_SINGLE_ACTIVATION_TRANSITION_STATE_EQUIVALENCE
                 else OUTCOME_STATE_CORPUS_TRANSITION_STATE_EQUIVALENCE,
                 gameCount = games.size,
                 gamesWithActivatedResolutionKeyMappings = audits.count { it.activatedResolutionKeyMappings.isNotEmpty() },
                 activatedResolutionKeyMappingCount = audits.sumOf { it.activatedResolutionKeyMappings.size },
+                gamesWithActivatedResolutionScopes = audits.count { it.activatedResolutionScopes.isNotEmpty() },
+                activatedResolutionScopeCount = audits.sumOf { it.activatedResolutionScopes.size },
+                activatedResolutionScopeMemberCount = audits.sumOf { audit ->
+                    audit.activatedResolutionScopes.sumOf { it.members.size }
+                },
                 gamesWithSyntheticAbilityMappings = audits.count {
                     it.syntheticAbilityMappingCount > 0
                 },
@@ -1150,17 +1199,22 @@ internal data class RecordedReplayStateDifference(
 )
 
 private data class ScopedReplayIdentityMapping(
-    val stackEntityId: EntityId,
+    val stackEntityIds: List<EntityId>,
     val expectedId: String,
     val actualId: String,
     val activatedResolutionKey: Boolean = false,
 ) {
     init {
         require(expectedId != actualId)
+        require(stackEntityIds.isNotEmpty() && stackEntityIds.distinct().size == stackEntityIds.size)
+        require(activatedResolutionKey || stackEntityIds.size == 1)
     }
 
-    val statePath: String =
-        "/entities/${jsonPointerSegment(stackEntityId.value)}/" +
+    val stackEntityId: EntityId get() = stackEntityIds.first()
+    val statePath: String get() = statePath(stackEntityId)
+
+    fun statePath(entityId: EntityId): String =
+        "/entities/${jsonPointerSegment(entityId.value)}/" +
             if (activatedResolutionKey) {
                 "com.wingedsheep.engine.state.components.stack.ActivatedAbilityOnStackComponent/" +
                     "objectReferences/resolutionKey"
@@ -1169,18 +1223,21 @@ private data class ScopedReplayIdentityMapping(
                     "abilityIdentity/abilityId"
             }
 
-    fun componentExists(state: GameState): Boolean = if (activatedResolutionKey) {
-        state.getEntity(stackEntityId)?.get<ActivatedAbilityOnStackComponent>() != null
+    fun componentExists(state: GameState, entityId: EntityId): Boolean = if (activatedResolutionKey) {
+        state.getEntity(entityId)?.get<ActivatedAbilityOnStackComponent>() != null
     } else {
-        state.getEntity(stackEntityId)?.get<TriggeredAbilityOnStackComponent>() != null
+        state.getEntity(entityId)?.get<TriggeredAbilityOnStackComponent>() != null
     }
 }
 
 private data class ScopedReplayIdentityLifecycle(
     val mapping: ScopedReplayIdentityMapping,
     val creationRawOrdinal: Int,
-    var retirementRawOrdinal: Int? = null,
-)
+    val memberRetirements: MutableMap<EntityId, Int> = linkedMapOf(),
+) {
+    val retirementRawOrdinal: Int?
+        get() = if (memberRetirements.size == mapping.stackEntityIds.size) memberRetirements.values.max() else null
+}
 
 private data class LegacyTimeLordTypeLineLifecycle(
     val eventIndex: Int,
@@ -1197,7 +1254,8 @@ private data class LegacyTimeLordTypeLineLifecycle(
 /**
  * Transition-scoped compatibility for typed engine serialization identities. Delayed-ability
  * identities and activated reference-scope keys are admitted only at their typed creation
- * transitions. Activated keys remain component-local, with no continuation frames. A `Time
+ * transitions. One activation scope may have several ordered repeat members, each with a
+ * component-local key and a monotone retirement; continuation frames remain unsupported. A `Time
  * Lord` TypeLine normalization is admitted only when an exact typed leave event also creates the
  * exact corresponding last-known component. Each remains scoped to that component's lifetime and
  * then becomes a game-lifetime tombstone, so an uncorrelated recurrence cannot reuse it.
@@ -1288,7 +1346,7 @@ internal class RecordedReplayStateEquivalence(
                 }
             }
             val collision = admittedMappings.values.map { it.mapping }.firstOrNull {
-                it.stackEntityId == mapping.stackEntityId ||
+                it.stackEntityIds.any { entityId -> entityId in mapping.stackEntityIds } ||
                     it.expectedId == mapping.expectedId ||
                     it.actualId == mapping.actualId ||
                     it.expectedId == mapping.actualId ||
@@ -1368,10 +1426,12 @@ internal class RecordedReplayStateEquivalence(
 
         stateDifference("after", expectedAfter, actualAfter)?.let { return it }
         admittedMappings.values.filter { it.retirementRawOrdinal == null }.forEach { lifecycle ->
-            if (!lifecycle.mapping.componentExists(expectedAfter) &&
-                !lifecycle.mapping.componentExists(actualAfter)
-            ) {
-                lifecycle.retirementRawOrdinal = rawOrdinal
+            lifecycle.mapping.stackEntityIds.filter { it !in lifecycle.memberRetirements }.forEach { entityId ->
+                if (!lifecycle.mapping.componentExists(expectedAfter, entityId) &&
+                    !lifecycle.mapping.componentExists(actualAfter, entityId)
+                ) {
+                    lifecycle.memberRetirements[entityId] = rawOrdinal
+                }
             }
         }
         admittedLegacyTypeLines.values.filter { it.retirementRawOrdinal == null }
@@ -1417,16 +1477,22 @@ internal class RecordedReplayStateEquivalence(
             "Replay state equivalence audit requested before safe inspection-bundle validation"
         }
         return OutcomeStateReplayCompatibilityAudit(
-            activatedResolutionKeyMappings = admittedMappings.values
+            activatedResolutionScopes = admittedMappings.values
                 .filter { it.mapping.activatedResolutionKey }.map { lifecycle ->
-                    OutcomeStateActivatedResolutionKeyMappingAudit(
+                    OutcomeStateActivatedResolutionScopeAudit(
                         creationRawOrdinal = lifecycle.creationRawOrdinal,
                         retirementRawOrdinal = requireNotNull(lifecycle.retirementRawOrdinal),
-                        stackEntityId = lifecycle.mapping.stackEntityId.value,
-                        normalizedStatePath = lifecycle.mapping.statePath,
+                        members = lifecycle.mapping.stackEntityIds.map { entityId ->
+                            OutcomeStateActivatedResolutionKeyMappingAudit(
+                                creationRawOrdinal = lifecycle.creationRawOrdinal,
+                                retirementRawOrdinal = requireNotNull(lifecycle.memberRetirements[entityId]),
+                                stackEntityId = entityId.value,
+                                normalizedStatePath = lifecycle.mapping.statePath(entityId),
+                            )
+                        },
                     )
-                }.sortedWith(compareBy<OutcomeStateActivatedResolutionKeyMappingAudit> { it.creationRawOrdinal }
-                    .thenBy { it.stackEntityId }),
+                }.sortedWith(compareBy<OutcomeStateActivatedResolutionScopeAudit> { it.creationRawOrdinal }
+                    .thenBy { it.members.first().stackEntityId }),
             syntheticAbilityMappings = admittedMappings.values.filter { !it.mapping.activatedResolutionKey }.map { lifecycle ->
                 OutcomeStateSyntheticAbilityMappingAudit(
                     creationRawOrdinal = lifecycle.creationRawOrdinal,
@@ -1546,7 +1612,7 @@ internal class RecordedReplayStateEquivalence(
             ) {
                 return@mapNotNull null
             }
-            ScopedReplayIdentityMapping(entityId, expectedIdentity.abilityId.value, actualIdentity.abilityId.value) to
+            ScopedReplayIdentityMapping(listOf(entityId), expectedIdentity.abilityId.value, actualIdentity.abilityId.value) to
                 Triple(expectedEvent, expectedComponent, actualComponent)
         }
         if (candidates.isEmpty()) return MappingDiscovery()
@@ -1611,33 +1677,41 @@ internal class RecordedReplayStateEquivalence(
     ): MappingDiscovery {
         if (listOf(expectedBefore, actualBefore, expectedAfter, actualAfter)
                 .any { it.continuationStack.isNotEmpty() }) return MappingDiscovery()
-        val event = events.filterIsInstance<AbilityActivatedEvent>().filter { !it.isManaAbility }.singleOrNull()
-            ?: return MappingDiscovery()
-        val entityId = event.abilityEntityId ?: return MappingDiscovery()
-        if (event.isManaAbility || event.sourceId != action.sourceId ||
-            event.controllerId != action.playerId ||
-            expectedBefore.getEntity(entityId) != null || actualBefore.getEntity(entityId) != null
-        ) return MappingDiscovery()
-        val expectedContainer = expectedAfter.getEntity(entityId) ?: return MappingDiscovery()
-        val actualContainer = actualAfter.getEntity(entityId) ?: return MappingDiscovery()
-        if (expectedAfter.stack.count { it == entityId } != 1 ||
-            actualAfter.stack.count { it == entityId } != 1
-        ) return MappingDiscovery()
-        val expected = expectedContainer.get<ActivatedAbilityOnStackComponent>() ?: return MappingDiscovery()
-        val actual = actualContainer.get<ActivatedAbilityOnStackComponent>() ?: return MappingDiscovery()
-        val expectedKey = expected.objectReferences.resolutionKey ?: return MappingDiscovery()
-        val actualKey = actual.objectReferences.resolutionKey ?: return MappingDiscovery()
-        if (expectedKey == actualKey || expectedKey.isBlank() || actualKey.isBlank() ||
-            !expected.objectReferences.captured ||
-            expected.sourceId != event.sourceId || expected.sourceName != event.sourceName ||
-            expected.controllerId != event.controllerId ||
-            // Targets, entry stamps, requirements and all other components remain exact.
-            expectedContainer != actualContainer.with(actual.copy(
-                objectReferences = actual.objectReferences.copy(resolutionKey = expectedKey),
-            ))
-        ) return MappingDiscovery()
+        val activations = events.filterIsInstance<AbilityActivatedEvent>().filter { !it.isManaAbility }
+        if (action.repeatCount < 1 || activations.size != action.repeatCount) return MappingDiscovery()
+        val entityIds = activations.map { it.abilityEntityId ?: return MappingDiscovery() }
+        if (entityIds.distinct().size != entityIds.size) return MappingDiscovery()
+        var expectedScopeKey: String? = null
+        var actualScopeKey: String? = null
+        activations.zip(entityIds).forEach { (event, entityId) ->
+            if (event.sourceId != action.sourceId || event.controllerId != action.playerId ||
+                expectedBefore.getEntity(entityId) != null || actualBefore.getEntity(entityId) != null
+            ) return MappingDiscovery()
+            val expectedContainer = expectedAfter.getEntity(entityId) ?: return MappingDiscovery()
+            val actualContainer = actualAfter.getEntity(entityId) ?: return MappingDiscovery()
+            if (expectedAfter.stack.count { it == entityId } != 1 ||
+                actualAfter.stack.count { it == entityId } != 1
+            ) return MappingDiscovery()
+            val expected = expectedContainer.get<ActivatedAbilityOnStackComponent>() ?: return MappingDiscovery()
+            val actual = actualContainer.get<ActivatedAbilityOnStackComponent>() ?: return MappingDiscovery()
+            val expectedKey = expected.objectReferences.resolutionKey ?: return MappingDiscovery()
+            val actualKey = actual.objectReferences.resolutionKey ?: return MappingDiscovery()
+            if (expectedKey == actualKey || expectedKey.isBlank() || actualKey.isBlank() ||
+                !expected.objectReferences.captured ||
+                expected.sourceId != event.sourceId || expected.sourceName != event.sourceName ||
+                expected.controllerId != event.controllerId ||
+                // Compare each member with its own counterpart, never with another repeat.
+                expectedContainer != actualContainer.with(actual.copy(
+                    objectReferences = actual.objectReferences.copy(resolutionKey = expectedKey),
+                )) ||
+                (expectedScopeKey != null && expectedScopeKey != expectedKey) ||
+                (actualScopeKey != null && actualScopeKey != actualKey)
+            ) return MappingDiscovery()
+            expectedScopeKey = expectedKey
+            actualScopeKey = actualKey
+        }
         return MappingDiscovery(listOf(ScopedReplayIdentityMapping(
-            entityId, expectedKey, actualKey, activatedResolutionKey = true,
+            entityIds, requireNotNull(expectedScopeKey), requireNotNull(actualScopeKey), activatedResolutionKey = true,
         )))
     }
 
@@ -1747,28 +1821,27 @@ internal class RecordedReplayStateEquivalence(
             val actualOwn = stringOccurrencePaths(actualJson, mapping.actualId)
             val expectedCross = stringOccurrencePaths(expectedJson, mapping.actualId)
             val actualCross = stringOccurrencePaths(actualJson, mapping.expectedId)
-            val expectedStackExists = mapping.componentExists(expected)
-            val actualStackExists = mapping.componentExists(actual)
-            if (mapping.activatedResolutionKey && (expectedStackExists || actualStackExists) &&
+            val expectedLive = mapping.stackEntityIds.filter { mapping.componentExists(expected, it) }
+            val actualLive = mapping.stackEntityIds.filter { mapping.componentExists(actual, it) }
+            if (mapping.activatedResolutionKey && (expectedLive.isNotEmpty() || actualLive.isNotEmpty()) &&
                 (expected.continuationStack.isNotEmpty() || actual.continuationStack.isNotEmpty())
             ) {
                 return RecordedReplayStateDifference(boundary, "/continuationStack", null, null,
                     "activated resolution key mapping does not support continuation frames")
             }
-            if (lifecycle.retirementRawOrdinal != null && (expectedStackExists || actualStackExists)) {
-                return RecordedReplayStateDifference(boundary, mapping.statePath, null, null,
+            (expectedLive + actualLive).firstOrNull { it in lifecycle.memberRetirements }?.let { entityId ->
+                return RecordedReplayStateDifference(boundary, mapping.statePath(entityId), null, null,
                     "retired correlated stack component reappeared")
             }
-            val expectedAllowed = if (expectedStackExists && actualStackExists) listOf(mapping.statePath) else emptyList()
-            val actualAllowed = if (expectedStackExists && actualStackExists) listOf(mapping.statePath) else emptyList()
-            if (expectedOwn != expectedAllowed || actualOwn != actualAllowed) {
-                val path = (expectedOwn + actualOwn).firstOrNull { it != mapping.statePath } ?: mapping.statePath
+            val allowedPaths = expectedLive.map { mapping.statePath(it) }.sorted()
+            if (expectedLive != actualLive || expectedOwn.sorted() != allowedPaths || actualOwn.sorted() != allowedPaths) {
+                val path = (expectedOwn + actualOwn).firstOrNull { it !in allowedPaths } ?: mapping.statePath
                 return RecordedReplayStateDifference(
                     boundary = boundary,
                     path = path,
                     expected = jsonString(mapping.expectedId),
                     actual = jsonString(mapping.actualId),
-                    reason = if (expectedStackExists != actualStackExists) {
+                    reason = if (expectedLive != actualLive) {
                         "correlated synthetic ability stack component exists on only one side"
                     } else {
                         "mapped synthetic ability id is absent from or occurs outside its correlated stack component"
@@ -1837,12 +1910,14 @@ internal class RecordedReplayStateEquivalence(
             )
         }
 
-        val routingAdjustedActual = admittedMappings.values.map { it.mapping }.fold(actual) { state, mapping ->
-            val container = state.getEntity(mapping.stackEntityId) ?: return@fold state
+        val routingAdjustedActual = admittedMappings.values.flatMap { lifecycle ->
+            lifecycle.mapping.stackEntityIds.map { lifecycle.mapping to it }
+        }.fold(actual) { state, (mapping, entityId) ->
+            val container = state.getEntity(entityId) ?: return@fold state
             if (mapping.activatedResolutionKey) {
                 val component = container.get<ActivatedAbilityOnStackComponent>() ?: return@fold state
                 if (component.objectReferences.resolutionKey != mapping.actualId) return@fold state
-                return@fold state.copy(entities = state.entities + (mapping.stackEntityId to
+                return@fold state.copy(entities = state.entities + (entityId to
                     container.with(component.copy(objectReferences = component.objectReferences.copy(
                         resolutionKey = mapping.expectedId,
                     )))))
@@ -1852,7 +1927,7 @@ internal class RecordedReplayStateEquivalence(
             if (identity.abilityId.value != mapping.actualId) return@fold state
             state.copy(
                 entities = state.entities + (
-                    mapping.stackEntityId to container.with(
+                    entityId to container.with(
                         component.copy(
                             abilityIdentity = identity.copy(abilityId = AbilityId(mapping.expectedId)),
                         )
