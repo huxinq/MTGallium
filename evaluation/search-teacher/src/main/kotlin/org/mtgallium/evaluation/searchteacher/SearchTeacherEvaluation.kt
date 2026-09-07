@@ -68,6 +68,12 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         return
     }
 
+    if (options.suite == "terminal-prediction-diagnostic") {
+        val plan = evidenceJson.decodeFromString<TerminalPredictionDiagnosticPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = runTerminalPredictionDiagnostic(root, plan, diagnosticOutput(requireNotNull(options.outputPath)))
+        println("Terminal prediction diagnostic ${report.identity}: ${report.roots.size} development roots; descriptive only")
+        return
+    }
     if (options.suite == "terminal-kernel-study") {
         val plan = evidenceJson.decodeFromString<TerminalKernelStudyPlan>(Files.readString(requireNotNull(options.profilePath)))
         val report = TerminalKernelStudyRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))

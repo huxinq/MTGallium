@@ -183,3 +183,22 @@ added to wall time as if sequential. Reused stages report current verification
 cost and zero new scientific work, not zero historical cost. JVM CPU excludes
 child processes. Build cost is retained in the separate build bundle. Agent
 allowance, machine energy and unobserved historical costs are not inferred.
+
+## Development prediction diagnosis
+
+`terminal-prediction-diagnostic` accepts a `TerminalPredictionDiagnosticPlan`
+with verified `bank`, `targets` and frozen `model` references. It requires two
+complete production-target repetitions on DEVELOPMENT groups excluded from
+that model's recorded training, with the same terminal target configuration and
+engine. It reuses all samples and performs no fit or continuation collection.
+Register the intended METHOD_SELECTION population in the campaign before use.
+
+The report retains scores, action means, sample accounting and action-centered
+moments per root, per group and with equal group weighting. Pooled squared
+residual equals cross-repetition residual product plus one quarter of squared
+repetition difference. These are descriptive algebraic quantities; negative
+cross-products remain negative. Repetitions share the sampled belief population,
+so persistent residuals cannot distinguish model error from posterior error,
+nor identify a preferred representation or learning intervention. Source revisions
+remain separately recorded. Sample-max regrets are optimistic and inspected
+development data do not constitute fresh confirmation.
