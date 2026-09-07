@@ -78,6 +78,8 @@ class ArgentumSearchWorld private constructor(
     override fun actorToAct(): String? = policyActor(environment)?.let(aliases::getValue)
 
     /** Current safe-projection work counts; no referee state enters this diagnostic. */
+    internal fun observationDescriptorReuse(viewer: String): Int = project(rawPlayer(viewer)).references.reusedCardDescriptors
+
     internal fun observationFragmentReuse(viewer: String): Pair<Int, Int> = project(rawPlayer(viewer)).canonicalFragments.let {
         it.reusedCards to it.encodedCards
     }

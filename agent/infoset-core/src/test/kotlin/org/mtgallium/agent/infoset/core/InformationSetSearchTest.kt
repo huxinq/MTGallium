@@ -683,6 +683,30 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `menu-only frontier refresh preserves horizon debt settlements and attribution seeds`() {
+        fun run(enabled: Boolean): Pair<InformationSetSearchResult, Pair<MenuSelectionProbePolicy, MenuSelectionProbePolicy>> {
+            val root = MenuSelectionProbePolicy("refresh-root", enabled)
+            val opponent = MenuSelectionProbePolicy("refresh-opponent", enabled)
+            val session = coreSession(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 3,
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD, LeafEvaluator.ARGENTUM_BOARD_V1)),
+                UniformOpponentPolicy, root, opponent, reuseConfig = InformationSetSearchReuseConfig(enabled = true))
+            session.search("p0", batch(List(8) { FakeWorld(hiddenVariant = "compatible") }), 101L, beliefContinuityEpoch = 0L)
+            val promoted = List(8) { FakeWorld(hiddenVariant = "compatible").also { world ->
+                repeat(2) { world.step(world.expandChoices().candidates.first()) }
+            } }
+            return session.search("p0", batch(promoted), 102L, beliefContinuityEpoch = 0L) to (root to opponent)
+        }
+        val (baseline, oldPolicies) = run(false)
+        val (optimized, policies) = run(true)
+        assertTrue(optimized.diagnostics.refreshedSimulations > 0)
+        assertTrue(policies.first.menuCalls + policies.second.menuCalls > 0)
+        assertEquals(oldPolicies.first.seeds, policies.first.seeds)
+        assertEquals(oldPolicies.second.seeds, policies.second.seeds)
+        assertEquals(baseline.copy(diagnostics = baseline.diagnostics.copy(evaluatorNanos = 0)),
+            optimized.copy(diagnostics = optimized.diagnostics.copy(evaluatorNanos = 0)))
+    }
+
+    @Test
     fun `a rejected reuse frontier refresh aborts search instead of preserving a stale value`() {
         val session = coreSession(
             config = InformationSetSearchConfig(

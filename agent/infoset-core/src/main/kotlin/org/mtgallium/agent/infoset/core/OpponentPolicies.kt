@@ -132,7 +132,8 @@ object UniformOpponentPolicy : OpponentPolicy {
     ): ProbabilityDistribution<SemanticChoice> = ProbabilityDistribution.uniform(candidates)
 }
 
-internal fun <T> sampleOpponentPolicyDistribution(
+/** Shared selection sampler; menu-only policies must retain this exact seeded draw. */
+fun <T> sampleOpponentPolicyDistribution(
     distribution: ProbabilityDistribution<T>,
     seed: Long,
 ): T {

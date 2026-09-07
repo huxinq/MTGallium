@@ -212,6 +212,18 @@ interface OpponentPolicy {
         selectedComponentId = id,
     )
 
+    /**
+     * Optional exact selection from the already-admitted acting-player menu. Return null when
+     * any part of selection or diagnostics needs information. A non-null result must equal
+     * [select] with the same menu and seeds; this capability does not change policy identity,
+     * menu admission, genuine decision boundaries or the caller's perspective obligations.
+     */
+    fun selectFromCandidates(
+        candidates: List<SemanticChoice>,
+        policySeed: Long,
+        sampleSeed: Long,
+    ): OpponentPolicyDecision? = null
+
     /** Samples one action and returns the component/replacement record for that exact site. */
     fun select(
         opponentInformation: PolicyInformationState,

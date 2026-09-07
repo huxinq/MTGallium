@@ -68,6 +68,8 @@ class ArgentumSearchWorldTest {
             assertEquals(parent, world.informationState("p0"))
             assertTrue(world.step(choice).accepted)
             if (choice.operationFamily == SemanticOperationFamily.PLAY_LAND) {
+                assertTrue(world.observationDescriptorReuse("p0") > 0,
+                    "Accepted non-priority transitions must reuse unchanged identity descriptors")
                 assertTrue(world.observationFragmentReuse("p0").first > 0,
                     "Accepted non-priority transitions must carry forward previous safe fragments")
             }

@@ -9,6 +9,41 @@ import kotlinx.serialization.json.buildJsonObject
 
 class RolloutPolicyAnnotationRequirementTest {
     @Test
+    fun `menu-only rollout selection preserves seeds decisions and diagnostics while avoiding information reads`() {
+        data class Run(val result: InformationSetSearchResult, val terminal: TerminalPolicyContinuation,
+            val probe: ExpansionProbe, val root: MenuSelectionProbePolicy, val opponent: MenuSelectionProbePolicy)
+        fun run(enabled: Boolean): Run {
+            val probe = ExpansionProbe()
+            val root = MenuSelectionProbePolicy("root-menu", enabled)
+            val opponent = MenuSelectionProbePolicy("opponent-menu", enabled)
+            val config = InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 8,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1))
+            val search = InformationSetSearch(config, UniformOpponentPolicy, root, opponent,
+                leafEvaluationStrategy = LeafEvaluationStrategy(LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId,
+                    LeafValueSource.SampledWorld(LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId)))
+            val result = search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
+            val terminal = search.continueFirstUnvisitedEdgeToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
+            return Run(result, terminal, probe, root, opponent)
+        }
+        val baseline = run(false)
+        val optimized = run(true)
+        // Deferred information can require a later derived-cache snapshot when a rollout prefix
+        // enters the tree. Only that work counter and evaluator timing may differ.
+        assertEquals(baseline.result.copy(diagnostics = baseline.result.diagnostics.copy(
+            evaluatorNanos = 0, transitionCacheDerivedSnapshots = 0)),
+            optimized.result.copy(diagnostics = optimized.result.diagnostics.copy(
+                evaluatorNanos = 0, transitionCacheDerivedSnapshots = 0)))
+        assertEquals(baseline.terminal, optimized.terminal)
+        assertEquals(baseline.probe.acceptedLabels, optimized.probe.acceptedLabels)
+        assertEquals(baseline.root.seeds, optimized.root.seeds)
+        assertEquals(baseline.opponent.seeds, optimized.opponent.seeds)
+        assertTrue(optimized.root.menuCalls > 0)
+        assertTrue(optimized.opponent.menuCalls > 0)
+        assertEquals(baseline.probe.informationCalls - optimized.root.menuCalls - optimized.opponent.menuCalls,
+            optimized.probe.informationCalls)
+    }
+
+    @Test
     fun `zero-weight annotation consumers are not called to build the distribution`() {
         val world = PolicyAdmissionWorld(ExpansionProbe())
         val candidates = world.expandChoicesForPolicyAdmission().candidates
@@ -283,6 +318,7 @@ private class PerspectiveRecordingPolicy(
 }
 
 private class ExpansionProbe {
+    var informationCalls: Int = 0
     var admissionCalls: Int = 0
     var annotationCalls: Int = 0
     val acceptedLabels = mutableListOf<String>()
@@ -311,6 +347,7 @@ private class PolicyAdmissionWorld(
     override fun actorToAct(): String? = if (tick >= 4) null else if (tick % 2 == 0) "p0" else "p1"
 
     override fun informationState(viewer: String): PolicyInformationState {
+        probe.informationCalls++
         val actor = actorToAct()
         return PolicyInformationState(
             actingPlayerId = actor,
@@ -370,4 +407,25 @@ private class PolicyAdmissionWorld(
     override fun terminalPayoff(rootPlayer: String): Double? = if (tick >= 4) 0.0 else null
 
     override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.0
+}
+
+/** Exact uniform test policy with nontrivial attribution seeds, shared with the refresh witness. */
+internal class MenuSelectionProbePolicy(override val id: String, private val enabled: Boolean) : OpponentPolicy {
+    override val requiresProductionAdmission = false
+    val seeds = mutableListOf<Pair<Long, Long>>()
+    var menuCalls = 0
+    override fun distribution(opponentInformation: PolicyInformationState, candidates: List<SemanticChoice>, policySeed: Long) =
+        ProbabilityDistribution.uniform(candidates)
+    private fun diagnostic(policySeed: Long, attributionSeed: Long): OpponentPolicyDecisionDiagnostic {
+        seeds += policySeed to attributionSeed
+        return OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = "$id:${attributionSeed and 1}")
+    }
+    override fun decisionDiagnostic(opponentInformation: PolicyInformationState, candidates: List<SemanticChoice>,
+        chosen: SemanticChoice, policySeed: Long, attributionSeed: Long) = diagnostic(policySeed, attributionSeed)
+    override fun selectFromCandidates(candidates: List<SemanticChoice>, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision? {
+        if (!enabled) return null
+        menuCalls++
+        return OpponentPolicyDecision(sampleOpponentPolicyDistribution(ProbabilityDistribution.uniform(candidates), sampleSeed),
+            diagnostic(policySeed, ComponentSeeds.derive(sampleSeed, id, "component-attribution")))
+    }
 }

@@ -132,6 +132,12 @@ are independent and retain the fit and menu population in behavior identity.
 This changes the continuation policy and requires new evaluation; it does not
 relabel historical Production results. Tree selection, the belief opponent model,
 terminal payoff and fixed search budgets retain their separate configuration.
+An optional menu-only selection capability may defer full information construction in
+bounded rollouts, terminal continuations and frontier refresh only when it returns the
+same sampled action and component diagnostics for the same admitted menu and seeds.
+Fast continuation uses this for non-casting menus; casting contexts still require the
+full acting-player state. Transition caches retain information only when materialized.
+This exact construction shortcut leaves policy identity and admission unchanged.
 Existing policies still request Production admission by default. Annotation
 consumers must also request admission; mixtures retain the requirements of their
 positive-weight components.

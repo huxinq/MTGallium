@@ -36,6 +36,16 @@ internal class FastKernelRolloutPolicy(
     private fun learnedScope(candidates: List<SemanticChoice>) =
         candidates.any { it.operationFamily == SemanticOperationFamily.CAST_SPELL }
 
+    override fun selectFromCandidates(
+        candidates: List<SemanticChoice>,
+        policySeed: Long,
+        sampleSeed: Long,
+    ): OpponentPolicyDecision? {
+        if (learnedScope(candidates)) return null
+        val decision = outsideScope.selectFromCandidates(candidates, policySeed, sampleSeed)
+        return decision.copy(diagnostic = decision.diagnostic.copy(declaredPolicyId = id))
+    }
+
     override fun distribution(
         opponentInformation: PolicyInformationState,
         candidates: List<SemanticChoice>,

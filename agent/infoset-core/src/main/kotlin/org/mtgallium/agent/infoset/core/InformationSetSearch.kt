@@ -133,8 +133,8 @@ class InformationSetSearch(
                 } else {
                     expansion.candidates
                 }
-                val decision = policy.select(
-                    opponentInformation = world.informationState(actor),
+                val decision = policy.selectForRollout(
+                    opponentInformation = { world.informationState(actor) },
                     candidates = candidates,
                     policySeed = ComponentSeeds.derive(
                         searchSeed,
@@ -923,6 +923,7 @@ class InformationSetSearch(
             val singleton = expansion.exactSingletonPassOrNull().takeIf {
                 config.compressPolicySingletonPasses
             }
+            var policyInformationUsed = false
             val selected = singleton ?: run {
                 // The outer opponent remains an independently configurable stochastic environment.
                 val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
@@ -931,8 +932,8 @@ class InformationSetSearch(
                 } else {
                     expansion.candidates
                 }
-                val decision = policy.select(
-                    opponentInformation = world.informationState(actor),
+                val decision = policy.selectForRollout(
+                    opponentInformation = { world.informationState(actor).also { policyInformationUsed = true } },
                     candidates = candidates,
                     policySeed = ComponentSeeds.derive(
                         searchSeed,
@@ -950,7 +951,8 @@ class InformationSetSearch(
             // The same node may later enter the tree with a different opponent policy or wider menu.
             transitionCache?.retainDerived(
                 transitionNode, world,
-                DERIVED_BASE or (if (singleton == null) DERIVED_POLICY_EXPANSION or DERIVED_INFORMATION else 0),
+                DERIVED_BASE or (if (singleton == null) DERIVED_POLICY_EXPANSION else 0) or
+                    (if (policyInformationUsed) DERIVED_INFORMATION else 0),
             )
             val advanced = advanceCached(world, selected, transitionCache, transitionNode, workAudit, rollout = true)
             world = advanced.world
@@ -1423,8 +1425,8 @@ class InformationSetSearch(
                 } else {
                     expansion
                 }
-                val decision = policy.select(
-                    opponentInformation = world.informationState(actor),
+                val decision = policy.selectForRollout(
+                    opponentInformation = { world.informationState(actor) },
                     candidates = policyExpansion.candidates,
                     policySeed = ComponentSeeds.derive(
                         refreshSeed,
@@ -1700,3 +1702,12 @@ class InformationSetSearch(
         }
     }
 }
+
+/** Defer only the full state; supplied menus, selection seeds and attribution remain unchanged. */
+private fun OpponentPolicy.selectForRollout(
+    opponentInformation: () -> PolicyInformationState,
+    candidates: List<SemanticChoice>,
+    policySeed: Long,
+    sampleSeed: Long,
+): OpponentPolicyDecision = selectFromCandidates(candidates, policySeed, sampleSeed)
+    ?: select(opponentInformation(), candidates, policySeed, sampleSeed)

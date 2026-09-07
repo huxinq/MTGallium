@@ -93,6 +93,15 @@ class RootKernelRolloutPolicyTest {
         val semantic = SemanticHeuristicOpponentPolicy(requiresProductionAdmission = false)
         assertEquals(semantic.distribution(mulliganInformation, mulliganMenu, 1L).entries,
             fast.distribution(mulliganInformation, mulliganMenu, 1L).entries)
+        for (seed in 0L until 32L) {
+            for (choices in listOf(mulliganMenu, mulliganMenu.reversed())) {
+                assertEquals(fast.select(mulliganInformation, choices, seed, seed + 71),
+                    fast.selectFromCandidates(choices, seed, seed + 71))
+                assertEquals(semantic.select(mulliganInformation, choices, seed, seed + 71),
+                    semantic.selectFromCandidates(choices, seed, seed + 71))
+            }
+        }
+        assertNull(fast.selectFromCandidates(menu, 1L, 2L), "Casting menus require learned state features")
         val selected = fast.select(mulliganInformation, mulliganMenu, 1L, 2L)
         assertEquals(semantic.id, selected.diagnostic.selectedComponentId)
         assertNull(selected.diagnostic.replacement)
