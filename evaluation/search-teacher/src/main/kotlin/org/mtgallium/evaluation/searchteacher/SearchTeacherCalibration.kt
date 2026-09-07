@@ -550,6 +550,9 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     report.comparisons.forEach { comparison ->
         appendLine("- ${comparison.candidateId}: ${comparison.validPairs}/${comparison.assignedPairs} valid ${if (report.sequentialResult == null) "pairs" else "inspected pairs"}; point rate=${comparison.candidatePointRate}; paired bootstrap 95%=[${comparison.pairedBootstrap95Lower}, ${comparison.pairedBootstrap95Upper}].")
         appendLine("  Candidate W/L/draw=${comparison.candidateBySeat.sumOf { it.wins }}/${comparison.candidateBySeat.sumOf { it.losses }}/${comparison.candidateBySeat.sumOf { it.draws }} over ${comparison.validGames} complete valid games; invalid pairs=${comparison.invalidPairs}; incomplete pairs=${comparison.incompletePairs}. Counts use the comparison prefix, excluding sequential overshoot.")
+        append(renderGameplayLengths(gameplayLengthObservations(
+            comparison.pairs + report.sequentialOvershootPairs.orEmpty(), comparison.candidateId),
+            comparison.pairs.size, report.plan.pairOffset))
         comparison.operationalByPolicy.forEach { cost ->
             appendLine("  ${cost.search.policyId}: searched ${cost.search.searchedDecisions}/${cost.selections} selections; singleton=${cost.selectionCounts[SearchTeacherSelectionKind.POLICY_SINGLETON_ACTION] ?: 0}; search ms/selection=${cost.searchedMillisPerSelection}; search ms/game=${cost.searchedMillisPerGame}; shared game ms=${cost.sharedWholeGameMeanMillis}.")
         }

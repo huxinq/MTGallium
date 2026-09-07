@@ -462,8 +462,13 @@ data class GameRunResult(
     val cleanupDiscardEvents: Int = 0,
     val mainPhasePassesWithProactiveOptions: Int = 0,
     val elapsedMillis: Double? = null,
+    /** Player-turn number at engine termination; absent in historical evidence, never inferred as zero. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val terminalTurnNumber: Int? = null,
 ) {
     init {
+        require(terminalTurnNumber == null || (terminalTurnNumber >= 0 && disposition == GameRunDisposition.GAME_ENDED))
         require(schemaVersion in 3..4) { "Unknown GameRunResult schema $schemaVersion" }
         when (disposition) {
             GameRunDisposition.GAME_ENDED -> {

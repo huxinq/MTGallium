@@ -34,6 +34,11 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
     fun diagnosticOutput(path: Path): Path =
         store.requireDiagnosticOutput(path, "the ${suite.id} command output")
 
+    if (options.suite == "gameplay-summary") {
+        print(renderRetainedGameplayLengths(options.runDirectories.map(::loadRetainedGameplayLengths)))
+        return
+    }
+
     if (options.suite == "search-profile-summary") {
         require(options.outputPath == null) { "Profile inspection writes to stdout; it does not modify retained evidence" }
         print(summarizeRegisteredSearchProfile(requireNotNull(options.profilePath) {

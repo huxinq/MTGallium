@@ -8,6 +8,10 @@ default:
     @just --list
 
 # Read retained JFR evidence through its finalized manifest; no gameplay or registry startup.
+# Read-only: authenticate and summarize finalized gameplay; optional second run stays a separate population.
+gameplay-summary RUN COMPARE="":
+    @{{gradle}} --quiet :evaluation:search-teacher:run --args={{quote("--suite gameplay-summary --run-directory " + quote(RUN) + if COMPARE == "" { "" } else { " --run-directory " + quote(COMPARE) })}}
+
 search-profile-summary PROFILE:
     @{{gradle}} --quiet :evaluation:search-teacher:run --args={{quote("--suite search-profile-summary --profile " + quote(PROFILE))}}
 

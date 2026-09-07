@@ -11,6 +11,7 @@ internal object SearchTeacherSuites {
         "research-preflight",
         "research-preflight-verify",
         "search-profile-summary",
+        "gameplay-summary",
         "terminal-prediction-diagnostic",
         "terminal-kernel-study",
         "attack-kernel-learning",
@@ -124,6 +125,7 @@ internal data class SearchTeacherCli(
     val pairs: Int = 1,
     val opponent: ArenaPolicyKind = ArenaPolicyKind.HEURISTIC,
     val profilePath: Path? = null,
+    val runDirectories: List<Path> = emptyList(),
     /** Explicit private input; the public source tree intentionally contains no frozen deck. */
     val deckManifest: Path? = null,
     val caseLimit: Int = 48,
@@ -177,6 +179,7 @@ internal data class SearchTeacherCli(
                     "--opponent" -> parsed.copy(
                         opponent = ArenaPolicyKind.valueOf(args.value(++index, option).uppercase())
                     )
+                    "--run-directory" -> parsed.copy(runDirectories = parsed.runDirectories + listOf(args.path(++index, option)))
                     "--profile" -> parsed.copy(profilePath = args.path(++index, option))
                     "--precision-parent" -> parsed.copy(precisionParent = args.path(++index, option))
                     "--precision-run" -> parsed.copy(precisionRun = args.path(++index, option))
@@ -229,6 +232,11 @@ internal data class SearchTeacherCli(
 
         private fun SearchTeacherCli.validate() {
             SearchTeacherSuites.require(suite)
+            if (suite == "gameplay-summary") {
+                require(runDirectories.size in 1..2 && outputPath == null) {
+                    "gameplay-summary requires one or two --run-directory inputs and prints to stdout"
+                }
+            } else require(runDirectories.isEmpty()) { "--run-directory belongs to gameplay-summary" }
             if (suite in setOf("research-preflight", "research-preflight-verify", "campaign-data-use", "campaign-data-snapshot", "research-transfer-audit")) {
                 require(profilePath != null && outputPath != null) { "$suite requires --profile and --output" }
             }

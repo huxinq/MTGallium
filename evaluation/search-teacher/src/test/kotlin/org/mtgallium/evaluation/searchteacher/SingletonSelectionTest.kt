@@ -143,6 +143,7 @@ class SingletonSelectionTest {
         assertEquals((0 until 24).toList(), accepted)
         assertEquals(24, result.decisions)
         assertFalse(result.terminal)
+        assertNull(result.terminalTurnNumber)
         assertNull(result.searchScore)
         assertTrue(result.searchLatenciesMillis.size < 24)
         assertTrue(result.seatDiagnostics.values.sumOf {

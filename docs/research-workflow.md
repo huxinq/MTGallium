@@ -275,3 +275,37 @@ or campaign-wide multiplicity control. Other treatments and selected subsets
 cannot be appended. The parent keeps its original disposition, inspected prefix and overshoot even
 if the continuation later crosses a different boundary. An NI result therefore
 remains an NI result in its original artifact.
+
+### Game length and runtime inspection
+
+`just gameplay-summary /private/run` authenticates an already finalized calibration,
+sequential calibration, optional/superiority continuation, or attack-gameplay run.
+Pass a second directory to compare two runs:
+
+```sh
+just gameplay-summary /private/earlier/gameplay /private/later/gameplay
+```
+
+The command prints to stdout, verifies source/configuration identities and registered
+manifests/checkpoints through the existing loaders, and never invokes a gameplay or
+replay runner. Each parent/child retains its actual execution identity. A running
+composed root is refused because it has no authenticated final chunk index; a
+finalized child can be inspected explicitly. Invalid operational sequential sources
+remain subject to the existing sequential loader's refusal contract.
+
+Reports show accepted decisions (including passes, responses and singletons), searched
+decisions across both seats, player-turn number at terminal, and concurrent game time.
+Means, medians and nearest-rank p90 decision lengths are descriptive. Counts identify
+missing historical fields; absent turns are not zero. The optional terminal-turn field
+is omitted from historical GameRunResult serialization when absent. New arena games
+record the engine's terminal player-turn number (not rounds); no replay is needed to
+recover it in future reports.
+
+New calibration, attack gameplay and continuation Markdown reports include these
+summaries automatically. Terminal games enter length summaries only through valid
+complete pairs; stopped/invalid pair attempts, inspected games and operational
+overshoot remain distinct. Outcome-conditioned lengths use the inspected population
+and cannot establish that stronger policies cause shorter games. Both policies share
+one game length and game time. Cross-run ratios keep populations separate and expose
+configuration, source, deck and worker differences; they are not isolated speedups or
+tournament throughput. Existing retained reports are not modified.

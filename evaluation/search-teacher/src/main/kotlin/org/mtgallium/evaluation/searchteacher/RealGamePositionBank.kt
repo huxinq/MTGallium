@@ -438,12 +438,26 @@ private fun readBankSource(input: RealGamePositionBankSource): BankSource {
     if (input.completedSequentialReferenceOnly) return readCompletedSequentialReferenceBankSource(input)
     if (input.retainedReferenceOnly) return readRetainedReferenceBankSource(input)
     val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
-    val artifacts = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity)
+    val report = loadCompletedCalibration(directory, input.expectedRunIdentity)
+    val entries = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity).artifacts.associateBy { it.relativePath }
+    val games = report.comparisons.flatMap { it.pairs }.flatMap { it.games }
+    return BankSource(RealGamePositionBankSourceBinding(directory.toString(), report.runIdentity,
+        entries.getValue("report.json").sha256, sha256File(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+        report.sourceProvenance, report.deckHash, report.cardPoolHash,
+        evidenceJson.encodeToJsonElement(report.plan).jsonObject,
+        report.policies.map { evidenceJson.encodeToJsonElement(it).jsonObject }, games.size,
+        report.comparisons.sumOf { it.validGames }, games.sumOf { game -> game.seatDiagnostics.values.sumOf { it.searchDecisionsDetail.size } }),
+        report.comparisons, report.policies)
+}
+
+/** Authenticate fixed calibration evidence without constructing an arena or starting gameplay. */
+internal fun loadCompletedCalibration(directory: Path, expectedIdentity: String): SearchTeacherCalibrationReport {
+    val artifacts = ResearchRunArtifacts.loadAndVerify(directory, expectedIdentity)
     val entries = artifacts.artifacts.associateBy { it.relativePath }
     val reportPath = ResearchRunFiles.resolveBelow(directory, "report.json")
     require(entries.getValue("report.json").sha256 == sha256File(reportPath))
     val report = readEvidenceJson(reportPath, SearchTeacherCalibrationReport.serializer())
-    requireRealGamePositionBankSourceIdentity(report, input.expectedRunIdentity)
+    requireRealGamePositionBankSourceIdentity(report, expectedIdentity)
     require(entries.containsKey("plan.json"))
     require(evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(Files.readString(directory.resolve("plan.json"))) == report.plan)
     require(report.comparisons.map { it.candidateId } == report.plan.candidates.map { it.id })
@@ -473,24 +487,16 @@ private fun readBankSource(input: RealGamePositionBankSource): BankSource {
         require(comparison.invalidPairs == comparison.pairs.count { !it.valid } && comparison.incompletePairs == 0)
     }
     require(report.valid == report.comparisons.all { it.validPairs == report.plan.pairCount })
-    val games = report.comparisons.flatMap { it.pairs }.flatMap { it.games }
-    return BankSource(RealGamePositionBankSourceBinding(directory.toString(), report.runIdentity,
-        entries.getValue("report.json").sha256, sha256File(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
-        report.sourceProvenance, report.deckHash, report.cardPoolHash,
-        evidenceJson.encodeToJsonElement(report.plan).jsonObject,
-        report.policies.map { evidenceJson.encodeToJsonElement(it).jsonObject }, games.size,
-        report.comparisons.sumOf { it.validGames }, games.sumOf { game -> game.seatDiagnostics.values.sumOf { it.searchDecisionsDetail.size } }),
-        report.comparisons, report.policies)
+    val expected = report.comparisons.flatMap { it.pairs }.flatMap { it.games }.map { "checkpoints/${it.gameId}.json" }
+    require(expected.size == expected.toSet().size &&
+        entries.keys.filter { it.startsWith("checkpoints/") }.toSet() == expected.toSet())
+    expected.forEach { require(ResearchRunCheckpoints.load(directory.resolve(it)).parentPayloadSha256 == null) }
+    return report
 }
 
 /** Authenticate a complete fixed calibration epoch using the bank's existing checkpoint authority. */
 internal fun verifyCompletedCalibration(directory: Path, expectedIdentity: String) {
-    val source = readBankSource(RealGamePositionBankSource(directory.toString(), expectedIdentity))
-    val expected = source.comparisons.flatMap { it.pairs }.flatMap { it.games }.map { "checkpoints/${it.gameId}.json" }
-    val entries = ResearchRunArtifacts.loadAndVerify(directory, expectedIdentity).artifacts
-    require(expected.size == expected.toSet().size &&
-        entries.filter { it.relativePath.startsWith("checkpoints/") }.map { it.relativePath }.toSet() == expected.toSet())
-    expected.forEach { require(ResearchRunCheckpoints.load(directory.resolve(it)).parentPayloadSha256 == null) }
+    loadCompletedCalibration(directory, expectedIdentity)
 }
 
 internal fun loadVerifiedRealGamePositionBank(directory: Path, expectedIdentity: String): RealGamePositionBankReport {
