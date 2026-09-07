@@ -75,6 +75,26 @@ class AttackKernelLearningTest {
                 val expected = incumbent.selectFromCandidates(menu, 37L, 19L)
                 assertEquals(expected.copy(diagnostic = expected.diagnostic.copy(declaredPolicyId = policy.id)), fallback)
                 assertFails { policy.distribution(info, menu, 37L) }
+                val recorder = AttackInfluenceRecorder(policy, incumbent, policy)
+                val searchSeed = 73L
+                val policySeed = ComponentSeeds.derive(searchSeed, 2, 5, policy.id, "rollout")
+                val sampleSeed = ComponentSeeds.derive(searchSeed, 2, 5, "rollout-sample")
+                val actual = recorder.selectForExpansion({ info }, menu, true, policySeed, sampleSeed)
+                assertEquals(policy.selectForExpansion({ info }, menu, true, policySeed, sampleSeed), actual)
+                recorder.observeBoundedRollout({ info }, menu, true, actual.choice, searchSeed, 2, 5)
+                val event = recorder.events.single()
+                assertEquals(5, event.depth)
+                assertEquals(2, event.simulationIndex)
+                assertEquals(actual.choice.signature, event.actual)
+                assertEquals(event.actual, event.learned)
+                assertEquals(incumbent.selectForExpansion({ info }, menu, true,
+                    ComponentSeeds.derive(searchSeed, 2, 5, incumbent.id, "rollout"), sampleSeed).choice.signature,
+                    event.incumbent)
+                assertEquals(policy.behaviorSpecification, recorder.behaviorSpecification)
+                assertEquals(info, world.informationState(requireNotNull(world.actorToAct())))
+                recorder.observeBoundedRollout({ error("incomplete must be ignored") }, menu, false,
+                    actual.choice, searchSeed, 2, 5)
+                assertEquals(1, recorder.events.size)
                 assertTrue(world.step(selected.choice).accepted)
                 witnessed = true
                 break
