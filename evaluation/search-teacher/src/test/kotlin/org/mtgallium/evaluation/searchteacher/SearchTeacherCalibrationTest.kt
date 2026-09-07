@@ -156,7 +156,7 @@ class SearchTeacherCalibrationTest {
             Files.deleteIfExists(directory.resolve("checkpoint.json"))
             Files.delete(directory)
         }
-        listOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen").forEach { suite ->
+        listOf("search-teacher-calibration", "search-teacher-sequential", "search-teacher-continuation", "search-teacher-continuation-preflight", "real-game-position-bank", "position-bank-screen").forEach { suite ->
             assertFails { SearchTeacherCli.parse(arrayOf("--suite", suite)) }
             assertEquals(suite, SearchTeacherCli.parse(arrayOf("--suite", suite, "--profile", "/tmp/plan.json",
                 "--output", "/tmp/output", "--deck-manifest", "/tmp/deck.json")).suite)

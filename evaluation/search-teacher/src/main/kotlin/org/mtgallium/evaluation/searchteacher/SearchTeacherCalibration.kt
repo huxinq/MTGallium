@@ -329,8 +329,9 @@ internal fun calibrationPresentationProfile(source: PolicySourceProvenance): Fro
 internal class SearchTeacherCalibrationRunner(
     private val root: Path, private val registry: CardRegistry, private val manifest: DeckManifest,
 ) {
+    @JvmOverloads
     fun run(plan: SearchTeacherCalibrationPlan, output: Path, workerThreads: Int,
-        sequentialRule: PairedSequentialRule? = null): SearchTeacherCalibrationReport {
+        sequentialRule: PairedSequentialRule? = null, publishProgress: Boolean = true): SearchTeacherCalibrationReport {
         require(workerThreads > 0)
         sequentialRule?.let { SearchTeacherSequentialPlan(plan, it) }
         val started = System.nanoTime()
@@ -361,7 +362,7 @@ internal class SearchTeacherCalibrationRunner(
         }
         val completed = AtomicInteger(0)
         val total = Math.multiplyExact(plan.candidates.size, plan.pairCount)
-        val progressPath = System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of)
+        val progressPath = if (publishProgress) System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of) else null
         publishDurableRunProgress(progressPath, 0, total, "calibration ${plan.phase}", "preparing paired gameplay")
         fun playTask(task: Int): Pair<String, SearchBudgetFrontierPair> {
             val candidate = plan.candidates[task / plan.pairCount]

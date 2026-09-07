@@ -1277,6 +1277,16 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         check(report.valid) { "Position screen includes refusals; inspect the retained report" }
         return
     }
+    if (options.suite in setOf("search-teacher-continuation", "search-teacher-continuation-preflight")) {
+        val plan = evidenceJson.decodeFromString<SearchTeacherContinuationPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = SearchTeacherContinuationRunner(root, registry, manifest).run(plan, requireNotNull(options.outputPath),
+            preflightOnly = options.suite == "search-teacher-continuation-preflight")
+        println("Optional continuation: ${report?.result?.disposition ?: "preflight verified"}")
+        if (report != null) check(report.operationalValid && report.treatmentIssues.isEmpty()) {
+            "Continuation contains invalid gameplay or treatment issues; inspect its report"
+        }
+        return
+    }
     if (options.suite == "search-teacher-sequential") {
         val plan = evidenceJson.decodeFromString<SearchTeacherSequentialPlan>(
             Files.readString(requireNotNull(options.profilePath)))

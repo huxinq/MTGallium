@@ -483,6 +483,16 @@ private fun readBankSource(input: RealGamePositionBankSource): BankSource {
         report.comparisons, report.policies)
 }
 
+/** Authenticate a complete fixed calibration epoch using the bank's existing checkpoint authority. */
+internal fun verifyCompletedCalibration(directory: Path, expectedIdentity: String) {
+    val source = readBankSource(RealGamePositionBankSource(directory.toString(), expectedIdentity))
+    val expected = source.comparisons.flatMap { it.pairs }.flatMap { it.games }.map { "checkpoints/${it.gameId}.json" }
+    val entries = ResearchRunArtifacts.loadAndVerify(directory, expectedIdentity).artifacts
+    require(expected.size == expected.toSet().size &&
+        entries.filter { it.relativePath.startsWith("checkpoints/") }.map { it.relativePath }.toSet() == expected.toSet())
+    expected.forEach { require(ResearchRunCheckpoints.load(directory.resolve(it)).parentPayloadSha256 == null) }
+}
+
 internal fun loadVerifiedRealGamePositionBank(directory: Path, expectedIdentity: String): RealGamePositionBankReport {
     val artifacts = ResearchRunArtifacts.loadAndVerify(directory, expectedIdentity)
     require(setOf("plan.json", "report.json").all { required -> artifacts.artifacts.any { it.relativePath == required } })

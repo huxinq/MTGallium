@@ -213,3 +213,46 @@ byte-array allocation, including the single-String size limit. The full decoded
 report object still resides in memory; streaming JSON does not imply bounded
 heap use independent of the number of games. Size the heap and private storage
 for the declared cap, and preserve checkpoint recovery and all population checks.
+
+## Optional continuation of stopped gameplay
+
+`search-teacher-continuation-preflight` authenticates a completed parent and the
+current frozen treatment without playing games. `search-teacher-continuation`
+uses the same explicit JSON plan and output directory to extend it. Both require
+`--profile`, `--output`, and `--deck-manifest`; worker count belongs to the plan.
+
+The plan records `parentDirectory`, `parentIdentity`, `parentManifestSha256`,
+`parentPrefixSha256`, `expectedSourceCommit`, `build`, `sourceCompatibilityStatement`,
+`totalPairCap`, and `workerThreads`. The `build` reference pins the verified clean-source frozen runtime. The cap
+counts parent plus new pairs. The
+parent must be operationally valid, stopped for futility or exhausted budget,
+and have no executed overshoot. Only the cap increases: original bets,
+boundaries, seed base, ordered scores, model references, policy descriptors and
+deck remain fixed. Current policy specifications and Argentum state must match;
+implementation equivalence across different source revisions still requires a
+reviewed compatibility statement, retained alongside both source identities.
+
+A new parent-linked report governs fixed calibration batches at the next unseen
+pair index. Each batch retains its own source, manifest and checkpoints; it is
+an execution unit, not an independently restarted statistical test. The
+cumulative test inspects every prefix and dispatches no later batch after its
+first stop. Already executed work beyond that prefix is retained as overshoot.
+Resume verifies and reuses existing batches and checkpoints; the original
+parent result and cap are never rewritten. A finalized continuation can be
+reverified by the same command without playing missing games. Nested batch
+manifests are registered in the final continuation manifest and their complete
+artifacts are checked during reconstruction.
+
+Costs report parent, new and combined execution epochs, including overshoot.
+The strength-and-cost indicator requires the upper-only boundary, valid
+execution, no treatment diagnostic issues, and both new and combined mean
+searched-decision cost ratios at most one. Per-game search time is reported
+separately. This indicator does not automatically promote a policy or establish
+the subsequent learning iteration.
+
+Optional continuation retains the original process's time-uniform guarantee
+under its original conditional-mean null relative to all available information.
+It does not yield fresh confirmation, conditional-on-this-prefix error control
+or campaign-wide multiplicity control. Other treatments and selected subsets
+cannot be appended. A stopped parent remains inconclusive under its original
+protocol even if the explicit continuation later crosses a boundary.
