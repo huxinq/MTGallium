@@ -99,6 +99,12 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         println("Attack kernel learning ${report.researchRunIdentity}: ${report.disposition}")
         return
     }
+    if (options.suite == "direct-attack-kernel-screen") {
+        val plan = evidenceJson.decodeFromString<DirectAttackKernelScreenPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = DirectAttackKernelScreenRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Direct attack kernel screen ${report.identity}: ${report.disposition}; no deployed-strength conclusion")
+        return
+    }
     if (options.suite == "terminal-kernel-study") {
         val plan = evidenceJson.decodeFromString<TerminalKernelStudyPlan>(Files.readString(requireNotNull(options.profilePath)))
         val report = TerminalKernelStudyRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))

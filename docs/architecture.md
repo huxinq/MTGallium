@@ -152,6 +152,23 @@ uses fresh terminal targets under frozen fast continuations, one development fit
 and held-out comparison against the incumbent's stochastic action distribution.
 Passing that comparison requires subsequent fresh gameplay; it is not strength evidence.
 
+An optional direct attack kernel selects the actual player's action on those same
+complete pure attack/decline menus of two through eight choices. It receives only
+the actual acting-player information and admitted expansion; every other menu
+continues through the incumbent Search Teacher session. The returned action still
+passes normal live rebinding and acceptance. A direct choice has a distinct
+selection kind and no search result, visits or values. Its fit, scorer and scope
+are bound into behavior identity, separately from rollout policy identity;
+configuring this option never changes either rollout policy.
+
+When either arena seat deploys a direct kernel, both seats retain a common wall-time
+measurement from before actual information/expansion construction through selection,
+including direct feature/scoring and ordinary search work. It includes interleaved
+host preparation, excludes accepted transitions, belief advancement and session
+construction, and is reported as accumulated decision computation per game.
+Legacy search-only latency fields remain separate. Absent configuration preserves
+historical policy identities and serialization; historical unmeasured cost is null.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout

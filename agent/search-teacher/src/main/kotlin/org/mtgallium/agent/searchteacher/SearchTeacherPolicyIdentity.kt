@@ -135,6 +135,9 @@ data class SearchTeacherBehaviorSpecification(
     val rootSelectionGuidanceId: String? = null,
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directRootSelectionId: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
     val searchHeuristicProfile: ArgentumHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION,
 ) {
     init {

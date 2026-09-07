@@ -536,6 +536,10 @@ data class ArenaSeatDiagnostics(
     val liveOpponentPolicyDecisions: OpponentPolicyDecisionSummary = OpponentPolicyDecisionSummary(),
     val heuristicComparatorDecisions: OpponentPolicyDecisionSummary = OpponentPolicyDecisionSummary(),
     val searchDecisionsDetail: List<ArenaSearchDecisionDiagnostic> = emptyList(),
+    /** Wall time before actual information/expansion through selection, including failed calls. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val decisionComputationMillis: List<Double>? = null,
 )
 
 @Serializable

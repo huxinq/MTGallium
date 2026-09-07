@@ -182,6 +182,8 @@ enum class SearchTeacherSelectionKind {
     SEARCHED,
     /** Explicit action selected by the policy; no search values or visits were computed. */
     POLICY_SINGLETON_ACTION,
+    /** Actual policy choice without search values or visits. */
+    DIRECT_POLICY_ACTION,
 }
 
 data class SearchTeacherPolicySelection(
@@ -239,6 +241,7 @@ class SearchTeacherPolicySession(
     private val beliefProposalAuditSink: ArgentumBeliefProposalAuditSink =
         ArgentumBeliefProposalAuditSink.NONE,
     private val rootSelectionPolicy: RootSelectionPolicy? = null,
+    private val directRootSelectionPolicy: DirectRootSelectionPolicy? = null,
 ) {
     val behaviorSpecification: SearchTeacherBehaviorSpecification =
         SearchTeacherPolicyIdentity.specification(
@@ -253,7 +256,8 @@ class SearchTeacherPolicySession(
         ).copy(rootSelectionGuidanceId = rootSelectionPolicy?.let {
             require(it.configurationId.isNotBlank())
             "$ROOT_SELECTION_GUIDANCE_RULE:${it.configurationId}"
-        })
+        }, directRootSelectionId = directRootSelectionPolicy?.configurationId?.also { require(it.isNotBlank()) })
+    init { require(directRootSelectionPolicy == null || rootSelectionPolicy == null) }
     private val belief = SearchTeacherBeliefTracker(
         root = root,
         viewer = viewer,
@@ -308,6 +312,10 @@ class SearchTeacherPolicySession(
         SearchTeacherAutomaticSelection.classify(expansion)?.let { return it }
         if (parameters.singletonSelection.enabled) {
             SearchTeacherSingletonSelection.classify(expansion)?.let { return it }
+        }
+        directRootSelectionPolicy?.select({ world.informationState(actor) }, expansion)?.let { choice ->
+            require(choice in expansion.candidates) { "Direct root policy returned a non-admitted choice" }
+            return SearchTeacherPolicySelection(choice, null, SearchTeacherSelectionKind.DIRECT_POLICY_ACTION)
         }
         // Sequential particles are still advanced after every accepted action, but the expensive
         // all-particle digest audit is needed only when its result can affect an actual search.

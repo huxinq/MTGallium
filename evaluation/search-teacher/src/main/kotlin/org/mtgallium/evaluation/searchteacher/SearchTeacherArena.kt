@@ -390,7 +390,7 @@ internal class SearchTeacherArena(
                     ),
                 ),
             )
-            return behaviorBinding(specification, sourceProvenance)
+            return behaviorBinding(specification.copy(directRootSelectionId = policy.directRootSelectionPolicy?.configurationId), sourceProvenance)
         }
 
         val direct = directPolicyBehavior(
@@ -583,6 +583,7 @@ internal class SearchTeacherArena(
                 parameters = parameters,
                 opponentPolicy = opponentModel,
                 gameId = gameId,
+                directRootSelectionPolicy = policy.directRootSelectionPolicy,
                 rolloutPolicy = policy.effectiveRootRolloutPolicy(),
                 rolloutOpponentPolicy = policy.effectiveOpponentRolloutPolicy(),
                 informationEvaluator = policy.informationEvaluator,
@@ -630,6 +631,8 @@ internal class SearchTeacherArena(
             }
             runtimes.firstOrNull()
         }
+        val measureDecisionCost = seatPolicies.values.any { it.directRootSelectionPolicy != null }
+        val decisionCostsBySeat = mutableMapOf("p0" to mutableListOf<Double>(), "p1" to mutableListOf())
         val latenciesBySeat = mutableMapOf("p0" to mutableListOf<Double>(), "p1" to mutableListOf())
         val selectionCountsBySeat = mutableMapOf(
             "p0" to mutableMapOf<SearchTeacherSelectionKind, Int>(),
@@ -653,6 +656,7 @@ internal class SearchTeacherArena(
                 policyId = policy.id,
                 searchDecisions = latenciesBySeat.getValue(seat).size,
                 searchLatenciesMillis = latenciesBySeat.getValue(seat),
+                decisionComputationMillis = decisionCostsBySeat.getValue(seat).toList().takeIf { measureDecisionCost },
                 beliefUpdates = session?.beliefDiagnosticsHistory?.size ?: 0,
                 lowEssUpdates = session?.beliefLowEssUpdates ?: 0,
                 invalidBeliefWeights = session?.beliefInvalidWeights ?: 0,
@@ -840,6 +844,7 @@ internal class SearchTeacherArena(
                 val actor = requireNotNull(world.actorToAct()) { "Non-terminal game has no actor" }
                 // O-04(a): an existing incomplete ledger refuses the next policy decision.
                 stopForRepresentationBoundary(EvidenceStopDetectionPoint.BEFORE_POLICY_CHOICE)
+                val computationStartedAt = System.nanoTime()
                 val information = world.informationState(actor)
                 if (inspectionLimits != null && information.observation.turnNumber > inspectionLimits.maximumTurns) {
                     declaredLimitStopReason = PolicyTrajectoryStopReason.TURN_LIMIT_REACHED
@@ -862,14 +867,17 @@ internal class SearchTeacherArena(
                 debugWriter?.append(decisions, null, world.privilegedDebugSnapshot())
 
                 val authoritativeBeforeSelection = world.authoritativeFingerprint()
-                val selection = choose(
+                val selection = try { choose(
                     world = world,
                     actor = actor,
                     policy = seatPolicies.getValue(actor),
                     decisionIndex = decisions,
                     gameId = gameId,
                     policySession = policySessions[actor],
-                )
+                ) } finally {
+                    if (measureDecisionCost) decisionCostsBySeat.getValue(actor) +=
+                        (System.nanoTime() - computationStartedAt) / 1_000_000.0
+                }
                 if (inspectionLimits != null) {
                     val selectionFinishedAt = System.nanoTime()
                     val policyDeadline = policyDecisionStartedAt +

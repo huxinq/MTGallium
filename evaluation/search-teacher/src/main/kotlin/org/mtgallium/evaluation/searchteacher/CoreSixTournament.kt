@@ -49,8 +49,11 @@ internal data class ArenaPolicySpec(
     /** Experimental continuation policies; null retains the production composition. */
     val rootRolloutPolicy: OpponentPolicy? = null,
     val opponentRolloutPolicy: OpponentPolicy? = null,
+    val directRootSelectionPolicy: org.mtgallium.agent.searchteacher.DirectRootSelectionPolicy? = null,
 ) {
     init {
+        require(directRootSelectionPolicy == null ||
+            (kind == ArenaPolicyKind.SEARCH && searchPlanner == SearchPlannerKind.SHARED_TREE))
         require(id.isNotBlank())
         require((kind == ArenaPolicyKind.SEARCH) == (profile != null || parameters != null))
         require(profile == null || parameters == null)

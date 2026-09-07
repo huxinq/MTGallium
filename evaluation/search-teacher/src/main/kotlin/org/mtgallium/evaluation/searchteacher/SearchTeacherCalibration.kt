@@ -107,8 +107,13 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val directArgentumHeuristic: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directAttackKernelFit: RootKernelFitReference? = null,
 ) {
     init {
+        require(directAttackKernelFit == null || (!directArgentumHeuristic && attackRootKernelRolloutFit == null)) {
+            "Direct attack deployment cannot combine with a learned attack rollout or direct heuristic"
+        }
         require(!directArgentumHeuristic || (evaluator == null && tacticalEvaluator == null &&
             rootRolloutPolicy == null && opponentRolloutPolicy == null && rolloutTurnHorizon == null &&
             rootCloningFit == null && rootKernelRolloutFit == null && fastRootKernelRolloutFit == null &&
@@ -158,6 +163,7 @@ internal data class SearchTeacherCalibrationPolicy(
 
     fun policy(baseSeed: Long) = if (directArgentumHeuristic) ArenaPolicySpec(id, ArenaPolicyKind.HEURISTIC) else ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = informationEvaluator(),
+        directRootSelectionPolicy = directAttackKernelFit?.loadDirectAttackPolicy(),
         rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy()?.let { incumbent ->
             attackRootKernelRolloutFit?.loadAttackRolloutPolicy(incumbent) ?: incumbent
         } ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
@@ -259,6 +265,11 @@ internal data class SearchTeacherCalibrationCost(
     val searchedMillisPerGame: Double?,
     /** Both seats and host overhead; this is not an estimate of this policy's isolated game cost. */
     val sharedWholeGameMeanMillis: Double?,
+    /** All measured selection calls, including direct choices and failed selection calls. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val decisionComputationMillisPerGame: Double? = null,
+
 )
 
 @Serializable
@@ -522,9 +533,12 @@ internal fun calibrationComparison(plan: SearchTeacherCalibrationPlan, candidate
             val selected = counts.values.sum()
             val latency = games.flatMap { it.seatDiagnostics.values }.filter { it.policyId == policy.id }
                 .flatMap { it.searchDecisionsDetail }.sumOf { it.latencyMillis }
+            val measured = games.flatMap { it.seatDiagnostics.values }.filter { it.policyId == policy.id }
+            val decisionCost = measured.takeIf { it.isNotEmpty() && it.all { seat -> seat.decisionComputationMillis != null } }
+                ?.sumOf { it.decisionComputationMillis!!.sum() }?.div(games.size)
             SearchTeacherCalibrationCost(search, selected, counts, latency.takeIf { selected > 0 }?.div(selected),
                 latency.takeIf { games.isNotEmpty() }?.div(games.size),
-                search.wholeGameElapsedMillis.takeIf { games.isNotEmpty() }?.div(games.size))
+                search.wholeGameElapsedMillis.takeIf { games.isNotEmpty() }?.div(games.size), decisionCost)
         })
 }
 
@@ -573,6 +587,9 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
             comparison.pairs + report.sequentialOvershootPairs.orEmpty(), comparison.candidateId),
             comparison.pairs.size, report.plan.pairOffset))
         comparison.operationalByPolicy.forEach { cost ->
+            cost.decisionComputationMillisPerGame?.let {
+                appendLine("  ${cost.search.policyId}: all decision computation ms/game=$it; direct selections=${cost.selectionCounts[SearchTeacherSelectionKind.DIRECT_POLICY_ACTION] ?: 0}. Boundary includes actual information and expansion through selection; excludes transition/belief advancement and session construction.")
+            }
             appendLine("  ${cost.search.policyId}: searched ${cost.search.searchedDecisions}/${cost.selections} selections; singleton=${cost.selectionCounts[SearchTeacherSelectionKind.POLICY_SINGLETON_ACTION] ?: 0}; search ms/selection=${cost.searchedMillisPerSelection}; search ms/game=${cost.searchedMillisPerGame}; shared game ms=${cost.sharedWholeGameMeanMillis}.")
         }
     }

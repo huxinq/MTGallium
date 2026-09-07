@@ -89,6 +89,12 @@ internal data class PositionBankScreenPlan(
     val terminalActionSignatures: Map<String, List<String>> = emptyMap(),
 ) {
     init {
+        require(mode == PositionBankScreenMode.SEARCH || policies.all { it.search.directAttackKernelFit == null }) {
+            "Direct root selection is supported only by actual-selection search screens"
+        }
+        require(policies.none { it.rootKernel != null && it.search.directAttackKernelFit != null }) {
+            "Direct root selection cannot combine with root search guidance"
+        }
         require(attackInfluenceFit == null || mode == PositionBankScreenMode.SEARCH)
         require(attackInfluenceFit == null || policies.none {
             it.search.rolloutHorizonSettlementOverride ==
@@ -271,7 +277,8 @@ internal class PositionBankScreenRunner(
                     mapOf("p0" to manifest.mainDeck, "p1" to manifest.mainDeck), parameters,
                     defaultMonoRedOpponentPolicy(), position.sourceGameId,
                     recorder ?: arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator,
-                    rootSelectionPolicy = rootPolicies[policy.search.id])
+                    rootSelectionPolicy = rootPolicies[policy.search.id],
+                    directRootSelectionPolicy = arenaPolicy.directRootSelectionPolicy)
                 replayFixedRootPrefix(position.decisionIndex, replay, actual, session)
                 require(actual.actorToAct() == position.actor)
                 require(actual.informationState(position.actor).informationStateDigest == position.informationStateDigest)
