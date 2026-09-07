@@ -4,6 +4,8 @@ import com.wingedsheep.engine.registry.CardRegistry
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.evaluation.searchteacher.evidence.RunProvenance
@@ -11,6 +13,7 @@ import org.mtgallium.research.run.*
 
 /** One explicit extension of an unchanged stopped process, not a new confirmation test. */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 internal data class SearchTeacherContinuationPlan(
     val parentDirectory: String,
     val parentIdentity: String,
@@ -21,6 +24,9 @@ internal data class SearchTeacherContinuationPlan(
     val sourceCompatibilityStatement: String,
     val totalPairCap: Int,
     val workerThreads: Int,
+    /** Inspect parity in the parent's already-declared time-uniform confidence sequence. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val seekSuperiority: Boolean = false,
 ) {
     init {
         require(parentDirectory.isNotBlank() && parentIdentity.isNotBlank() && expectedSourceCommit.isNotBlank())
@@ -41,6 +47,26 @@ internal fun continuationRule(original: PairedSequentialRule, parentResult: Pair
     require(continued.orderedPrefixSha256 == parentResult.orderedPrefixSha256 &&
         continued.upperLogCapitals == parentResult.upperLogCapitals && continued.lowerLogCapitals == parentResult.lowerLogCapitals)
     return rule
+}
+
+/**
+ * A new readout of the parent's fixed confidence sequence, not a reset or fresh confirmation.
+ * Inverting the original mixtures already tests every hypothetical mean, including .5. Changing
+ * which bound we inspect does not change those processes or their time-uniform coverage event.
+ * Preserve every executed parent pair in order, including work beyond the original NI stop.
+ */
+internal fun superiorityContinuationRule(original: PairedSequentialRule, parentResult: PairedSequentialResult,
+    scores: List<PairedSequentialScore>, firstPairIndex: Int, totalPairCap: Int): PairedSequentialRule {
+    require(original.practicalAcceptance?.objective == PairedPracticalObjective.NON_INFERIOR)
+    require(parentResult.disposition == PairedSequentialDisposition.NON_INFERIOR)
+    require(totalPairCap > original.maximumPairs)
+    require(scores.isNotEmpty() && scores.all { it.pointRate != null })
+    require(pairedSequentialTest(original, scores, firstPairIndex) == parentResult)
+    require(parentResult.confidenceSequence == pairedMeanConfidenceSequence(original,
+        scores.take(parentResult.validScoredPairs).map { requireNotNull(it.pointRate) }))
+    // These are exactly the original confidence-sequence mixtures evaluated at parity.
+    return original.copy(nullPointRate = .5, targetPointRate = .5, maximumPairs = totalPairCap,
+        practicalAcceptance = null)
 }
 
 /** The first cumulative stopping prefix wins; finish its dispatched batch only as overshoot. */
@@ -107,7 +133,9 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
         val parentResult = requireNotNull(parent.sequentialResult)
         require(parentResult.orderedPrefixSha256 == plan.parentPrefixSha256)
         val first = parent.plan.pairOffset
-        val rule = continuationRule(requireNotNull(parent.sequentialRule), parentResult, scores, first, plan.totalPairCap)
+        val rule = if (plan.seekSuperiority) superiorityContinuationRule(
+            requireNotNull(parent.sequentialRule), parentResult, scores, first, plan.totalPairCap)
+        else continuationRule(requireNotNull(parent.sequentialRule), parentResult, scores, first, plan.totalPairCap)
         require(first.toLong() + plan.totalPairCap <= Int.MAX_VALUE)
         // Loading the original descriptors authenticates frozen fits before any child gameplay.
         val arena = SearchTeacherArena(registry, manifest, calibrationPresentationProfile(source), parent.plan.baseSeed)
@@ -122,7 +150,7 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
         }
         val directory = EvidenceStore(root).requireDiagnosticOutput(output, "Search Teacher optional continuation")
         require(!directory.startsWith(parentDirectory) && !parentDirectory.startsWith(directory))
-        val identity = ResearchRunBindings(protocol = "search-teacher-optional-continuation-v1", material = mapOf(
+        val identity = ResearchRunBindings(protocol = if (plan.seekSuperiority) "search-teacher-confidence-sequence-superiority-v1" else "search-teacher-optional-continuation-v1", material = mapOf(
             "plan" to sha256(evidenceJson.encodeToString(plan)), "source" to sha256(evidenceJson.encodeToString(source)),
             "parent-rule" to sha256(evidenceJson.encodeToString(parentResult.rule)),
             "continuation-rule" to sha256(evidenceJson.encodeToString(rule)))).identity
@@ -186,24 +214,48 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
         val result = pairedSequentialTest(rule, scores, first)
         val epochs = listOf(continuationCosts("parent", parentCosts), continuationCosts("new", newCosts),
             continuationCosts("combined", parentCosts.indices.map { addCost(parentCosts[it], newCosts[it]) }))
-        val report = SearchTeacherContinuationReport(identity = identity, plan = plan, source = source,
-            parentSource = parent.sourceProvenance, parentResult = parentResult, parentPairs = parentPairs.size,
-            chunks = chunks, scores = scores, result = result, newExecutedPairs = scores.size - parentPairs.size,
-            newInspectedPairs = result.inspectedPairs - parentPairs.size, plannedUnexecutedPairs = rule.maximumPairs - scores.size,
-            operationalValid = valid, treatmentIssues = issues, costs = epochs,
-            strengthAndCostGatePassed = valid && issues.isEmpty() && result.disposition == PairedSequentialDisposition.ABOVE_NULL &&
-                epochs.drop(1).all { it.costGatePassed })
-        if (finalized) {
-            require(readEvidenceJson(directory.resolve("report.json"), SearchTeacherContinuationReport.serializer()) == report)
-        } else {
-            writeJsonAtomically(directory.resolve("report.json"), report)
-            ResearchRunArtifacts(directory, identity).also { artifacts ->
-                listOf("plan.json", "report.json", "progress.json").forEach(artifacts::register)
-                chunks.forEach { artifacts.register("${it.directory}/${ResearchRunArtifacts.MANIFEST_FILE}") }
-                artifacts.finalize()
-            }
-        }
+        val report = continuationReport(plan, identity, source, parent.sourceProvenance, parentResult,
+            parentPairs.size, scores, chunks, result, valid, issues, epochs)
+        retainContinuationReport(directory, report)
         return report
+    }
+}
+
+internal fun continuationReport(plan: SearchTeacherContinuationPlan, identity: String,
+    source: PolicySourceProvenance, parentSource: PolicySourceProvenance,
+    parentResult: PairedSequentialResult, parentPairCount: Int,
+    scores: List<PairedSequentialScore>, chunks: List<ContinuationChunkBinding>,
+    result: PairedSequentialResult, valid: Boolean, issues: List<String>,
+    epochs: List<ContinuationEpochCost>): SearchTeacherContinuationReport {
+    val rule = result.rule
+    return SearchTeacherContinuationReport(
+        protocol = if (plan.seekSuperiority) "search-teacher-confidence-sequence-superiority-v1" else "search-teacher-optional-continuation-v1",
+        identity = identity, plan = plan, source = source,
+        parentSource = parentSource, parentResult = parentResult, parentPairs = parentPairCount,
+        chunks = chunks, scores = scores, result = result, newExecutedPairs = scores.size - parentPairCount,
+        newInspectedPairs = (result.inspectedPairs - parentPairCount).coerceAtLeast(0), plannedUnexecutedPairs = rule.maximumPairs - scores.size,
+        operationalValid = valid, treatmentIssues = issues, costs = epochs,
+        strengthAndCostGatePassed = valid && issues.isEmpty() && result.disposition == PairedSequentialDisposition.ABOVE_NULL &&
+            epochs.drop(1).all { it.costGatePassed }).let { report ->
+            if (!plan.seekSuperiority) report else report.copy(
+                result = result.copy(confidenceSequence = pairedMeanConfidenceSequence(rule,
+                    scores.take(result.validScoredPairs).map { requireNotNull(it.pointRate) })),
+                interpretation = "Parity readout of the parent's predeclared time-uniform confidence sequence: same policies, ordered pair population, betting fractions and directional errors; no capital reset. The original NI rule, inspected prefix and overshoot remain immutable. All executed parent pairs enter the parity process once in their original order; its first crossing fixes its own inspected prefix and overshoot. ABOVE_NULL rejects mean <= .5; BELOW_TARGET rejects mean >= .5. This is continuation evidence, not fresh confirmation, conditional-on-prefix or campaign-wide error control, or automatic promotion. Parent and child source identities remain separate; source compatibility is reviewed, not proved by equal policy hashes. Cost populations include execution overshoot and do not establish a runtime intervention.")
+        }
+}
+
+internal fun retainContinuationReport(directory: Path, report: SearchTeacherContinuationReport) {
+    if (Files.exists(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))) {
+        ResearchRunArtifacts.loadAndVerify(directory, report.identity)
+        require(readEvidenceJson(directory.resolve("report.json"), SearchTeacherContinuationReport.serializer()) == report)
+    } else {
+        writeJsonAtomically(directory.resolve("report.json"), report)
+        writeJsonAtomically(directory.resolve("progress.json"), report.result)
+        ResearchRunArtifacts(directory, report.identity).also { artifacts ->
+            listOf("plan.json", "report.json", "progress.json").forEach(artifacts::register)
+            report.chunks.forEach { artifacts.register("${it.directory}/${ResearchRunArtifacts.MANIFEST_FILE}") }
+            artifacts.finalize()
+        }
     }
 }
 

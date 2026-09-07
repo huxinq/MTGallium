@@ -223,12 +223,30 @@ uses the same explicit JSON plan and output directory to extend it. Both require
 
 The plan records `parentDirectory`, `parentIdentity`, `parentManifestSha256`,
 `parentPrefixSha256`, `expectedSourceCommit`, `build`, `sourceCompatibilityStatement`,
-`totalPairCap`, and `workerThreads`. The `build` reference pins the verified clean-source frozen runtime. The cap
-counts parent plus new pairs. The
-parent must be operationally valid, stopped for futility or exhausted budget,
-and have no executed overshoot. Only the cap increases: original bets,
-boundaries, seed base, ordered scores, model references, policy descriptors and
-deck remain fixed. Current policy specifications and Argentum state must match;
+`totalPairCap`, `workerThreads`, and optional `seekSuperiority`. Omitted or false
+`seekSuperiority` preserves the original plan encoding and continuation protocol.
+The `build` reference pins the verified clean-source frozen runtime. The cap
+counts parent plus new pairs and must exceed the parent's cap.
+
+The default mode requires an operationally valid parent stopped for futility or
+exhausted budget, with no executed overshoot. Only the cap increases: original
+bets and boundaries remain fixed.
+
+With `seekSuperiority: true`, the parent must be a completed, valid
+`NON_INFERIOR` trial with its authenticated confidence sequence. The distinct
+`search-teacher-confidence-sequence-superiority-v1` protocol inspects parity in
+that already-declared time-uniform confidence sequence. Its betting fractions
+and directional error allocations remain fixed; the same mixtures are evaluated
+at 0.5 with no capital reset. Every executed parent pair, including original NI
+overshoot, enters exactly once in order. The first parity crossing determines
+this readout's own inspected prefix and overshoot. `ABOVE_NULL` rejects mean
+at most 0.5; `BELOW_TARGET` rejects mean at least 0.5. Invalid execution stops
+without a score, and an exhausted cap is inconclusive. Superiority is not
+promised. If inherited scores already cross parity, the report finalizes with
+zero new pairs and no child dispatch.
+
+Both modes keep seed base, ordered population, model references, policy
+descriptors and deck fixed. Current policy specifications and Argentum must match;
 implementation equivalence across different source revisions still requires a
 reviewed compatibility statement, retained alongside both source identities.
 
@@ -254,5 +272,6 @@ Optional continuation retains the original process's time-uniform guarantee
 under its original conditional-mean null relative to all available information.
 It does not yield fresh confirmation, conditional-on-this-prefix error control
 or campaign-wide multiplicity control. Other treatments and selected subsets
-cannot be appended. A stopped parent remains inconclusive under its original
-protocol even if the explicit continuation later crosses a boundary.
+cannot be appended. The parent keeps its original disposition, inspected prefix and overshoot even
+if the continuation later crosses a different boundary. An NI result therefore
+remains an NI result in its original artifact.
