@@ -307,9 +307,11 @@ internal fun loadStudyScreen(reference: CloningComparisonInput, expected: Positi
     }
 }
 
-internal fun requireTerminalStudyControl(report: PositionBankScreenReport, plan: PositionBankScreenPlan) {
-    require(report.plan == plan && report.valid && report.selectedRootIds == plan.rootIds && report.rows.size == plan.rootIds.size)
-    require(report.rows.map { it.rootId }.toSet() == plan.rootIds.toSet())
+internal fun requireTerminalStudyControl(report: PositionBankScreenReport, plan: PositionBankScreenPlan, expectedRootIds: List<String> = plan.rootIds) {
+    require(plan.mode == PositionBankScreenMode.ROOT_ROLLOUT_SELECTION && plan.repetitions == 1 && plan.policies.size == 1)
+    require(expectedRootIds.isNotEmpty() && expectedRootIds == expectedRootIds.distinct().sorted())
+    require(report.plan == plan && report.valid && report.selectedRootIds == expectedRootIds && report.rows.size == expectedRootIds.size)
+    require(report.rows.map { it.rootId }.toSet() == expectedRootIds.toSet())
     report.rows.forEach { row ->
         require(row.disposition == PositionBankScreenDisposition.ROLLOUT_SELECTED && row.chosen != null)
         require(row.searchDiagnostics == null && row.searchRootValue == null && row.candidateStatistics.isEmpty() && row.rootActionEstimates.isEmpty())
