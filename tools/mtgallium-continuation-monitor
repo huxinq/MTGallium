@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Install a passive, low-priority monitor for an existing parent-linked continuation."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--game-output', type=Path, required=True)
+parser.add_argument('--durable-state', type=Path, required=True)
+parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--trials', type=int, default=2000)
+parser.add_argument('--poll-seconds', type=int, default=60)
+parser.add_argument('--start', action='store_true', help='Start a passive systemd user service after sealing setup')
+args = parser.parse_args()
+assert args.trials > 0 and args.poll_seconds >= 10
+repo = Path(__file__).resolve().parents[1]
+def git(*arguments):
+    return subprocess.check_output(['git', *arguments], cwd=repo, text=True).strip()
+assert not git('status', '--porcelain'), 'Commit monitor source first'
+source = git('rev-parse', 'HEAD')
+private = Path(os.environ['MTGALLIUM_PRIVATE_EVIDENCE_ROOT']).resolve()
+output = Path(os.path.abspath(args.output))
+work = private / 'search-teacher' / 'work'
+assert private != repo and repo not in private.parents
+assert work in output.parents and output != work and not output.exists(), 'Choose a fresh private work child'
+for path in [output, *output.parents]:
+    assert not path.is_symlink(), f'Symlink output route: {path}'
+game = args.game_output.resolve()
+assert game not in output.parents and output not in game.parents and game != output
+state = args.durable_state.resolve()
+request = json.loads((state/'request.json').read_text())
+assert str(game) in request['outputPaths'], 'Durable request must identify this gameplay output'
+plan = json.loads((game/'plan.json').read_text())
+build = Path(plan['build']['directory'])
+classpath = (build/'classpath.txt').read_text().strip()
+setup = output/'setup'
+setup.mkdir(parents=True)
+(setup/'classpath.txt').write_text(classpath+'\n')
+shutil.copy2(game/'plan.json', setup/'continuation-plan.json')
+config = dict(monitorSource=source, treatmentSource=plan['expectedSourceCommit'],
+              treatmentRepository=request['workingDirectory'], gameDirectory=str(game),
+              durableStateDirectory=str(state), unit=request['unit'], outputDirectory=str(output),
+              trials=args.trials, pollSeconds=args.poll_seconds)
+(setup/'config.json').write_text(json.dumps(config, indent=2)+'\n')
+for name in ['ContinuationProgressMonitor.java', 'ContinuationProgressMonitorTest.java']:
+    shutil.copy2(repo/'tools/diagnostics'/name, setup/name)
+shutil.copy2(__file__, setup/'installer.py')
+classes = setup/'classes'
+with (setup/'compile-and-test.log').open('w') as log:
+    subprocess.run(['javac', '-cp', classpath, '-d', str(classes), str(setup/'ContinuationProgressMonitor.java'),
+                    str(setup/'ContinuationProgressMonitorTest.java')], check=True, stdout=log, stderr=subprocess.STDOUT)
+    subprocess.run(['java', '-XX:ActiveProcessorCount=1', '-Xmx512m', '-cp', str(classes)+':'+classpath,
+                    'ContinuationProgressMonitorTest'], check=True, stdout=log, stderr=subprocess.STDOUT)
+assert source == git('rev-parse', 'HEAD') and not git('status', '--porcelain'), 'Monitor source changed during compilation'
+command = ['java', '-XX:ActiveProcessorCount=1', '-Xmx2g', '-cp', str(classes)+':'+classpath, 'ContinuationProgressMonitor']
+setup_identity = subprocess.check_output(command+['--seal-setup', str(setup)], text=True).strip()
+print(setup_identity)
+if args.start:
+    unit = 'mtgallium-progress-'+request['runId'].rsplit('-',1)[-1]+'-'+setup_identity.rsplit(':',1)[-1][:8]
+    subprocess.run(['systemd-run', '--user', '--unit', unit, '--property=Nice=19', '--property=CPUWeight=1',
+                    '--property=MemoryMax=3G', '--property=Restart=on-failure', '--property=RestartSec=30',
+                    '--working-directory', str(setup), '--setenv=MTGALLIUM_PUBLIC_SOURCE=1',
+                    '--setenv=MTGALLIUM_PRIVATE_EVIDENCE_ROOT='+str(private), *command, str(setup)], check=True)
+    print('Monitor service:', unit+'.service')
+else:
+    subprocess.run(command+[str(setup),'--once'], check=True)
+print('Automatic summary:', output/'latest.md')
