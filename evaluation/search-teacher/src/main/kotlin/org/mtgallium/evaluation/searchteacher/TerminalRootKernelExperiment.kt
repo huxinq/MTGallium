@@ -129,7 +129,9 @@ internal fun fitTerminalRootKernel(repository: Path, plan: TerminalRootKernelFit
     val bank = loadVerifiedRealGamePositionBank(Path.of(plan.bank.directory), plan.bank.researchRunIdentity)
     val screen = loadTerminalRootScreen(plan.terminal, bank)
     val additions = plan.additional.map { input ->
-        val extraBank = loadVerifiedRealGamePositionBank(Path.of(input.bank.directory), input.bank.researchRunIdentity)
+        // Worker-sized target batches can share this exact authenticated bank. Retain one copy.
+        val extraBank = if (input.bank == plan.bank) bank else
+            loadVerifiedRealGamePositionBank(Path.of(input.bank.directory), input.bank.researchRunIdentity)
         val extra = loadTerminalRootScreen(input.terminal, extraBank)
         requireSameTerminalTarget(screen.plan, extra.plan)
         require(screen.sourceProvenance.argentum.revision == extra.sourceProvenance.argentum.revision)
