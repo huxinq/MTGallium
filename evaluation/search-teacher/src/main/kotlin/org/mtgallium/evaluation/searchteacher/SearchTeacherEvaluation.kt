@@ -82,6 +82,12 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         println("Terminal prediction diagnostic ${report.identity}: ${report.roots.size} development roots; descriptive only")
         return
     }
+    if (options.suite == "attack-kernel-gameplay") {
+        val plan = evidenceJson.decodeFromString<AttackKernelGameplayPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = AttackKernelGameplayRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Attack kernel gameplay ${report.identity}: ${report.disposition}; passed=${report.strengthAndCostGatePassed}")
+        return
+    }
     if (options.suite == "attack-kernel-learning") {
         val plan = evidenceJson.decodeFromString<AttackKernelLearningPlan>(Files.readString(requireNotNull(options.profilePath)))
         val report = AttackKernelLearningRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
