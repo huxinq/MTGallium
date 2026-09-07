@@ -91,6 +91,17 @@ class RootKernelSelectionPolicyTest {
         assertFails { valid.load() }
     }
 
+    @Test fun `terminal fit has distinct authenticated target protocol and retains frozen model`() {
+        val f = RootActionKernelFeatures(RootActionKernelVector(listOf(0), listOf(1.0)), RootActionKernelVector(listOf(0), listOf(1.0)))
+        val model = RootActionKernelModel(ridge = .001, centers = listOf(f), coefficients = listOf(.2))
+        val terminal = fixture(model, terminal = true)
+        assertEquals(model, terminal.loadFrozenModel().model)
+        assertNotEquals(fixture(model).load().configurationId, terminal.load().configurationId)
+        assertFails { fixture(model, terminal = true, wrongTarget = true).load() }
+        assertFails { fixture(model, terminal = true, bindWrongPlan = true).load() }
+        assertFails { fixture(model, terminal = true, actions = 2).load() }
+    }
+
     @Test fun `screen binds kernel manifest and rejects unsupported modes while preserving historical defaults`() {
         val plain = PositionBankScreenPolicy(SearchTeacherCalibrationPolicy("synthetic", 2, 4, 2, 1.4, false, 1.0), MonoRedVisibleEvaluatorConfig())
         assertFalse("rootKernel" in evidenceJson.encodeToString(plain))
@@ -104,22 +115,26 @@ class RootKernelSelectionPolicyTest {
 
     /** Entirely synthetic source/report metadata; this fixture is not historical evidence. */
     private fun fixture(model: RootActionKernelModel, protocol: String = "root-action-kernel-fit-v1", actions: Int = model.centers.size,
-        bindWrongPlan: Boolean = false): RootKernelFitReference {
+        bindWrongPlan: Boolean = false, terminal: Boolean = false, wrongTarget: Boolean = false): RootKernelFitReference {
         val directory = Files.createTempDirectory("synthetic-root-kernel-")
         val state = ResearchSourceTreeState("a".repeat(40), "0".repeat(64), "0".repeat(64), "0".repeat(64))
         val source = ResearchRunProvenance(state.revision, state.revision, state.revision, false, false,
             ResearchSourceProvenance(expectedArgentumRevision = state.revision, outer = state, argentum = state))
         val plan = RootActionKernelPlan(CloningComparisonInput("/tmp/synthetic", "synthetic"))
-        val bindings = ResearchRunBindings(protocol = protocol, material = mapOf(
+        val terminalPlan = TerminalRootKernelFitPlan(CloningComparisonInput("/tmp/bank", "synthetic"), SavedRootPolicyInput("/tmp/terminal", "synthetic", "terminal"), model.ridge)
+        val bindings = ResearchRunBindings(protocol = if (terminal) "terminal-root-action-kernel-fit-v1" else protocol, material = mapOf(
             "source" to sha256(evidenceJson.encodeToString(source)),
-            "plan" to if (bindWrongPlan) "wrong" else sha256(evidenceJson.encodeToString(plan)),
+            "plan" to if (bindWrongPlan) "wrong" else sha256(if (terminal) evidenceJson.encodeToString(terminalPlan) else evidenceJson.encodeToString(plan)),
+            "target" to if (wrongTarget) "search-backup" else "conditional-terminal-payoff-equal-repetition-mean-root-centered-v1",
             "feature-schema" to NEURAL_BC_FEATURE_SCHEMA,
             "kernel" to "l2-state-l2-candidate-root-centered-candidate-plus-state-tensor-candidate-v1"))
         val metrics = RootActionKernelFitMetrics(1, 1, actions, 0.0, 0.0)
         val report = RootActionKernelReport(bindings.identity, source, plan, metrics, metrics, 0.0, 0.0, 0, emptyList(), emptyList(), emptyList())
         Files.writeString(directory.resolve("model.json"), evidenceJson.encodeToString(model))
         Files.writeString(directory.resolve("bindings.json"), evidenceJson.encodeToString(bindings))
-        Files.writeString(directory.resolve("report.json"), evidenceJson.encodeToString(report))
+        val terminalReport = TerminalRootKernelFitReport(bindings.identity, source, terminalPlan, metrics,
+            TerminalRootScreenAccounting(1, 1, 0, actions, actions, 0, 0, 0, actions, 0, 0, 0, 0.0))
+        Files.writeString(directory.resolve("report.json"), if (terminal) evidenceJson.encodeToString(terminalReport) else evidenceJson.encodeToString(report))
         ResearchRunArtifacts(directory, bindings.identity).also {
             listOf("model.json", "bindings.json", "report.json").forEach(it::register); it.finalize()
         }

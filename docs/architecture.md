@@ -90,3 +90,9 @@ the declared rollout policies to terminal payoff, without leaf evaluation.
 Records retain posterior weights, paired sampling coordinates, completed
 outcomes, non-game failures and unexecuted work. Incomplete actions have no
 value target, and terminal samples never create search visits or backups.
+
+Terminal-target kernel fitting uses a distinct artifact protocol. It admits only
+complete development rows, removes root-wide offsets, and freezes the fixed-ridge
+model before generating held-out terminal targets. The target comparison holds
+the prior model's development roots and safe features fixed and requires disjoint
+held-out seed groups. It measures conditional action ordering, not deployed strength.

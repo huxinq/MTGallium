@@ -8,6 +8,8 @@ import org.mtgallium.agent.infoset.core.RootSelectionPolicy
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.research.run.*
 
+internal data class LoadedRootKernelModel(val model: RootActionKernelModel, val configurationId: String)
+
 @Serializable
 internal data class RootKernelFitReference(val directory: String, val researchRunIdentity: String, val manifestSha256: String) {
     init {
@@ -16,7 +18,9 @@ internal data class RootKernelFitReference(val directory: String, val researchRu
         require(manifestSha256.matches(Regex("[0-9a-f]{64}")))
     }
 
-    fun load(): RootKernelSelectionPolicy {
+    fun load(): RootKernelSelectionPolicy = loadFrozenModel().let { RootKernelSelectionPolicy(it.model, it.configurationId) }
+
+    fun loadFrozenModel(): LoadedRootKernelModel {
         val path = Path.of(directory)
         require(researchSha256File(path.resolve(ResearchRunArtifacts.MANIFEST_FILE)) == manifestSha256)
         val manifest = ResearchRunArtifacts.loadAndVerify(path, researchRunIdentity)
@@ -28,18 +32,34 @@ internal data class RootKernelFitReference(val directory: String, val researchRu
             return Files.readString(file)
         }
         val bindings = evidenceJson.decodeFromString<ResearchRunBindings>(input("bindings.json"))
-        require(bindings.identity == researchRunIdentity && bindings.protocol == "root-action-kernel-fit-v1")
-        val report = evidenceJson.decodeFromString<RootActionKernelReport>(input("report.json"))
-        require(report.researchRunIdentity == researchRunIdentity)
-        report.source.requireReady()
-        require(!report.source.outerDirty && !report.source.engineDirty)
-        require(bindings.material["source"] == sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), report.source)))
-        require(bindings.material["plan"] == sha256(evidenceJson.encodeToString(RootActionKernelPlan.serializer(), report.plan)))
+        require(bindings.identity == researchRunIdentity)
+        val model = evidenceJson.decodeFromString<RootActionKernelModel>(input("model.json"))
+        when (bindings.protocol) {
+            "root-action-kernel-fit-v1" -> {
+                val report = evidenceJson.decodeFromString<RootActionKernelReport>(input("report.json"))
+                require(report.researchRunIdentity == researchRunIdentity)
+                report.source.requireReady()
+                require(!report.source.outerDirty && !report.source.engineDirty)
+                require(bindings.material["source"] == sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), report.source)))
+                require(bindings.material["plan"] == sha256(evidenceJson.encodeToString(RootActionKernelPlan.serializer(), report.plan)))
+                require(model.ridge == report.plan.ridge && model.centers.size == report.development.actions)
+            }
+            "terminal-root-action-kernel-fit-v1" -> {
+                val report = evidenceJson.decodeFromString<TerminalRootKernelFitReport>(input("report.json"))
+                require(report.researchRunIdentity == researchRunIdentity)
+                report.source.requireReady()
+                require(!report.source.outerDirty && !report.source.engineDirty)
+                require(bindings.material["source"] == sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), report.source)))
+                require(bindings.material["plan"] == sha256(evidenceJson.encodeToString(TerminalRootKernelFitPlan.serializer(), report.plan)))
+                require(bindings.material["target"] == "conditional-terminal-payoff-equal-repetition-mean-root-centered-v1")
+                require(model.ridge == report.plan.ridge && model.centers.size == report.development.actions)
+                require(report.accounting.refusedRows == 0 && report.accounting.completedTerminalSamples == report.accounting.requestedContinuations)
+            }
+            else -> error("Unsupported root kernel fit protocol: ${bindings.protocol}")
+        }
         require(bindings.material["feature-schema"] == NEURAL_BC_FEATURE_SCHEMA)
         require(bindings.material["kernel"] == "l2-state-l2-candidate-root-centered-candidate-plus-state-tensor-candidate-v1")
-        val model = evidenceJson.decodeFromString<RootActionKernelModel>(input("model.json"))
-        require(model.ridge == report.plan.ridge && model.centers.size == report.development.actions)
-        return RootKernelSelectionPolicy(model, "root-kernel-clipped-score-v1:$COMPILED_ROOT_ACTION_KERNEL_ID:$researchRunIdentity:$manifestSha256:${entries.getValue("model.json").sha256}")
+        return LoadedRootKernelModel(model, "root-kernel-clipped-score-v1:$COMPILED_ROOT_ACTION_KERNEL_ID:$researchRunIdentity:$manifestSha256:${entries.getValue("model.json").sha256}")
     }
 }
 
