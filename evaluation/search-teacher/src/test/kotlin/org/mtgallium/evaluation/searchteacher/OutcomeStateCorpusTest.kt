@@ -1,6 +1,8 @@
 package org.mtgallium.evaluation.searchteacher
 
 import org.mtgallium.agent.infoset.argentum.ArgentumRawTransition
+import com.wingedsheep.engine.core.TargetsChosenEvent
+import com.wingedsheep.engine.core.BecomesTargetEvent
 import com.wingedsheep.engine.core.ActivateAbility
 import com.wingedsheep.engine.core.AbilityActivatedEvent
 import com.wingedsheep.engine.core.GameAction
@@ -32,6 +34,9 @@ import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.PlayerYields
 import com.wingedsheep.engine.state.components.battlefield.LastKnownPermanentComponent
 import com.wingedsheep.engine.state.components.identity.CardComponent
+import com.wingedsheep.engine.state.components.stack.ChosenTarget
+import com.wingedsheep.engine.state.components.stack.TargetsComponent
+import com.wingedsheep.sdk.scripting.targets.AnyTarget
 import com.wingedsheep.engine.state.components.stack.ActivatedAbilityOnStackComponent
 import com.wingedsheep.engine.state.components.stack.EntitySnapshot
 import com.wingedsheep.engine.state.components.stack.TriggeredAbilityOnStackComponent
@@ -759,6 +764,48 @@ class OutcomeStateCorpusTest {
     }
 
     @Test
+    fun `targeted activation preserves every auxiliary component while correlating its resolution key`() {
+        val base = syntheticActivatedTransition()
+        val targetId = EntityId.of("synthetic-target")
+        val targets = TargetsComponent(
+            targets = listOf(ChosenTarget.Permanent(targetId)),
+            targetRequirements = listOf(AnyTarget()),
+            targetEntryStamps = mapOf(targetId to 17L),
+        )
+        fun GameState.withTargets(component: TargetsComponent = targets): GameState = copy(
+            entities = entities + (SYNTHETIC_STACK_ID to
+                requireNotNull(getEntity(SYNTHETIC_STACK_ID)).with(component)),
+        )
+        val manaEvent = AbilityActivatedEvent(EntityId.of("mana-source"), "Synthetic Land",
+            SYNTHETIC_CONTROLLER_ID, isManaAbility = true, costsTap = true)
+        val events = listOf(manaEvent) + base.expectedEvents + listOf(
+            TargetsChosenEvent(SYNTHETIC_CONTROLLER_ID, SYNTHETIC_STACK_ID, SYNTHETIC_SOURCE_NAME),
+            BecomesTargetEvent(targetId, "Synthetic Target", SYNTHETIC_STACK_ID, SYNTHETIC_CONTROLLER_ID),
+        )
+        val targeted = base.copy(
+            action = (base.action as ActivateAbility).copy(targets = targets.targets),
+            expectedEvents = events, actualEvents = events,
+            expectedAfter = base.expectedAfter.withTargets(),
+            actualAfter = base.actualAfter.withTargets(),
+        )
+        assertEquals(null, targeted.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0))
+        fun refused(actualAfter: GameState) {
+            assertTrue(targeted.copy(actualAfter = actualAfter)
+                .difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0) != null)
+        }
+        refused(base.actualAfter.withTargets(targets.copy(
+            targets = listOf(ChosenTarget.Permanent(EntityId.of("different-target"))),
+        )))
+        refused(base.actualAfter.withTargets(targets.copy(targetEntryStamps = mapOf(targetId to 18L))))
+        refused(base.actualAfter.withTargets(targets.copy(targetRequirements = listOf(AnyTarget(count = 2)))))
+        refused(base.actualAfter)
+        refused(targeted.actualAfter.copy(entities = targeted.actualAfter.entities +
+            (SYNTHETIC_STACK_ID to requireNotNull(targeted.actualAfter.getEntity(SYNTHETIC_STACK_ID))
+                .with(SYNTHETIC_CARD))))
+        refused(targeted.actualAfter.changeActivation { copy(effect = GainLifeEffect(3)) })
+    }
+
+    @Test
     fun `activated resolution correspondence refuses missing ambiguous or unequal creation evidence`() {
         val creation = syntheticActivatedTransition()
         fun refused(candidate: SyntheticDelayedAbilityTransition) {
@@ -783,10 +830,8 @@ class OutcomeStateCorpusTest {
             (SYNTHETIC_STACK_ID to ComponentContainer.of(SYNTHETIC_CARD))),
             actualBefore = creation.actualBefore.copy(entities = creation.actualBefore.entities +
                 (SYNTHETIC_STACK_ID to ComponentContainer.of(SYNTHETIC_CARD)))))
-        refused(creation.copy(expectedAfter = creation.expectedAfter.copy(entities = creation.expectedAfter.entities +
-            (SYNTHETIC_STACK_ID to creation.expectedAfter.getEntity(SYNTHETIC_STACK_ID)!!.with(SYNTHETIC_CARD))),
-            actualAfter = creation.actualAfter.copy(entities = creation.actualAfter.entities +
-                (SYNTHETIC_STACK_ID to creation.actualAfter.getEntity(SYNTHETIC_STACK_ID)!!.with(SYNTHETIC_CARD)))))
+        refused(creation.copy(actualAfter = creation.actualAfter.copy(entities = creation.actualAfter.entities +
+            (SYNTHETIC_STACK_ID to creation.actualAfter.getEntity(SYNTHETIC_STACK_ID)!!.with(SYNTHETIC_CARD)))))
         assertTrue(creation.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0,
             expectedAccepted = false, actualAccepted = false) != null)
         assertTrue(creation.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0,

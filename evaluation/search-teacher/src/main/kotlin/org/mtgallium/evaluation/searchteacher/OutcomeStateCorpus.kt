@@ -1620,8 +1620,7 @@ internal class RecordedReplayStateEquivalence(
         ) return MappingDiscovery()
         val expectedContainer = expectedAfter.getEntity(entityId) ?: return MappingDiscovery()
         val actualContainer = actualAfter.getEntity(entityId) ?: return MappingDiscovery()
-        if (expectedContainer.all().size != 1 || actualContainer.all().size != 1 ||
-            expectedAfter.stack.count { it == entityId } != 1 ||
+        if (expectedAfter.stack.count { it == entityId } != 1 ||
             actualAfter.stack.count { it == entityId } != 1
         ) return MappingDiscovery()
         val expected = expectedContainer.get<ActivatedAbilityOnStackComponent>() ?: return MappingDiscovery()
@@ -1632,7 +1631,10 @@ internal class RecordedReplayStateEquivalence(
             !expected.objectReferences.captured ||
             expected.sourceId != event.sourceId || expected.sourceName != event.sourceName ||
             expected.controllerId != event.controllerId ||
-            expected != actual.copy(objectReferences = actual.objectReferences.copy(resolutionKey = expectedKey))
+            // Targets, entry stamps, requirements and all other components remain exact.
+            expectedContainer != actualContainer.with(actual.copy(
+                objectReferences = actual.objectReferences.copy(resolutionKey = expectedKey),
+            ))
         ) return MappingDiscovery()
         return MappingDiscovery(listOf(ScopedReplayIdentityMapping(
             entityId, expectedKey, actualKey, activatedResolutionKey = true,
