@@ -24,10 +24,12 @@ const val ARGENTUM_HEURISTIC_ANNOTATION_UNAVAILABLE_TRIGGER_V1: String =
 /** Safe approximation of Argentum's proactive heuristic using only projected choice metadata. */
 class SemanticHeuristicOpponentPolicy(
     override val id: String = "semantic-argentum-heuristic-v2",
+    override val requiresProductionAdmission: Boolean = true,
 ) : OpponentPolicy {
     override val distributionIsSeedInvariant: Boolean = true
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification =
         OpponentPolicyBehaviorSpecification(
+            requiresProductionAdmission = requiresProductionAdmission,
             implementationId = "semantic-typed-action-intent-score-table-v2",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,

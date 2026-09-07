@@ -19,6 +19,11 @@ class InformationSetSearch(
         leafEvaluationStrategy.source.invokedEvaluatorConfigurationId
 
     init {
+        listOf(opponentPolicy, rolloutPolicy, rolloutOpponentPolicy).forEach { policy ->
+            require(!policy.requiresPolicyAnnotations || policy.requiresProductionAdmission) {
+                "Policy annotations require production admission"
+            }
+        }
         require(leafEvaluationStrategy.configuredEvaluatorId == config.leaf.evaluator.evaluatorId) {
             "Configured leaf ${config.leaf.evaluator.evaluatorId} does not match strategy " +
                 leafEvaluationStrategy.configuredEvaluatorId
@@ -81,7 +86,7 @@ class InformationSetSearch(
 
     /**
      * Continues an already-applied first edge to an actual engine terminal state with the exact
-     * production root/opponent rollout-policy pair and seed derivation. This diagnostic seam never
+     * configured root/opponent rollout-policy pair and seed derivation. This diagnostic seam never
      * invokes a leaf evaluator or converts exhaustion, missing choices, rejection, or policy
      * replacement into a payoff.
      */
@@ -96,7 +101,7 @@ class InformationSetSearch(
         require(childDepth > 0)
         require(maximumContinuationPolicyDecisions > 0)
         check(!config.compressPolicySingletonPasses) {
-            "Terminal evidence requires the production uncompressed rollout-policy decision path"
+            "Terminal evidence requires the configured uncompressed rollout-policy decision path"
         }
         val world = childWorld.fork()
         val rootAudit = OpponentPolicyDecisionCounter()
@@ -544,8 +549,10 @@ class InformationSetSearch(
                     transitionCache?.annotatedExpansion(transitionNode) {
                         initialPolicyAnnotatedExpansion(world)
                     } ?: initialPolicyAnnotatedExpansion(world)
-                } else {
+                } else if (opponentPolicy.requiresProductionAdmission) {
                     initialPolicyAdmissionExpansion(world)
+                } else {
+                    expansion
                 }
             }
             val policySeed = ComponentSeeds.derive(searchSeed, simulationIndex, depth, "opponent")
@@ -1490,8 +1497,10 @@ class InformationSetSearch(
     ): PolicyExpansion = if (policy.requiresPolicyAnnotations) {
         if (workAudit != null) workAudit.policyAnnotatedExpansions++
         initialPolicyAnnotatedExpansion(world)
-    } else {
+    } else if (policy.requiresProductionAdmission) {
         initialPolicyAdmissionExpansion(world)
+    } else {
+        initialExpansion(world)
     }
 
     private fun descriptor(

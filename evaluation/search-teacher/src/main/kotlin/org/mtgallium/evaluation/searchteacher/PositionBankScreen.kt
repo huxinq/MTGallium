@@ -354,8 +354,10 @@ internal fun selectPositionScreenRollout(
 ): OpponentPolicyDecision {
     val information = world.informationState(actor)
     require(world.actorToAct() == actor && information.actingPlayerId == actor)
+    require(!policy.requiresPolicyAnnotations || policy.requiresProductionAdmission)
     val menu = (if (policy.requiresPolicyAnnotations) world.expandChoicesWithPolicyAnnotations()
-        else world.expandChoicesForPolicyAdmission()).candidates
+        else if (policy.requiresProductionAdmission) world.expandChoicesForPolicyAdmission()
+        else world.expandChoices()).candidates
     // An admission anchor or a changed semantic payload would make retained all-action targets incomplete.
     val saved = savedMenu.associateBy { it.signature }
     require(saved.size == savedMenu.size && menu.size == savedMenu.size &&

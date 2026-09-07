@@ -127,18 +127,21 @@ class ParticleBelief private constructor(
         updateSeed: Long,
         rejuvenator: ParticleRejuvenator = ParticleRejuvenator.FORK_ONLY,
     ): ParticleBeliefUpdate {
+        require(!opponentPolicy.requiresPolicyAnnotations || opponentPolicy.requiresProductionAdmission)
         val advanced = mutableListOf<LogWeightedWorld>()
         val opponentDecisionCounter = OpponentPolicyDecisionCounter()
         var rejected = 0
         entries.forEachIndexed { index, entry ->
             // Private choices are still sampled from the actor's own safe information. Preserve
-            // the policy-admitted family even when annotations are not consumed, and materialize
-            // annotations only for policies that declare that requirement.
+            // the declared menu population; only opted-in policies omit production admission.
+            // Materialize annotations only for policies that declare that requirement.
             val candidates = (entry.world as? PolicyAnnotatedSearchWorld)?.let { world ->
                 if (opponentPolicy.requiresPolicyAnnotations) {
                     world.expandChoicesWithPolicyAnnotations().candidates
-                } else {
+                } else if (opponentPolicy.requiresProductionAdmission) {
                     world.expandChoicesForPolicyAdmission().candidates
+                } else {
+                    world.expandChoices().candidates
                 }
             } ?: entry.world.expandChoices().candidates
             if (candidates.isEmpty()) {

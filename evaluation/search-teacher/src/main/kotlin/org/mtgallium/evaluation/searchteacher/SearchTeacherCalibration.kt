@@ -84,6 +84,12 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rootKernelRolloutFit: RootKernelFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val fastRootKernelRolloutFit: RootKernelFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val fastOpponentKernelRolloutFit: RootKernelFitReference? = null,
 ) {
     init {
         require(evaluator == null || tacticalEvaluator == null) { "Only one evaluator may be configured" }
@@ -93,6 +99,15 @@ internal data class SearchTeacherCalibrationPolicy(
         require(rolloutHeuristicProbability.isFinite() && rolloutHeuristicProbability > 0 && rolloutHeuristicProbability <= 1)
         require(rootCloningFit == null || (rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
             "A learned root rollout must not silently override another root-policy configuration"
+        }
+        require(fastRootKernelRolloutFit == null ||
+            (rootKernelRolloutFit == null && rootCloningFit == null && rootRolloutPolicy == null &&
+                rolloutHeuristicProbability == 1.0)) {
+            "A fast kernel root rollout must not override another root-policy configuration"
+        }
+        require(fastOpponentKernelRolloutFit == null ||
+            (opponentRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
+            "A fast kernel opponent rollout must not override another opponent-policy configuration"
         }
         require(rootKernelRolloutFit == null ||
             (rootCloningFit == null && rootRolloutPolicy == null && rolloutHeuristicProbability == 1.0)) {
@@ -111,12 +126,12 @@ internal data class SearchTeacherCalibrationPolicy(
 
     fun policy(baseSeed: Long) = ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
         informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
-        rootRolloutPolicy = rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
+        rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy() ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
             it.load()
         } ?: configuredRolloutPolicy(
             "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),
         ),
-        opponentRolloutPolicy = configuredRolloutPolicy(
+        opponentRolloutPolicy = fastOpponentKernelRolloutFit?.loadFastRolloutPolicy() ?: configuredRolloutPolicy(
             "opponent", opponentRolloutPolicy, SearchTeacherSearchFactory.opponentRolloutPolicy(),
         ))
 

@@ -68,6 +68,43 @@ class RootKernelRolloutPolicyTest {
         assertNull(policy.select(information, annotated, 10L, 11L).diagnostic.replacement)
     }
 
+    @Test
+    fun `fast continuation uses casting argmax and declared cheap component elsewhere`() {
+        val cast = castingWorld()
+        val actor = requireNotNull(cast.actorToAct())
+        val information = cast.informationState(actor)
+        val menu = cast.expandChoices().candidates
+        val features = rootActionKernelFeatures(information, menu)
+        val model = RootActionKernelModel(ridge = .001, centers = features,
+            coefficients = List(menu.size) { (it + 1) * 100.0 })
+        val fast = FastKernelRolloutPolicy(model, "synthetic-fit", "a".repeat(64))
+        assertFalse(fast.requiresPolicyAnnotations)
+        assertFalse(fast.requiresProductionAdmission)
+        assertFalse(fast.behaviorSpecification.requiresProductionAdmission)
+        for (choices in listOf(menu, menu.reversed())) {
+            val scores = CompiledRootActionKernel(model).scores(rootActionKernelFeatures(information, choices))
+            assertEquals(choices[scores.indices.maxBy { scores[it] }], fast.select(information, choices, 8L, 9L).choice)
+        }
+        assertFails { fast.distribution(information.copy(actingPlayerId = "other"), menu, 0L) }
+        val mulligan = world(skipMulligans = false)
+        val viewer = requireNotNull(mulligan.actorToAct())
+        val mulliganInformation = mulligan.informationState(viewer)
+        val mulliganMenu = mulligan.expandChoices().candidates
+        val semantic = SemanticHeuristicOpponentPolicy(requiresProductionAdmission = false)
+        assertEquals(semantic.distribution(mulliganInformation, mulliganMenu, 1L).entries,
+            fast.distribution(mulliganInformation, mulliganMenu, 1L).entries)
+        val selected = fast.select(mulliganInformation, mulliganMenu, 1L, 2L)
+        assertEquals(semantic.id, selected.diagnostic.selectedComponentId)
+        assertNull(selected.diagnostic.replacement)
+        val baseline = RootKernelRolloutPolicy(model, "synthetic-fit", "a".repeat(64))
+        assertNotEquals(baseline.behaviorSpecification, fast.behaviorSpecification)
+        assertNotEquals(SemanticHeuristicOpponentPolicy().behaviorSpecification, semantic.behaviorSpecification)
+        assertFalse("requiresProductionAdmission" in evidenceJson.encodeToString(
+            OpponentPolicyBehaviorSpecification.serializer(), baseline.behaviorSpecification))
+        assertTrue("requiresProductionAdmission" in evidenceJson.encodeToString(
+            OpponentPolicyBehaviorSpecification.serializer(), fast.behaviorSpecification))
+    }
+
     private fun castingWorld(): ArgentumSearchWorld {
         val world = world(skipMulligans = true)
         repeat(16) {

@@ -13,6 +13,9 @@ class MixtureOpponentPolicy(
     override val id: String,
     private val components: List<OpponentPolicyMixtureEntry>,
 ) : OpponentPolicy {
+    override val requiresProductionAdmission: Boolean = components.any {
+        it.weight > 0.0 && it.policy.requiresProductionAdmission
+    }
     override val requiresPolicyAnnotations: Boolean = components.any {
         it.weight > 0.0 && it.policy.requiresPolicyAnnotations
     }
@@ -26,6 +29,7 @@ class MixtureOpponentPolicy(
 
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
+            requiresProductionAdmission = requiresProductionAdmission,
             implementationId = "weighted-mixture-with-posterior-attribution-v2",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,

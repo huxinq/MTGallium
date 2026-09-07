@@ -175,6 +175,8 @@ enum class BeliefMode { CONSISTENCY_ONLY_V1, POLICY_CONDITIONED_V1 }
 
 interface OpponentPolicy {
     val id: String
+    /** Opt out only for a declared policy over the plain semantic proposal menu, without production anchors. */
+    val requiresProductionAdmission: Boolean get() = true
     /** True only when [distribution] or diagnostics consume optional policy annotations. */
     val requiresPolicyAnnotations: Boolean get() = false
     /** Enables exact per-state distribution memoization; sampling remains independently seeded. */
@@ -186,6 +188,7 @@ interface OpponentPolicy {
      */
     val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
+            requiresProductionAdmission = requiresProductionAdmission,
             implementationId = "opaque-declared-policy-v1",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,

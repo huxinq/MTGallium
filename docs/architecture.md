@@ -93,6 +93,18 @@ and delegated policy are part of policy identity. Opponent continuation and
 leaf evaluation remain separately configured; learned preferences are not
 payoff labels.
 
+An explicitly configured fast kernel continuation instead uses the plain semantic
+proposal menu without Production admission or its extra combat anchors. It applies
+the frozen casting-context scorer when that menu contains a cast-spell action and
+a declared cheap semantic heuristic otherwise. Root and opponent rollout settings
+are independent and retain the fit and menu population in behavior identity.
+This changes the continuation policy and requires new evaluation; it does not
+relabel historical Production results. Tree selection, the belief opponent model,
+terminal payoff and fixed search budgets retain their separate configuration.
+Existing policies still request Production admission by default. Annotation
+consumers must also request admission; mixtures retain the requirements of their
+positive-weight components.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout

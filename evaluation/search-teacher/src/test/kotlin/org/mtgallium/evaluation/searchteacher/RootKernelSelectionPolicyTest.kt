@@ -112,6 +112,28 @@ class RootKernelSelectionPolicyTest {
         assertFails { candidate.copy(rootCloningFit = CloningFitReference(reference.directory, reference.researchRunIdentity, reference.manifestSha256)) }
     }
 
+    @Test fun `fast rollout configuration binds each actor independently and rejects silent override`() {
+        val f = RootActionKernelFeatures(RootActionKernelVector(listOf(0), listOf(1.0)), RootActionKernelVector(listOf(0), listOf(1.0)))
+        val reference = fixture(RootActionKernelModel(ridge = .001, centers = listOf(f), coefficients = listOf(.2)), terminal = true)
+        val baseline = SearchTeacherCalibrationPolicy("control", 8, 56, 32, 1.4, true, 1.0)
+        assertFalse("fastRootKernelRolloutFit" in evidenceJson.encodeToString(baseline))
+        assertFalse("fastOpponentKernelRolloutFit" in evidenceJson.encodeToString(baseline))
+        for ((root, opponent) in listOf(true to false, false to true, true to true)) {
+            val treatment = baseline.copy(fastRootKernelRolloutFit = reference.takeIf { root },
+                fastOpponentKernelRolloutFit = reference.takeIf { opponent })
+            assertEquals(treatment, evidenceJson.decodeFromString<SearchTeacherCalibrationPolicy>(evidenceJson.encodeToString(treatment)))
+            val policy = treatment.policy(1L)
+            assertEquals(!root, policy.effectiveRootRolloutPolicy().requiresProductionAdmission)
+            assertEquals(!opponent, policy.effectiveOpponentRolloutPolicy().requiresProductionAdmission)
+            assertEquals(baseline.parameters(1L), policy.effectiveParameters(1L))
+        }
+        val fast = baseline.copy(fastRootKernelRolloutFit = reference, fastOpponentKernelRolloutFit = reference)
+        assertFails { fast.copy(rootKernelRolloutFit = reference) }
+        assertFails { fast.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM) }
+        assertFails { fast.copy(opponentRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM) }
+        assertFails { fast.copy(rolloutHeuristicProbability = .5) }
+    }
+
     @Test fun `terminal fit has distinct authenticated target protocol and retains frozen model`() {
         val f = RootActionKernelFeatures(RootActionKernelVector(listOf(0), listOf(1.0)), RootActionKernelVector(listOf(0), listOf(1.0)))
         val model = RootActionKernelModel(ridge = .001, centers = listOf(f), coefficients = listOf(.2))

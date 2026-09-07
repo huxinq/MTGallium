@@ -117,6 +117,55 @@ class RolloutPolicyAnnotationRequirementTest {
     }
 
     @Test
+    fun `plain-menu policies omit production admission in tree and both rollouts`() {
+        val probe = ExpansionProbe()
+        val rootRollout = PerspectiveRecordingPolicy("root-plain", false)
+        val opponentRollout = PerspectiveRecordingPolicy("opponent-plain", false)
+        val treeOpponent = PerspectiveRecordingPolicy("tree-plain", false)
+        val evaluator = object : InformationStateEvaluator {
+            override val id = LeafEvaluator.MTGALLIUM_VISIBLE_V2.evaluatorId
+            override fun evaluate(information: PolicyInformationState, rootPlayer: String): Double = 0.0
+        }
+        val search = InformationSetSearch(
+            config = InformationSetSearchConfig(
+                simulations = 8,
+                maxPolicyDecisions = 8,
+                leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT,
+                    LeafEvaluator.MTGALLIUM_VISIBLE_V2,
+                ),
+            ),
+            opponentPolicy = treeOpponent,
+            rolloutPolicy = rootRollout,
+            rolloutOpponentPolicy = opponentRollout,
+            leafEvaluationStrategy = LeafEvaluationStrategy(
+                evaluator.id,
+                LeafValueSource.Information(evaluator),
+            ),
+        )
+
+        val result = search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
+
+        search.settleFirstUnvisitedEdge(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
+        search.continueFirstUnvisitedEdgeToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
+
+        assertEquals(0, probe.annotationCalls)
+        assertEquals(0, probe.admissionCalls)
+        assertTrue(probe.acceptedLabels.all { it.startsWith("base-") })
+        assertTrue(rootRollout.calls > 0)
+        assertTrue(opponentRollout.calls > 0)
+        assertTrue(treeOpponent.calls > 0)
+        assertEquals(treeOpponent.id, result.diagnostics.opponentModelId)
+        assertEquals(rootRollout.id, result.diagnostics.rootRolloutPolicyId)
+        assertEquals(opponentRollout.id, result.diagnostics.opponentRolloutPolicyId)
+        assertEquals(0, result.diagnostics.policyAnnotatedExpansions)
+        (rootRollout.perspectives + opponentRollout.perspectives + treeOpponent.perspectives).forEach { witness ->
+            assertEquals(witness.actor, witness.viewer)
+            assertFalse(witness.candidateLabels.contains("admitted"))
+        }
+    }
+
+    @Test
     fun `policy admission preserves the annotated candidate identity while omitting tags`() {
         val probe = ExpansionProbe()
         val world = PolicyAdmissionWorld(probe)
@@ -130,6 +179,27 @@ class RolloutPolicyAnnotationRequirementTest {
         assertEquals(1, probe.admissionCalls)
         assertEquals(1, probe.annotationCalls)
         admitted.candidates.forEach { assertTrue(world.fork().step(it).accepted) }
+    }
+
+    @Test
+    fun `private belief choices honor plain versus admitted menu and mixture zero weights`() {
+        for (admission in listOf(false, true)) {
+            val probe = ExpansionProbe()
+            val plain = PerspectiveRecordingPolicy("private-policy", admission)
+            val policy = MixtureOpponentPolicy("private-mixture", listOf(
+                OpponentPolicyMixtureEntry(InactiveAnnotationPolicy, 0.0),
+                OpponentPolicyMixtureEntry(plain, 1.0),
+            ))
+            assertEquals(admission, policy.requiresProductionAdmission)
+            assertEquals(admission, policy.behaviorSpecification.requiresProductionAdmission)
+            val particles = ParticleBelief.from(belief(PolicyAdmissionWorld(probe, 1)), BeliefMode.CONSISTENCY_ONLY_V1)
+            assertEquals(1, particles.advanceUnobserved("p1", policy, 91L).belief.size)
+            assertEquals(0, probe.annotationCalls)
+            assertEquals(if (admission) 1 else 0, probe.admissionCalls)
+            assertEquals(if (admission) "admitted" else "base-a", probe.acceptedLabels.single())
+            assertTrue(plain.perspectives.isNotEmpty())
+            plain.perspectives.forEach { assertEquals("p1", it.viewer) }
+        }
     }
 
     private fun belief(world: SearchWorld) = BeliefBatch(
@@ -188,7 +258,9 @@ private data class PerspectiveWitness(
     val candidateLabels: List<String>,
 )
 
-private class PerspectiveRecordingPolicy(override val id: String) : OpponentPolicy {
+private class PerspectiveRecordingPolicy(
+    override val id: String, override val requiresProductionAdmission: Boolean = true,
+) : OpponentPolicy {
     var calls: Int = 0
     val perspectives = mutableListOf<PerspectiveWitness>()
     override val distributionIsSeedInvariant: Boolean = true
