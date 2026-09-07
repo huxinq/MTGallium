@@ -115,8 +115,12 @@ internal fun loadTerminalRootScreen(input: SavedRootPolicyInput, bank: RealGameP
     val manifest = ResearchRunArtifacts.loadAndVerify(path, input.identity)
     require(manifest.artifacts.map { it.relativePath }.containsAll(listOf("report.json", "plan.json")))
     val report = evidenceJson.decodeFromString<PositionBankScreenReport>(Files.readString(path.resolve("report.json")))
+    require(report.schemaVersion == 1 && report.workerThreads > 0)
     require(report.researchRunIdentity == input.identity && report.plan.policies.single().search.id == input.policyId)
     require(report.plan == evidenceJson.decodeFromString<PositionBankScreenPlan>(Files.readString(path.resolve("plan.json"))))
+    require(positionBankScreenBindings(report.plan, bank, report.sourceProvenance, report.workerThreads).identity == input.identity) {
+        "Terminal screen identity differs from its source, bank or material configuration"
+    }
     terminalRootScreenAccounting(report, bank)
     return report
 }

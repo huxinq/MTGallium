@@ -153,6 +153,19 @@ internal data class PositionBankScreenReport(
     ),
 )
 
+/** Shared producer/reader authority, including historical execution source rather than current HEAD. */
+internal fun positionBankScreenBindings(plan: PositionBankScreenPlan, bank: RealGamePositionBankReport,
+    source: PolicySourceProvenance, workerThreads: Int): ResearchRunBindings =
+    ResearchRunBindings(protocol = "real-game-position-screen-v1", material = mapOf(
+        "plan" to sha256(evidenceJson.encodeToString(PositionBankScreenPlan.serializer(), plan)),
+        "bank" to bank.bankIdentity,
+        "bank-manifest" to sha256File(Path.of(plan.bankDirectory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+        "source" to sha256(evidenceJson.encodeToString(PolicySourceProvenance.serializer(), source)),
+        "deck" to bank.sources.map { it.deckHash }.distinct().single(),
+        "card-pool" to bank.sources.map { it.cardPoolHash }.distinct().single(),
+        "worker-threads" to workerThreads.toString(),
+    ))
+
 internal class PositionBankScreenRunner(
     private val root: Path,
     private val registry: CardRegistry,
@@ -165,6 +178,7 @@ internal class PositionBankScreenRunner(
         val source = requireNotNull(sourceRun.sourceProvenance)
         val bankDirectory = Path.of(plan.bankDirectory)
         val bank = loadVerifiedRealGamePositionBank(bankDirectory, plan.expectedBankIdentity)
+        require(bank.sources.all { it.deckHash == manifest.deckHash() && it.cardPoolHash == manifest.cardPoolHash() })
         val eligible = bank.roots.filter { it.partition.name == plan.partition.name }.sortedBy { it.rootId }
         val selected = selectPositionScreenRoots(plan, eligible)
         require(selected.isNotEmpty()) { "The requested bank partition has no roots" }
@@ -174,14 +188,7 @@ internal class PositionBankScreenRunner(
         }
         // Load and verify each frozen model once before any reconstruction or search.
         val rootPolicies = plan.policies.mapNotNull { policy -> policy.rootKernel?.let { policy.search.id to it.load() } }.toMap()
-        val bindings = ResearchRunBindings(protocol = "real-game-position-screen-v1", material = mapOf(
-            "plan" to sha256(evidenceJson.encodeToString(plan)),
-            "bank" to bank.bankIdentity,
-            "bank-manifest" to sha256File(bankDirectory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
-            "source" to sha256(evidenceJson.encodeToString(source)),
-            "deck" to manifest.deckHash(), "card-pool" to manifest.cardPoolHash(),
-            "worker-threads" to workerThreads.toString(),
-        ))
+        val bindings = positionBankScreenBindings(plan, bank, source, workerThreads)
         val directory = EvidenceStore(root).requireDiagnosticOutput(output, "Real-game position screening")
         if (Files.exists(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))) {
             ResearchRunArtifacts.loadAndVerify(directory, bindings.identity)
