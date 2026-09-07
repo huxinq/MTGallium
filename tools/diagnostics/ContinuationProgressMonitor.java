@@ -32,6 +32,9 @@ public class ContinuationProgressMonitor {
     static String string(JsonObject o, String key) { return ((JsonPrimitive)o.get(key)).getContent(); }
     static void check(boolean value, String why) { if (!value) throw new IllegalStateException(why); }
     static boolean terminalExecution(String state) { return List.of("succeeded","failed").contains(state); }
+    static ResearchRunBindings snapshotBindings(String setup, List<Map<String,Object>> inputs, String prefix, int executedPairs) {
+        return new ResearchRunBindings(1,"continuation-progress-snapshot-v1",Map.of("setup",setup,"inputs",ResearchRunKt.researchSha256(json(inputs)),"prefix",prefix,"executed-pairs",Integer.toString(executedPairs)));
+    }
     static void write(Path path, Object value) { ResearchRunFiles.INSTANCE.atomicWrite(path,json(value)+"\n"); }
 
     /** Calls the actual treatment stopping rule on every simulated future path. */
@@ -167,7 +170,7 @@ public class ContinuationProgressMonitor {
             data.put("remainingPairCap",rule.getMaximumPairs()-rows.size());
             if(scores.stream().allMatch(s->s.getPointRate()!=null))data.put("forecast",forecast(rule,scores,first,workers,trials,Long.parseUnsignedLong(result.getOrderedPrefixSha256().substring(0,16),16)));
             else data.put("forecast",null);
-            var bindings=new ResearchRunBindings(1,"continuation-progress-snapshot-v1",Map.of("setup",setupIdentity,"inputs",ResearchRunKt.researchSha256(json(inputs)),"prefix",result.getOrderedPrefixSha256(),"executedPairs",Integer.toString(rows.size())));
+            var bindings=snapshotBindings(setupIdentity,inputs,result.getOrderedPrefixSha256(),rows.size());
             snapshotIdentity=bindings.getIdentity();Path dest=output.resolve("snapshots").resolve(snapshotIdentity.substring(snapshotIdentity.lastIndexOf(':')+1));
             if(Files.exists(dest.resolve("research-run-manifest.json"))) {
                 ResearchRunArtifacts.Companion.loadAndVerify(dest,snapshotIdentity);

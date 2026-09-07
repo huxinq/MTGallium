@@ -9,6 +9,8 @@ public class ContinuationProgressMonitorTest {
         check(!ContinuationProgressMonitor.terminalExecution("not-started"),"pre-execution state must keep monitoring");
         check(!ContinuationProgressMonitor.terminalExecution("running"),"running state");
         check(ContinuationProgressMonitor.terminalExecution("succeeded")&&ContinuationProgressMonitor.terminalExecution("failed"),"terminal execution states");
+        var binding=ContinuationProgressMonitor.snapshotBindings("synthetic-setup",List.of(),"a".repeat(64),52);
+        check(!binding.getIdentity().equals(ContinuationProgressMonitor.snapshotBindings("synthetic-setup",List.of(),"a".repeat(64),56).getIdentity()),"source artifact authority accepts binding names and distinguishes executed populations");
         var tied=List.of(new PairedSequentialScore(7,.5,List.of()),new PairedSequentialScore(8,.5,List.of()));
         var cap=ContinuationProgressMonitor.forecast(rule(10,false),tied,7,3,32,100);
         check((double)cap.get("expectedAdditionalExecutedGames")==16,"cap includes only eight future pairs");
