@@ -56,9 +56,10 @@ with (setup/'compile-and-test.log').open('w') as log:
                     'ContinuationProgressMonitorTest'], check=True, stdout=log, stderr=subprocess.STDOUT)
 assert source == git('rev-parse', 'HEAD') and not git('status', '--porcelain'), 'Monitor source changed during compilation'
 command = ['java', '-XX:ActiveProcessorCount=1', '-Xmx2g', '-cp', str(classes)+':'+classpath, 'ContinuationProgressMonitor']
-subprocess.run(command+['--seal-setup', str(setup)], check=True)
+setup_identity = subprocess.check_output(command+['--seal-setup', str(setup)], text=True).strip()
+print(setup_identity)
 if args.start:
-    unit = 'mtgallium-progress-'+request['runId'].rsplit('-',1)[-1]
+    unit = 'mtgallium-progress-'+request['runId'].rsplit('-',1)[-1]+'-'+setup_identity.rsplit(':',1)[-1][:8]
     subprocess.run(['systemd-run', '--user', '--unit', unit, '--property=Nice=19', '--property=CPUWeight=1',
                     '--property=MemoryMax=3G', '--property=Restart=on-failure', '--property=RestartSec=30',
                     '--working-directory', str(setup), '--setenv=MTGALLIUM_PUBLIC_SOURCE=1',
