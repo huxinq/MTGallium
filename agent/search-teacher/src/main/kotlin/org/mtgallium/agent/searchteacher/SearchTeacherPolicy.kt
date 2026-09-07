@@ -313,7 +313,7 @@ class SearchTeacherPolicySession(
         if (parameters.singletonSelection.enabled) {
             SearchTeacherSingletonSelection.classify(expansion)?.let { return it }
         }
-        directRootSelectionPolicy?.select({ world.informationState(actor) }, expansion)?.let { choice ->
+        directRootSelectionPolicy?.select({ world.informationState(actor) }, expansion, searchSeed)?.let { choice ->
             require(choice in expansion.candidates) { "Direct root policy returned a non-admitted choice" }
             return SearchTeacherPolicySelection(choice, null, SearchTeacherSelectionKind.DIRECT_POLICY_ACTION)
         }

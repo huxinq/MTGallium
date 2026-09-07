@@ -174,7 +174,16 @@ selection kind and no search result, visits or values. Its fit, scorer and scope
 are bound into behavior identity, separately from rollout policy identity;
 configuring this option never changes either rollout policy.
 
-When either arena seat deploys a direct kernel, both seats retain a common wall-time
+An optional direct attack heuristic control uses the same scope and ordinary
+search fallback as the direct kernel. It samples the configured fast incumbent's
+full action distribution with a reproducible decision seed. Its behavior identity
+retains the incumbent, scope and seed rule; deterministic kernel selection remains
+unchanged. Comparing these direct policies can separate the learned attack choice
+from the change in selection role, while comparison with the ordinary planner
+still addresses deployed improvement. Neither comparison alone supplies both
+claims.
+
+When either arena seat uses a direct attack policy, both seats retain a common wall-time
 measurement from before actual information/expansion construction through selection,
 including direct feature/scoring and ordinary search work. It includes interleaved
 host preparation, excludes accepted transitions, belief advancement and session
