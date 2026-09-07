@@ -9,6 +9,34 @@ import kotlinx.serialization.json.buildJsonObject
 
 class RolloutPolicyAnnotationRequirementTest {
     @Test
+    fun `policy quiescence respects each rollout policy admission requirement`() {
+        for (admission in listOf(false, true)) {
+            val probe = ExpansionProbe()
+            val root = PerspectiveRecordingPolicy("quiescent-root", admission)
+            val opponent = PerspectiveRecordingPolicy("quiescent-opponent", admission)
+            val evaluator = object : InformationStateEvaluator {
+                override val id = LeafEvaluator.MTGALLIUM_TACTICAL_V3.evaluatorId
+                override fun evaluate(information: PolicyInformationState, rootPlayer: String) = 0.0
+            }
+            val search = InformationSetSearch(
+                InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
+                    leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                        RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK)),
+                UniformOpponentPolicy, root, opponent,
+                leafEvaluationStrategy = LeafEvaluationStrategy(evaluator.id, LeafValueSource.Information(evaluator),
+                    settleAtRolloutHorizon = true, unresolvedLeafHandling = UnresolvedLeafHandling.EVALUATE),
+            )
+            val result = search.settleFirstUnvisitedEdge(PolicyAdmissionWorld(probe, 1, volatile = true), "p0", 77L, 0)
+            assertEquals(SearchSettlementOrigin.TERMINAL_PAYOFF, result.origin)
+            assertEquals(0, probe.annotationCalls)
+            assertEquals(if (admission) 3 else 0, probe.admissionCalls)
+            assertEquals(List(3) { if (admission) "admitted" else "base-a" }, probe.acceptedLabels)
+            assertTrue(root.calls > 0 && opponent.calls > 0)
+            (root.perspectives + opponent.perspectives).forEach { assertEquals(it.actor, it.viewer) }
+        }
+    }
+
+    @Test
     fun `menu-only rollout selection preserves seeds decisions and diagnostics while avoiding information reads`() {
         data class Run(val result: InformationSetSearchResult, val terminal: TerminalPolicyContinuation,
             val probe: ExpansionProbe, val root: MenuSelectionProbePolicy, val opponent: MenuSelectionProbePolicy)
@@ -327,6 +355,7 @@ private class ExpansionProbe {
 private class PolicyAdmissionWorld(
     private val probe: ExpansionProbe,
     private var tick: Int = 0,
+    private val volatile: Boolean = false,
 ) : PolicyAnnotatedSearchWorld {
     private fun choice(label: String, annotated: Boolean = false): SemanticChoice = SemanticChoice.create(
         kind = SemanticChoiceKind.ACTION,
@@ -354,7 +383,7 @@ private class PolicyAdmissionWorld(
             observation = PolicyObservation(
                 perspectivePlayerId = viewer,
                 turnNumber = 1 + tick / 2,
-                phase = "TEST",
+                phase = if (volatile) "COMBAT" else "TEST",
                 step = "POLICY",
                 activePlayerId = actor,
                 priorityPlayerId = actor,
@@ -402,7 +431,7 @@ private class PolicyAdmissionWorld(
         return SearchStepResult(true)
     }
 
-    override fun fork(): SearchWorld = PolicyAdmissionWorld(probe, tick)
+    override fun fork(): SearchWorld = PolicyAdmissionWorld(probe, tick, volatile)
 
     override fun terminalPayoff(rootPlayer: String): Double? = if (tick >= 4) 0.0 else null
 

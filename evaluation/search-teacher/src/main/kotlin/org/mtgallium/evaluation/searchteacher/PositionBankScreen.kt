@@ -20,6 +20,7 @@ import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.MonoRedVisibleFeatures
 import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSchema2
 import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecision
@@ -43,18 +44,27 @@ internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
 @Serializable
 internal data class PositionBankScreenPolicy(
     val search: SearchTeacherCalibrationPolicy,
-    val evaluator: MonoRedVisibleEvaluatorConfig,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val evaluator: MonoRedVisibleEvaluatorConfig? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rootKernel: RootKernelFitReference? = null,
 ) {
     init {
-        require(search.tacticalEvaluator == null || evaluator == MonoRedVisibleEvaluatorConfig()) {
+        require(search.tacticalEvaluator == null || evaluator == null ||
+            (search.tacticalEvaluator is CalibrationTacticalEvaluator.Settings && evaluator == MonoRedVisibleEvaluatorConfig())) {
             "Tactical screens cannot carry a conflicting visible-v2 configuration"
         }
+        require(search.tacticalEvaluator != null || evaluator != null) {
+            "Visible-v2 screens require an explicit cached evaluator"
+        }
+        require(!search.directArgentumHeuristic) { "Bank screens require a search policy" }
         require(search.evaluator == null || search.evaluator == evaluator) {
             "Search and screen evaluator configurations must agree"
         }
     }
+
+    fun informationEvaluator(): ConfiguredInformationStateEvaluator = search.informationEvaluator()
+        ?: ConfiguredMonoRedInformationEvaluator(requireNotNull(evaluator))
 }
 
 @Serializable
@@ -80,6 +90,10 @@ internal data class PositionBankScreenPlan(
 ) {
     init {
         require(attackInfluenceFit == null || mode == PositionBankScreenMode.SEARCH)
+        require(attackInfluenceFit == null || policies.none {
+            it.search.rolloutHorizonSettlementOverride ==
+                org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK
+        }) { "Attack influence recording does not observe policy-quiescence decisions" }
         require(terminalActionSignatures.isEmpty() || mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS)
         require((mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS) == (terminalContinuation != null))
         require(schemaVersion == 1 && bankDirectory.isNotBlank() && expectedBankIdentity.isNotBlank())
@@ -90,6 +104,10 @@ internal data class PositionBankScreenPlan(
         require(mode != PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES || policies.all { it.search.tacticalEvaluator == null })
         require(mode == PositionBankScreenMode.SEARCH || policies.all { it.rootKernel == null }) {
             "Root kernel guidance is supported only by ordinary search screens"
+        }
+        require(mode != PositionBankScreenMode.FEATURES ||
+            policies.none { it.search.tacticalEvaluator is SearchTeacherCalibrationTacticalEvaluator }) {
+            "Schema-2 tactical screens require reconstructed search mode"
         }
         require(mode != PositionBankScreenMode.FEATURES || repetitions == 1) {
             "Deterministic feature rescoring has no stochastic repetitions"
@@ -211,13 +229,18 @@ internal class PositionBankScreenRunner(
         val rows = parallelMapOrdered(groups, workerThreads) { task ->
             val position = selected[task / plan.policies.size]
             val policy = plan.policies[task % plan.policies.size]
-            val tactical = policy.search.tacticalEvaluator?.let(::MonoRedTacticalEvaluator)
-            val evaluator: ConfiguredInformationStateEvaluator = tactical ?: ConfiguredMonoRedInformationEvaluator(policy.evaluator)
+            val evaluator = policy.informationEvaluator()
             // The cache is a derived view, not a replacement authority for the represented state.
             require(MonoRedVisibleFeatures.extract(position.information, position.actor) == position.visibleFeatures)
-            val detailed = tactical?.evaluateDetailed(position.information, position.actor)
-            val raw = detailed?.rawScore ?: position.visibleFeatures.rawScore(policy.evaluator)
-            val bounded = detailed?.value ?: position.visibleFeatures.evaluate(policy.evaluator)
+            val (raw, bounded) = when (evaluator) {
+                is MonoRedTacticalEvaluator -> evaluator.evaluateDetailed(position.information, position.actor)
+                    .let { it.rawScore to it.value }
+                is MonoRedTacticalEvaluatorSchema2 -> evaluator.evaluateDetailed(position.information, position.actor)
+                    .let { it.rawScore to it.value }
+                is ConfiguredMonoRedInformationEvaluator -> position.visibleFeatures.rawScore(evaluator.config) to
+                    position.visibleFeatures.evaluate(evaluator.config)
+                else -> error("Unsupported screen evaluator ${evaluator.id}")
+            }
             val parameters = policy.search.parameters(position.baseSeed)
             require(!parameters.searchReuse.enabled) { "Screen repetitions require fresh search trees" }
             // Lazy so a feature-only screen does not load a model or construct an engine world.
@@ -294,7 +317,7 @@ internal class PositionBankScreenRunner(
                     } else if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL || plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES) {
                         val belief = session.beliefBatch(actual)
                         val recorder = if (plan.mode == PositionBankScreenMode.ACTION_CONDITIONAL_V2_TRACES)
-                            RecordingVisibleV2Evaluator(policy.evaluator) else null
+                            RecordingVisibleV2Evaluator(requireNotNull(policy.evaluator)) else null
                         val traces = mutableListOf<VisibleV2ActionTrace>()
                         val search = SearchTeacherSearchFactory.create(parameters.searchConfig(), defaultMonoRedOpponentPolicy(),
                             arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), recorder ?: evaluator,

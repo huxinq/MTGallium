@@ -54,7 +54,7 @@ class TacticalV3CalibrationTest {
         val old = SearchTeacherCalibrationPolicy("test", 8, 64, 32, 1.4, true, 1.0)
         assertFalse(evidenceJson.encodeToString(SearchTeacherCalibrationPolicy.serializer(), old).contains("tacticalEvaluator"))
         assertEquals(LeafEvaluator.MTGALLIUM_VISIBLE_V2, old.parameters(1).leaf.evaluator)
-        val tactical = old.copy(tacticalEvaluator = hand)
+        val tactical = old.copy(tacticalEvaluator = CalibrationTacticalEvaluator.Settings(hand))
         val parameters = tactical.parameters(1)
         assertEquals(LeafEvaluator.MTGALLIUM_TACTICAL_V3, parameters.leaf.evaluator)
         val strategy = SearchTeacherEvaluatorRegistry.strategy(parameters.leaf, MonoRedTacticalEvaluator(hand))

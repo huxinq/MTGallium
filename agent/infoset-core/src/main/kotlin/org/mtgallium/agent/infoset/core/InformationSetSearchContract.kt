@@ -31,11 +31,31 @@ enum class LeafEvaluator(val evaluatorId: String) {
     ;
 }
 
+/** Explicit experiment-controlled settlement change for a bounded-rollout leaf. */
+@Serializable
+enum class RolloutHorizonSettlementOverride {
+    /** Skip quiescence and evaluate the state reached at the bounded rollout horizon. */
+    DIRECT_EVALUATION,
+    /** Advance only forced priority passes, then evaluate an unresolved quiescence fallback. */
+    QUIESCENCE_WITH_EVALUATION_FALLBACK,
+    /** Finish volatility with explicit rollout-policy decisions, bounded separately from rollout. */
+    POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK,
+}
+
 @Serializable
 data class LeafEvaluationConfig(
     val stateSource: LeafStateSource,
     val evaluator: LeafEvaluator,
-)
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutHorizonSettlementOverride: RolloutHorizonSettlementOverride? = null,
+) {
+    init {
+        require(rolloutHorizonSettlementOverride == null || stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
+            "A rollout-horizon settlement override requires a bounded rollout"
+        }
+    }
+}
 
 @Serializable
 data class RolloutTurnHorizon(
@@ -94,6 +114,9 @@ data class InformationSetSearchConfig(
         require(rolloutTurnHorizon == null || leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
             "Completed-turn horizons require bounded rollout"
         }
+        require(rolloutTurnHorizon == null || leaf.rolloutHorizonSettlementOverride == null ||
+            leaf.rolloutHorizonSettlementOverride == RolloutHorizonSettlementOverride.DIRECT_EVALUATION
+        ) { "A completed-turn horizon evaluates its boundary directly, without later quiescence" }
         require(wideningThresholds.size == wideningLimits.size)
         require(wideningThresholds.zipWithNext().all { (a, b) -> a < b })
         require(wideningLimits.zipWithNext().all { (a, b) -> a < b })
@@ -271,7 +294,7 @@ data class InformationSetSearchDiagnostics(
     val evaluatorCalls: Int = 0,
     val evaluatorNanos: Long = 0,
     val evaluatorOutputChecksum: String = "0000000000000000",
-    /** V3 backs up neutral uncertainty instead of applying a quiet evaluator to unresolved tactics. */
+    /** Unresolved horizon fallbacks backed up as neutral instead of evaluated. */
     val quiescenceUnresolvedBackups: Int = 0,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
     val rootSelectionGuidance: RootSelectionGuidance? = null,

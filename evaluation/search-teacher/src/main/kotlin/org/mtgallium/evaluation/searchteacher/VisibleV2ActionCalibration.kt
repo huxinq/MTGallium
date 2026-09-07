@@ -140,7 +140,7 @@ internal fun requireVisibleV2TraceParity(recorded: PositionBankScreenReport, bas
     recorded.rows.zip(baseline.rows).forEach { (new, old) ->
         require(new.rootId == old.rootId && new.policyId == old.policyId && new.repetition == old.repetition && new.searchSeed == old.searchSeed)
         require(new.rootActionEstimates.size == old.rootActionEstimates.size)
-        requireVisibleV2TraceRow(new, recorded.plan.policies.single { it.search.id == new.policyId }.evaluator)
+        requireVisibleV2TraceRow(new, requireNotNull(recorded.plan.policies.single { it.search.id == new.policyId }.evaluator))
         new.rootActionEstimates.zip(old.rootActionEstimates).forEach { (a, b) ->
             require(a.action == b.action && a.meanBackedValue == b.meanBackedValue && a.visits == b.visits && a.settlementCounts == b.settlementCounts)
         }

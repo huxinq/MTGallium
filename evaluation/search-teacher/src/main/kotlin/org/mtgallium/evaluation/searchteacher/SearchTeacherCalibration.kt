@@ -10,7 +10,9 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.mtgallium.agent.searchteacher.ConfiguredMonoRedInformationEvaluator
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
-import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
+import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
+import org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride
+import org.mtgallium.agent.infoset.argentum.ArgentumHeuristicProfile
 import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSettings
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.LeafStateSource
@@ -54,7 +56,9 @@ internal enum class SearchTeacherCalibrationRolloutPolicy {
 }
 
 /** Budget/rollout interventions are explicit; absent evaluator configuration preserves the historical production evaluator. */
-@Serializable
+@OptIn(ExperimentalSerializationApi::class)
+@kotlinx.serialization.KeepGeneratedSerializer
+@Serializable(with = SearchTeacherCalibrationPolicySerializer::class)
 internal data class SearchTeacherCalibrationPolicy(
     val id: String,
     val particles: Int,
@@ -80,7 +84,7 @@ internal data class SearchTeacherCalibrationPolicy(
     val rootCloningFit: CloningFitReference? = null,
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
-    val tacticalEvaluator: MonoRedTacticalEvaluatorSettings? = null,
+    val tacticalEvaluator: CalibrationTacticalEvaluator? = null,
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val rootKernelRolloutFit: RootKernelFitReference? = null,
@@ -93,6 +97,12 @@ internal data class SearchTeacherCalibrationPolicy(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val attackRootKernelRolloutFit: RootKernelFitReference? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutHorizonSettlementOverride: RolloutHorizonSettlementOverride? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val searchHeuristicProfile: ArgentumHeuristicProfile? = null,
     /** Direct original Argentum policy; the search fields are inactive in this mode. */
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
@@ -102,8 +112,12 @@ internal data class SearchTeacherCalibrationPolicy(
         require(!directArgentumHeuristic || (evaluator == null && tacticalEvaluator == null &&
             rootRolloutPolicy == null && opponentRolloutPolicy == null && rolloutTurnHorizon == null &&
             rootCloningFit == null && rootKernelRolloutFit == null && fastRootKernelRolloutFit == null &&
-            fastOpponentKernelRolloutFit == null && attackRootKernelRolloutFit == null)) {
+            fastOpponentKernelRolloutFit == null && attackRootKernelRolloutFit == null &&
+            rolloutHorizonSettlementOverride == null && searchHeuristicProfile == null)) {
             "Direct Argentum heuristic cannot carry inactive evaluator or learned rollout interventions"
+        }
+        require(rolloutHorizonSettlementOverride == null || tacticalEvaluator != null) {
+            "A rollout-horizon settlement override requires tactical-v3"
         }
         require(attackRootKernelRolloutFit == null || fastRootKernelRolloutFit != null) {
             "Attack root rollout requires the frozen fast casting continuation"
@@ -136,12 +150,14 @@ internal data class SearchTeacherCalibrationPolicy(
         maxPolicyDecisions = maxPolicyDecisions, explorationConstant = explorationConstant,
         singletonSelection = PolicySingletonSelectionConfig(enabled = singletonSelection),
         rolloutTurnHorizon = rolloutTurnHorizon,
+        searchHeuristicProfile = searchHeuristicProfile ?: ArgentumHeuristicProfile.PRODUCTION,
         leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
-            if (tacticalEvaluator == null) LeafEvaluator.MTGALLIUM_VISIBLE_V2 else LeafEvaluator.MTGALLIUM_TACTICAL_V3),
+            if (tacticalEvaluator == null) LeafEvaluator.MTGALLIUM_VISIBLE_V2 else LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+            rolloutHorizonSettlementOverride),
     )
 
     fun policy(baseSeed: Long) = if (directArgentumHeuristic) ArenaPolicySpec(id, ArenaPolicyKind.HEURISTIC) else ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
-        informationEvaluator = tacticalEvaluator?.let(::MonoRedTacticalEvaluator) ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator),
+        informationEvaluator = informationEvaluator(),
         rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy()?.let { incumbent ->
             attackRootKernelRolloutFit?.loadAttackRolloutPolicy(incumbent) ?: incumbent
         } ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
@@ -152,6 +168,9 @@ internal data class SearchTeacherCalibrationPolicy(
         opponentRolloutPolicy = fastOpponentKernelRolloutFit?.loadFastRolloutPolicy() ?: configuredRolloutPolicy(
             "opponent", opponentRolloutPolicy, SearchTeacherSearchFactory.opponentRolloutPolicy(),
         ))
+
+    fun informationEvaluator(): ConfiguredInformationStateEvaluator? =
+        tacticalEvaluator?.informationEvaluator() ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator)
 
     private fun configuredRolloutPolicy(
         role: String,

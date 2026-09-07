@@ -790,11 +790,19 @@ class InformationSetSearch(
         }, horizon.completedTurns)
     }
 
+    /**
+     * Horizon quiescence may advance only an exact singleton priority pass. A quiet state is one
+     * for which [isVolatile] is false: no stack, no combat except END_COMBAT, no pending Combat,
+     * Damage, or Order decision, and no lethal-damage battlefield creature. It need not have no
+     * candidates. Thus this method never consumes a genuine branching decision, a singleton mana
+     * ability, or another strategic action while seeking a state to evaluate.
+     */
     private fun settleStaticLeaf(
         world: SearchWorld,
         rootPlayer: String,
         audit: QuiescenceAudit,
         workAudit: SearchWorkAudit,
+        maximumForcedPasses: Int = config.maxQuiescenceForcedPasses,
     ): StaticLeafSettlement {
         var forcedPasses = 0
         while (true) {
@@ -805,7 +813,7 @@ class InformationSetSearch(
             val expansion = initialExpansion(world)
             val pass = expansion.exactSingletonPassOrNull()
             if (pass != null) {
-                if (forcedPasses >= config.maxQuiescenceForcedPasses) {
+                if (forcedPasses >= maximumForcedPasses) {
                     audit.overflows++
                     audit.fallbacks++
                     return StaticLeafSettlement.Value(
@@ -907,6 +915,8 @@ class InformationSetSearch(
             }
             if (rolloutTargetTurn != null) {
                 if (world.informationState(rootPlayer).observation.turnNumber >= rolloutTargetTurn) {
+                    // The old turn's cleanup is complete. Leave the new turn's first genuine
+                    // choice untouched, including any upkeep trigger/response it presents.
                     return staticLeafValue(world, rootPlayer, workAudit)
                 }
                 if (rolloutDecisions >= requireNotNull(config.rolloutTurnHorizon).maxPolicyDecisions) {
@@ -979,12 +989,82 @@ class InformationSetSearch(
         if (!leafEvaluationStrategy.settleAtRolloutHorizon) {
             return staticLeafValue(world, rootPlayer, workAudit)
         }
+        if (config.leaf.rolloutHorizonSettlementOverride ==
+            RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK
+        ) {
+            return settleWithRolloutPolicies(
+                world, rootPlayer, searchSeed, simulationIndex, depth,
+                audit, quiescenceAudit, workAudit,
+            )
+        }
         return when (val settled = settleStaticLeaf(world, rootPlayer, quiescenceAudit, workAudit)) {
             is StaticLeafSettlement.Value -> settled.settlement
             StaticLeafSettlement.VolatileBranch -> {
                 quiescenceAudit.fallbacks++
                 unresolvedLeafValue(world, rootPlayer, quiescenceAudit, workAudit)
             }
+        }
+    }
+
+    /**
+     * An opt-in continuation of the declared rollout policies, not forced-action compression.
+     * Every volatile branching decision (including targets, blockers and ordering) is selected
+     * by its acting player's rollout policy and charged to both policy and quiescence counters.
+     * The original pass-only settlement route remains unchanged. Exhaustion still produces an
+     * explicitly heuristic fallback; it never supplies a terminal payoff.
+     */
+    private fun settleWithRolloutPolicies(
+        world: SearchWorld,
+        rootPlayer: String,
+        searchSeed: Long,
+        simulationIndex: Int,
+        rolloutDepth: Int,
+        rolloutAudit: RolloutPolicyAudit,
+        audit: QuiescenceAudit,
+        workAudit: SearchWorkAudit,
+    ): SearchSettlement {
+        val initialForcedPasses = audit.forcedPasses
+        var decisions = 0
+        while (true) {
+            val remainingPasses = config.maxQuiescenceForcedPasses -
+                (audit.forcedPasses - initialForcedPasses)
+            when (val settled = settleStaticLeaf(world, rootPlayer, audit, workAudit, remainingPasses)) {
+                is StaticLeafSettlement.Value -> return settled.settlement
+                StaticLeafSettlement.VolatileBranch -> Unit
+            }
+            if (decisions >= config.maxQuiescenceDecisions) {
+                audit.overflows++
+                audit.fallbacks++
+                return unresolvedLeafValue(world, rootPlayer, audit, workAudit)
+            }
+            val actor = checkNotNull(world.actorToAct())
+            val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
+            val expansion = if (world is PolicyAnnotatedSearchWorld) {
+                initialPolicyExpansion(world, policy, workAudit)
+            } else {
+                workAudit.expansions++
+                initialExpansion(world)
+            }
+            val decision = policy.selectForExpansion(
+                opponentInformation = { world.informationState(actor) },
+                candidates = expansion.candidates,
+                isProfileExhaustive = expansion.isProfileExhaustive,
+                policySeed = ComponentSeeds.derive(
+                    searchSeed, simulationIndex, rolloutDepth, decisions, policy.id, "rollout-quiescence",
+                ),
+                sampleSeed = ComponentSeeds.derive(
+                    searchSeed, simulationIndex, rolloutDepth, decisions, "rollout-quiescence-sample",
+                ),
+            )
+            rolloutAudit.record(actor == rootPlayer, decision.diagnostic)
+            audit.strategicDecisions++
+            workAudit.steps++
+            val result = world.step(decision.choice)
+            if (!result.accepted) {
+                workAudit.rejectedTransitions++
+                throw RejectedSearchTransitionException(decision.choice.signature, result.diagnostic)
+            }
+            decisions++
         }
     }
 

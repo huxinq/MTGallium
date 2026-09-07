@@ -15,6 +15,7 @@ import com.wingedsheep.engine.state.components.identity.FaceDownComponent
 import com.wingedsheep.engine.state.components.identity.RevealedToComponent
 import com.wingedsheep.gym.GameEnvironment
 import com.wingedsheep.mtg.sets.definitions.por.PortalSet
+import com.wingedsheep.mtg.sets.definitions.dft.AetherdriftSet
 import com.wingedsheep.mtg.sets.definitions.sth.StrongholdSet
 import com.wingedsheep.sdk.model.Deck
 import com.wingedsheep.sdk.model.GameRng
@@ -79,6 +80,102 @@ class ArgentumSearchWorldTest {
         assertTrue(SemanticOperationFamily.PLAY_LAND in seen)
         assertTrue(SemanticOperationFamily.CAST_SPELL in seen)
         assertTrue(SemanticOperationFamily.PASS_PRIORITY in seen)
+    }
+
+    @Test
+    fun `expiring profile delays a reachable upkeep pump without removing the legal pump`() {
+        val registry = registry().apply { register(AetherdriftSet.cards) }
+        val deck = mapOf("Mountain" to 12, "Burnout Bashtronaut" to 4, "Goblin Bully" to 4)
+        val env = GameEnvironment.create(registry).also {
+            it.reset(GameConfig(
+                players = listOf("Alice", "Bob").map { name ->
+                    PlayerConfig(name, Deck.of(*deck.entries.map { it.key to it.value }.toTypedArray()))
+                }, seed = 917L, skipMulligans = true, startingPlayerIndex = 0,
+            ))
+        }
+        // Select a synthetic opening hand before creating any represented history. All later
+        // states, including the upkeep and combat decisions, are reached through engine actions.
+        val player = env.playerIds.first()
+        var initial = env.state
+        val fixed = mutableSetOf<com.wingedsheep.sdk.model.EntityId>()
+        listOf("Mountain", "Mountain", "Burnout Bashtronaut", "Goblin Bully").forEachIndexed { index, name ->
+            val hand = initial.getHand(player)
+            val library = initial.getLibrary(player)
+            val source = (hand + library).first {
+                it !in fixed && initial.getEntity(it)?.get<CardComponent>()?.name == name
+            }
+            val target = hand[index]
+            initial = initial.copy(zones = initial.zones +
+                (ZoneKey(player, Zone.HAND) to hand.map {
+                    when (it) { source -> target; target -> source; else -> it }
+                }) + (ZoneKey(player, Zone.LIBRARY) to library.map { if (it == source) target else it }))
+            fixed += source
+        }
+        env.restore(initial, env.playerIds, env.stepCount)
+        val world = ArgentumSearchWorld.create(
+            env, "synthetic-expiring-pump", 94L, effectiveSetupSeed = 917L,
+            knownDecks = mapOf("p0" to deck, "p1" to deck),
+        )
+        var steps = 0
+        while (true) {
+            val observation = world.informationState("p0").observation
+            if (observation.turnNumber == 5 && observation.step == "UPKEEP") break
+            check(steps++ < 160) { "Did not reach the third upkeep" }
+            val candidates = world.expandChoices().candidates
+            val own = world.actorToAct() == "p0"
+            val battlefield = observation.zones.filter { it.zone == "BATTLEFIELD" && it.ownerId == "p0" }
+                .flatMap { it.cards }
+            val action = candidates.firstOrNull {
+                own && battlefield.count { card -> "LAND" in card.types } < 2 &&
+                    it.operationFamily == SemanticOperationFamily.PLAY_LAND
+            } ?: candidates.firstOrNull {
+                own && battlefield.none { card -> card.name == "Burnout Bashtronaut" } &&
+                    it.operationFamily == SemanticOperationFamily.CAST_SPELL &&
+                    it.actionIntent.sourceCardName == "Burnout Bashtronaut"
+            } ?: candidates.firstOrNull { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
+                ?: candidates.firstOrNull { it.actionIntent.kind == org.mtgallium.agent.infoset.core.SemanticActionIntentKind.DECLINE_ATTACK }
+                ?: candidates.firstOrNull { it.operationFamily == SemanticOperationFamily.DECISION_RESPONSE }
+                ?: error("Unexpected setup choice at ${observation.turnNumber}/${observation.step}: ${candidates.map { it.actionIntent }}")
+            assertTrue(world.step(action).accepted)
+        }
+        val original = world.determinizedHeuristicChoiceDiagnosis().choice
+        assertEquals(SemanticOperationFamily.ACTIVATE_ABILITY, original?.operationFamily)
+        val held = world.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION_EXPIRING)
+        assertEquals(world.informationState("p0"), held.informationState("p0"))
+        assertEquals(SemanticOperationFamily.PASS_PRIORITY, held.determinizedHeuristicChoiceDiagnosis().choice?.operationFamily)
+        assertEquals(SemanticOperationFamily.PASS_PRIORITY,
+            (held.fork() as ArgentumSearchWorld).determinizedHeuristicChoiceDiagnosis().choice?.operationFamily)
+        assertEquals(original, world.determinizedHeuristicChoiceDiagnosis().choice)
+        // The timing policy does not remove the pump from the legal/admitted action set.
+        assertTrue(held.expandChoices().candidates.any { it.operationFamily == SemanticOperationFamily.ACTIVATE_ABILITY })
+
+        val pumped = world.fork() as ArgentumSearchWorld
+        assertTrue(pumped.step(requireNotNull(original)).accepted)
+        val evaluated = mutableListOf<org.mtgallium.agent.infoset.core.PolicyInformationState>()
+        val evaluator = object : org.mtgallium.agent.infoset.core.InformationStateEvaluator {
+            override val id = LeafEvaluator.MTGALLIUM_VISIBLE_V2.evaluatorId
+            override fun evaluate(information: org.mtgallium.agent.infoset.core.PolicyInformationState, rootPlayer: String): Double {
+                evaluated += information
+                return 0.0
+            }
+        }
+        val settlement = InformationSetSearch(
+            config = InformationSetSearchConfig(
+                simulations = 1, maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_VISIBLE_V2),
+                rolloutTurnHorizon = org.mtgallium.agent.infoset.core.RolloutTurnHorizon(1, 256),
+            ),
+            opponentPolicy = UniformOpponentPolicy, rolloutPolicy = UniformOpponentPolicy,
+            rolloutOpponentPolicy = UniformOpponentPolicy,
+            leafEvaluationStrategy = LeafEvaluationStrategy(evaluator.id, LeafValueSource.Information(evaluator)),
+        ).settleFirstUnvisitedEdge(pumped, "p0", 621L, 0, rootTurnNumber = 5)
+        assertEquals(org.mtgallium.agent.infoset.core.SearchSettlementOrigin.HEURISTIC_SETTLEMENT, settlement.origin)
+        val afterCleanup = evaluated.single().observation
+        assertEquals(6, afterCleanup.turnNumber)
+        assertEquals("UPKEEP", afterCleanup.step)
+        assertTrue(afterCleanup.zones.flatMap { it.cards }
+            .filter { it.zone == "BATTLEFIELD" && it.name == "Burnout Bashtronaut" }
+            .all { it.power == 1 })
     }
 
     private fun sampledWorldLeafStrategy() = LeafEvaluationStrategy(
@@ -569,6 +666,21 @@ class ArgentumSearchWorldTest {
         assertEquals(root.informationState("p0"), rejuvenated.informationState("p0"))
         assertEquals(before, env.state)
         assertEquals(before.rng, env.state.rng)
+    }
+
+    @Test
+    fun `heuristic-profile fork preserves information while rebuilding annotations`() {
+        val cardRegistry = registry()
+        val env = environment(cardRegistry)
+        val knownDecks = mapOf("p0" to deck, "p1" to deck)
+        val production = ArgentumSearchWorld.create(env, "profile-fork", 44L, 811L, knownDecks = knownDecks)
+        production.expandChoicesWithPolicyAnnotations()
+        val expiring = production.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION_EXPIRING)
+
+        assertEquals(production.informationState("p0"), expiring.informationState("p0"))
+        assertEquals(production.expandChoices().candidates.map { it.signature }, expiring.expandChoices().candidates.map { it.signature })
+        // A fresh annotation call must succeed on the new profile rather than reusing production's cache.
+        assertTrue(expiring.expandChoicesWithPolicyAnnotations().candidates.isNotEmpty())
     }
 
     @Test

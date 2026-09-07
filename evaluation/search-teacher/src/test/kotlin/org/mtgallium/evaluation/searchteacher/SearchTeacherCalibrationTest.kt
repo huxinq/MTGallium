@@ -10,11 +10,15 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
 import org.mtgallium.agent.infoset.core.LeafStateSource
+import org.mtgallium.agent.infoset.core.LeafEvaluator
+import org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride
+import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSchema2
+import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluatorSchema2Weights
 import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.SearchTeacherDeckManifest
 import org.mtgallium.agent.infoset.core.PolicySourceProvenance
 import org.mtgallium.agent.infoset.core.PolicySourceTreeState
-import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
 import org.mtgallium.evaluation.searchteacher.cli.SearchTeacherCli
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.research.run.ResearchRunCheckpoints
@@ -131,12 +135,71 @@ class SearchTeacherCalibrationTest {
             candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(2, 96)),
             candidate.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM),
             candidate.copy(opponentRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.SEMANTIC_HEURISTIC),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(1)),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(2)),
+            candidate.copy(rolloutTurnHorizon = RolloutTurnHorizon(1, 513)),
+            candidate.copy(tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE),
         ).map { plan.copy(candidates = listOf(it)) }
         variations.forEach { assertNotEquals(baseline, identity(it)) }
         assertNotEquals(baseline, identity(s = source.copy(outer = tree.copy(revision = "later"))))
         assertNotEquals(baseline, identity(policies = mapOf("control" to "c", "candidate" to "changed")))
         assertNotEquals(baseline, identity(deck = "other-deck"))
         assertNotEquals(baseline, identity(workers = 2))
+    }
+
+    @Test
+    fun `completed turn horizons support v2 and both independently identified v3 forms`() {
+        val forms = listOf(null, SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+            SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE)
+        for (form in forms) {
+            val policy = control.copy(tacticalEvaluator = form, rolloutTurnHorizon = RolloutTurnHorizon(3))
+            assertEquals(RolloutTurnHorizon(3), policy.parameters(71).searchConfig().rolloutTurnHorizon)
+        }
+        val default = control.copy(tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT)
+            .informationEvaluator() as MonoRedTacticalEvaluatorSchema2
+        val reduced = control.copy(tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_WITHOUT_ATTACK_AND_INITIATIVE)
+            .informationEvaluator() as MonoRedTacticalEvaluatorSchema2
+        assertEquals(MonoRedTacticalEvaluatorSchema2Weights(), default.settings.weights)
+        assertEquals(default.settings.weights.copy(attack = 0.0, initiative = 0.0), reduced.settings.weights)
+        assertNotEquals(default.configurationId, reduced.configurationId)
+    }
+
+    @Test
+    fun `tactical settlement treatment selects v3 and binds its leaf configuration`() {
+        val tactical = control.copy(
+            tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+            rolloutHorizonSettlementOverride = RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+        )
+        val parameters = tactical.parameters(71)
+        val policy = tactical.policy(71)
+        assertEquals(LeafEvaluator.MTGALLIUM_TACTICAL_V3, parameters.leaf.evaluator)
+        assertEquals(RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+            parameters.leaf.rolloutHorizonSettlementOverride)
+        assertEquals("mono-red-tactical-value-v3", policy.informationEvaluator?.id)
+        assertEquals(parameters, policy.effectiveParameters(71))
+        assertFails { control.copy(
+            evaluator = MonoRedVisibleEvaluatorConfig(),
+            tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+        ) }
+        assertFails { control.copy(
+            rolloutHorizonSettlementOverride = RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+        ) }
+    }
+
+    @Test
+    fun `tactical quiescence evaluation fallback remains an explicit leaf treatment`() {
+        val tactical = control.copy(
+            tacticalEvaluator = SearchTeacherCalibrationTacticalEvaluator.V3_DEFAULT,
+            rolloutHorizonSettlementOverride =
+                RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+        )
+
+        val parameters = tactical.parameters(72)
+        assertEquals(
+            RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+            parameters.leaf.rolloutHorizonSettlementOverride,
+        )
+        assertEquals(parameters, tactical.policy(72).effectiveParameters(72))
     }
 
     @Test
@@ -209,7 +272,7 @@ class SearchTeacherCalibrationTest {
             Files.deleteIfExists(directory.resolve("checkpoint.json"))
             Files.delete(directory)
         }
-        listOf("search-teacher-calibration", "search-teacher-sequential", "search-teacher-continuation", "search-teacher-continuation-preflight", "real-game-position-bank", "position-bank-screen").forEach { suite ->
+        listOf("search-teacher-calibration", "search-teacher-sequential", "search-teacher-continuation", "search-teacher-continuation-preflight", "real-game-position-bank", "position-bank-screen", "position-bank-terminal-continuations").forEach { suite ->
             assertFails { SearchTeacherCli.parse(arrayOf("--suite", suite)) }
             assertEquals(suite, SearchTeacherCli.parse(arrayOf("--suite", suite, "--profile", "/tmp/plan.json",
                 "--output", "/tmp/output", "--deck-manifest", "/tmp/deck.json")).suite)

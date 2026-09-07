@@ -96,7 +96,7 @@ class ArenaEvaluatorSeamTest {
                 kind = ArenaPolicyKind.SEARCH,
                 profile = profile().copy(
                     leaf = LeafEvaluationConfig(
-                        LeafStateSource.BOUNDED_ROLLOUT,
+                        LeafStateSource.CURRENT_SAMPLED_WORLD,
                         LeafEvaluator.MTGALLIUM_TACTICAL_V3,
                     )
                 ),

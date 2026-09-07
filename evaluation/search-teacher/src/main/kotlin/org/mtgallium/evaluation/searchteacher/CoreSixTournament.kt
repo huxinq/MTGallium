@@ -80,8 +80,11 @@ internal data class ArenaPolicySpec(
             informationEvaluator?.let { evaluator ->
                 require(effective.leaf.stateSource == LeafStateSource.CURRENT_INFORMATION_STATE ||
                     (effective.leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT &&
-                        effective.leaf.evaluator == LeafEvaluator.MTGALLIUM_VISIBLE_V2)) {
-                    "Arena evaluator overrides require a current-information leaf or visible-v2 bounded rollout"
+                        effective.leaf.evaluator in setOf(
+                            LeafEvaluator.MTGALLIUM_VISIBLE_V2,
+                            LeafEvaluator.MTGALLIUM_TACTICAL_V3,
+                        ))) {
+                    "Arena evaluator overrides require a current-information leaf or a supported bounded rollout"
                 }
                 require(evaluator.id == effective.leaf.evaluator.evaluatorId) {
                     "Arena evaluator ${evaluator.id} does not match configured ${effective.leaf.evaluator.evaluatorId} leaf"

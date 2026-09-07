@@ -5,6 +5,7 @@ import org.mtgallium.agent.infoset.core.RootSelectionGuidance
 import org.mtgallium.agent.infoset.core.RootSelectionPolicy
 
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
+import org.mtgallium.agent.infoset.argentum.ArgentumHeuristicProfile
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
 import org.mtgallium.agent.infoset.core.BeliefBatch
@@ -103,6 +104,8 @@ data class SearchTeacherPolicyParameters(
     val wallClockBudgetMillis: Long? = null,
     val minimumSimulations: Int = 1,
     val singletonSelection: PolicySingletonSelectionConfig = PolicySingletonSelectionConfig(),
+    /** Opt-in simulated-tree/root-and-opponent heuristic annotation only; belief updates are unchanged. */
+    val searchHeuristicProfile: ArgentumHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION,
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
 ) {
     init {
@@ -281,7 +284,17 @@ class SearchTeacherPolicySession(
     val policyIdentity: String = SearchTeacherPolicyIdentity.identity(behaviorSpecification)
     fun beliefBatch(actual: ArgentumSearchWorld? = null): BeliefBatch<Weighted<SearchWorld>> {
         actual?.let { belief.synchronize(it, acceptedDecisionCount) }
-        return belief.batch()
+        return profiledBeliefBatch()
+    }
+
+    private fun profiledBeliefBatch(): BeliefBatch<Weighted<SearchWorld>> {
+        val batch = belief.batch()
+        if (parameters.searchHeuristicProfile == ArgentumHeuristicProfile.PRODUCTION) return batch
+        return batch.copy(particles = batch.particles.map { weighted ->
+            val world = weighted.value as? ArgentumSearchWorld
+                ?: error("Search Teacher belief particle is not an Argentum world")
+            weighted.copy(value = world.forkWithHeuristicProfile(parameters.searchHeuristicProfile))
+        })
     }
 
     fun select(
@@ -308,7 +321,7 @@ class SearchTeacherPolicySession(
         val result = try {
             search.search(
                 rootPlayer = actor,
-                belief = belief.batch(),
+                belief = profiledBeliefBatch(),
                 searchSeed = searchSeed,
                 beliefContinuityEpoch = belief.continuityEpoch,
                 rootSelectionGuidance = guidance,

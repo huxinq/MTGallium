@@ -80,6 +80,9 @@ configuration identity distinguishes overrides. Formula changes, learned labels,
 automated parameter optimization and tactical certification are separate work.
 Search disagreement can nominate positions for investigation but is not an
 accuracy score. Accessing validation roots must be disclosed in later claims.
+Repeated searches at one unchanged root/policy reconstruct the session once, with
+tree reuse and wall-clock budgets disabled. Later repetitions record zero added
+reconstruction time explicitly; they still run fresh search at their assigned seeds.
 
 ## Sequential gameplay
 
@@ -208,3 +211,135 @@ At least one policy in each matchup must use search. Safe trajectory and planner
 evidence follow the search seat (`p0` when both seats use search), with the seat
 in each artifact filename. Original-heuristic adapter replacement remains a
 reported evidence failure rather than an accepted original-policy result.
+
+## Matched terminal-continuation diagnostics
+
+### Selecting either tactical V3 formula
+
+The two retained V3 formulas coexist. An object-valued `tacticalEvaluator`
+selects schema 1 (`MonoRedTacticalEvaluatorSettings`), including its ten weights
+and `landConversion` term. Existing coefficient calibration remains bound to
+that formula. The strings `"V3_DEFAULT"` and
+`"V3_WITHOUT_ATTACK_AND_INITIATIVE"` select the screening branch's schema-2
+formula and its nine weights. Their original configuration IDs and JSON forms
+are preserved; an unspecified registry V3 evaluator still uses schema 1.
+
+Schema-2 screen policies omit the outer cached visible-V2 `evaluator` field.
+Existing schema-1 screen configurations retain their explicit default V2 object.
+The formulas share an evaluator family ID but have distinct schema and annotation
+versions in their configuration identities. Neither is promoted by integration.
+
+Attack-influence recording cannot be combined with policy quiescence: its
+observer covers bounded-rollout decisions and would omit later policy choices.
+
+`--suite position-bank-terminal-continuations` accepts explicit development root
+IDs, a bank identity, one reconstruction/rollout policy composition, sample count,
+candidate cap, continuation decision cap and seed. The bank's authenticated replay
+and sequential-belief reconstruction are shared with search screening.
+
+Each replicate samples a belief particle by its weight, then applies every current
+profile candidate to a separate fork with matched future-chance and continuation
+seeds. The candidate cap refuses the entire root rather than dropping actions.
+The actual replayed hidden world is never used as a belief particle. Both sides
+then use the declared rollout policies through genuine player decisions until an
+actual terminal state. This continuation invokes no leaf evaluator and does not
+run the full Search Teacher at later decisions.
+
+The report retains particle weights, coordinates, policy identities, terminal
+payoffs and available policy-decision diagnostics. Reconstruction, candidate
+rebinding, rejection and continuation failures stay explicit. A decision cap
+supplies no payoff. Candidate means and paired gaps are emitted only for roots
+whose entire assigned candidate/sample population reached valid terminals.
+Root-player features immediately after the assigned first action are cached as
+hypothetical observations, with their information digest and immediate-terminal
+flag. They are action-specific inputs for later diagnostics, not authoritative
+facts at the bank root or samples of the production leaf-settlement distribution.
+
+These are descriptive finite-sample, rollout-policy-conditioned payoff gaps for
+hypothetical continuations. They are not observed game results, exact information-
+state values, correct-action labels, tactical proofs or evidence of stronger play.
+Source-position policies, belief construction and continuation policies have
+separate meanings. The descriptor retains its full composition, but fields used
+only by ordinary search or leaf evaluation do not control this terminal API.
+Adaptive tuning and any eventual strength claim still need an appropriate target,
+validation discipline and gameplay evidence.
+
+### Reviewing terminal reports
+
+After official research-run and bank verification, the standard-library utility
+[`position_bank_terminal_diagnostics.py`](../tools/analysis/position_bank_terminal_diagnostics.py)
+produces a private review derivative from the finalized terminal and bank reports:
+
+```sh
+python3 tools/analysis/position_bank_terminal_diagnostics.py \
+  --terminal-report "$TERMINAL_REPORT" --bank-report "$BANK_REPORT" \
+  --verified-terminal-identity "$TERMINAL_IDENTITY" \
+  --verified-bank-identity "$BANK_IDENTITY" \
+  --official-verification-completed \
+  --json-output "$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/search-teacher/work/review/diagnostics.json" \
+  --markdown-output "$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/search-teacher/work/review/diagnostics.md"
+```
+
+The verification flag attests to checks already performed by the caller; this
+utility does not perform official verification. It retains input and manifest
+hashes, input source provenance, identities and its own script hash. The analysis
+requires clean committed source and records that revision separately in a review
+identity bound to its inputs. Outputs must be new
+absolute paths outside source checkouts and finalized input directories.
+
+The analysis accounts for every assigned root, preserves invalid populations,
+and computes gaps only from complete paired candidate matrices. It counts exact
+cached-feature collisions at matching coordinates. If every retained terminal
+payoff is binary, it also reports two-sided paired sign tests with Holm adjustment
+across all available candidate pairs in the full report. These tests assume the
+paired replicates follow the declared sampling model; they do not correct for
+earlier exploration or certify actions. Nonbinary outcomes retain descriptive
+gaps without sign tests. Neither a small p-value nor a feature collision is a
+playing-strength result.
+
+## Decision-level rollout treatments
+
+Calibration policy descriptors can opt into two independent treatments:
+
+- `searchHeuristicProfile: "PRODUCTION_EXPIRING"` uses the pinned engine's
+  expiring-grant timing guard for heuristic annotations inside simulated search.
+  This affects the annotated tree opponent and both rollout seats. Represented
+  belief updates retain their original opponent model. The default is
+  `PRODUCTION`; the optional field participates in behavior identity.
+- `rolloutHorizonSettlementOverride: "POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK"`
+  continues an unsettled tactical-v3 rollout through explicit root/opponent
+  rollout-policy choices. Responses, blockers, targets and ordering remain
+  individual choices, with policy attribution and quiescence counters. The
+  continuation shares one forced-pass budget and uses the configured quiescence
+  decision cap. A quiet strategic decision is left for evaluation; exhaustion
+  remains a heuristic fallback, never a terminal outcome.
+
+The existing `QUIESCENCE_WITH_EVALUATION_FALLBACK` remains pass-only. Neither
+option changes the default policy or justifies promoting a treatment based on
+selected decision probes. Record the exact source, configuration and heuristic
+versus terminal settlement populations when comparing these treatments.
+
+### Completed-turn endpoints
+
+`rolloutTurnHorizon: {"completedTurns": 3, "maxPolicyDecisions": 512}` replaces
+rollout's fixed decision endpoint with the first genuine player decision after
+three player turns finish. Count every player's turn, beginning with the current
+root turn; the absolute endpoint is fixed at the original search root and is
+shared across its siblings and tree depths. Turn completion includes cleanup and
+expiration of until-end-of-turn effects. The engine may already have untapped
+permanents or put new-turn triggers on the stack when it exposes that next
+choice; the option does not claim all such states are tactically quiet.
+
+The endpoint is evaluated directly with V2 or V3. It cannot be combined with a
+quiescence override that moves beyond that boundary. `maxPolicyDecisions` inside
+the horizon object is a rollout safety cap: failing to reach the boundary stops
+search with a typed non-game failure, rather than scoring an earlier leaf.
+The ordinary top-level decision budget still bounds tree depth, and simulation
+counts remain independent of rollout length. Defaults and retained identities
+without the optional horizon field are unchanged.
+
+For a separate formula ablation, `tacticalEvaluator:
+"V3_WITHOUT_ATTACK_AND_INITIATIVE"` zeros only the attack-capacity and
+priority/attack-window initiative weights. All life, body, block, reach, hand and
+mana terms retain the default formula; the effective weights identify the
+ablation. It is not an automatically promoted successor to `V3_DEFAULT`.

@@ -99,7 +99,7 @@ internal class TacticalV3CalibrationRunner(private val repository: Path, private
         return report
     }
     private fun policy(old: VisibleV2ExperimentReport, id: String, settings: MonoRedTacticalEvaluatorSettings) =
-        PositionBankScreenPolicy(old.plan.selection.copy(id = id, evaluator = null, tacticalEvaluator = settings), MonoRedVisibleEvaluatorConfig())
+        PositionBankScreenPolicy(old.plan.selection.copy(id = id, evaluator = null, tacticalEvaluator = CalibrationTacticalEvaluator.Settings(settings)), MonoRedVisibleEvaluatorConfig())
 
     fun preflight(plan: TacticalV3CalibrationPlan, output: Path, workers: Int): PositionBankScreenReport {
         val old = previous(plan)

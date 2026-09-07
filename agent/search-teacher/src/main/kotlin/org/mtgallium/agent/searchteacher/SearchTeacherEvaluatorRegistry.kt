@@ -6,6 +6,7 @@ import org.mtgallium.agent.infoset.core.LeafEvaluationStrategy
 import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.LeafValueSource
+import org.mtgallium.agent.infoset.core.RolloutHorizonSettlementOverride
 import org.mtgallium.agent.infoset.core.UnresolvedLeafHandling
 
 object SearchTeacherEvaluatorRegistry {
@@ -13,18 +14,35 @@ object SearchTeacherEvaluatorRegistry {
         leaf: LeafEvaluationConfig,
         informationEvaluator: InformationStateEvaluator? = null,
     ): LeafEvaluationStrategy = when (val evaluator = leaf.evaluator) {
-        LeafEvaluator.MTGALLIUM_VISIBLE_V2 -> informationStrategy(
-            evaluator,
-            informationEvaluator ?: MonoRedInformationEvaluator,
-        )
-        LeafEvaluator.MTGALLIUM_TACTICAL_V3 -> informationStrategy(
-            evaluator,
-            informationEvaluator ?: MonoRedTacticalEvaluatorV3,
-            supportsTraceReuse = false,
-            settleAtRolloutHorizon = true,
-            unresolvedLeafHandling = UnresolvedLeafHandling.BACK_UP_NEUTRAL,
-        )
+        LeafEvaluator.MTGALLIUM_VISIBLE_V2 -> {
+            require(leaf.rolloutHorizonSettlementOverride == null) {
+                "${evaluator.evaluatorId} does not support a rollout-horizon settlement override"
+            }
+            informationStrategy(evaluator, informationEvaluator ?: MonoRedInformationEvaluator)
+        }
+        LeafEvaluator.MTGALLIUM_TACTICAL_V3 -> {
+            require(leaf.rolloutHorizonSettlementOverride == null ||
+                leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT
+            ) { "${evaluator.evaluatorId} settlement overrides require bounded rollout" }
+            informationStrategy(
+                evaluator,
+                informationEvaluator ?: MonoRedTacticalEvaluatorV3,
+                supportsTraceReuse = false,
+                settleAtRolloutHorizon = leaf.rolloutHorizonSettlementOverride !=
+                    RolloutHorizonSettlementOverride.DIRECT_EVALUATION,
+                unresolvedLeafHandling = when (leaf.rolloutHorizonSettlementOverride) {
+                    null -> UnresolvedLeafHandling.BACK_UP_NEUTRAL
+                    RolloutHorizonSettlementOverride.DIRECT_EVALUATION -> UnresolvedLeafHandling.EVALUATE
+                    RolloutHorizonSettlementOverride.QUIESCENCE_WITH_EVALUATION_FALLBACK,
+                    RolloutHorizonSettlementOverride.POLICY_QUIESCENCE_WITH_EVALUATION_FALLBACK ->
+                        UnresolvedLeafHandling.EVALUATE
+                },
+            )
+        }
         LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 -> {
+            require(leaf.rolloutHorizonSettlementOverride == null) {
+                "${evaluator.evaluatorId} does not support a rollout-horizon settlement override"
+            }
             require(leaf.stateSource == LeafStateSource.CURRENT_INFORMATION_STATE) {
                 evaluator.evaluatorId + " replaces bounded continuation only through " +
                     LeafStateSource.CURRENT_INFORMATION_STATE
@@ -39,6 +57,9 @@ object SearchTeacherEvaluatorRegistry {
             )
         }
         LeafEvaluator.ARGENTUM_BOARD_V1 -> {
+            require(leaf.rolloutHorizonSettlementOverride == null) {
+                "${evaluator.evaluatorId} does not support a rollout-horizon settlement override"
+            }
             require(informationEvaluator == null) {
                 "${evaluator.evaluatorId} is evaluated only from an allowlisted sampled world"
             }

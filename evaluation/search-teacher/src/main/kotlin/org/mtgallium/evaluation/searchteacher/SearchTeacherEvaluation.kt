@@ -1293,6 +1293,15 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         check(report.complete) { "Position bank includes reconstruction refusals; inspect the retained report" }
         return
     }
+    if (options.suite == "position-bank-terminal-continuations") {
+        val plan = evidenceJson.decodeFromString<PositionBankTerminalContinuationPlan>(
+            Files.readString(requireNotNull(options.profilePath)))
+        val output = requireNotNull(options.outputPath)
+        val report = PositionBankTerminalContinuationRunner(root, registry, manifest).run(plan, output, options.threads)
+        println("Position terminal continuations complete=${report.complete}; report=${output.resolve("report.json")}")
+        check(report.complete) { "Position continuations include refusals; inspect the retained report" }
+        return
+    }
     if (options.suite == "position-bank-screen") {
         val plan = evidenceJson.decodeFromString<PositionBankScreenPlan>(
             Files.readString(requireNotNull(options.profilePath)))
