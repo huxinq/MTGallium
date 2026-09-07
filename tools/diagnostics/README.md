@@ -1,5 +1,18 @@
 # Search adapter cost profile
 
+`ObservationFragmentBenchmark.java` provides a bounded, manifest-verified screen
+of canonical observation fragment reuse. Compile it against the packaged research
+runtime, then pass a finalized gameplay directory, its expected research-run
+identity, repository root, and a new private output directory. It checks every registered p0 decision observation against the full
+serializer and retained digest before measuring six alternating rounds of digest
+construction and current-thread allocations. Each stream starts with an empty
+fragment cache. It runs no games and measures neither safe projection nor overall
+search speed. The gameplay source owns the input observations; the benchmark
+source owns the fragment algorithm and timings. It requires clean committed
+source and writes source/Argentum provenance, actual runtime hashes, material
+configuration and a report bound by its finalized artifact manifest. The existing
+private-evidence destination guard applies; stdout only points to the result.
+
 Read `search-cost-summary.md` first after a new adapter profile completes. It
 reports the complete-stack search denominator, mutually exclusive cost shares,
 inclusive entry points, digest callers and sampled allocation weights. It is

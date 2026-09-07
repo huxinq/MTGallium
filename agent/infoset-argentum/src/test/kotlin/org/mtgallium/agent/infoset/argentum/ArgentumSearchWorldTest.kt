@@ -42,6 +42,43 @@ class ArgentumSearchWorldTest {
     private val deck = mapOf("Mountain" to 12, "Raging Goblin" to 8)
     private val cardRegistry = registry()
 
+    @Test
+    fun `fragment digests match full serialization through accepted live transitions and forks`() {
+        val world = ArgentumSearchWorld.create(environment(), "fragment-live", 90L, effectiveSetupSeed = 811L)
+        val seen = mutableSetOf<SemanticOperationFamily>()
+        repeat(48) {
+            for (viewer in listOf("p0", "p1")) {
+                val view = world.informationState(viewer).observation
+                val blank = view.copy(observationDigest = "")
+                assertEquals(org.mtgallium.agent.infoset.core.PolicyJson.digest(
+                    org.mtgallium.agent.infoset.core.PolicyJson.format.encodeToJsonElement(
+                        org.mtgallium.agent.infoset.core.PolicyObservation.serializer(), blank)), view.observationDigest)
+            }
+            if (world.actorToAct() == null) return@repeat
+            val choices = world.expandChoices().candidates
+            val choice = choices.minBy { when (it.operationFamily) {
+                SemanticOperationFamily.PLAY_LAND -> 0
+                SemanticOperationFamily.CAST_SPELL -> 1
+                SemanticOperationFamily.MANA_ABILITY -> 2
+                else -> 3
+            } }
+            val parent = world.informationState("p0")
+            val fork = world.fork()
+            assertTrue(fork.step(choice).accepted)
+            assertEquals(parent, world.informationState("p0"))
+            assertTrue(world.step(choice).accepted)
+            if (choice.operationFamily == SemanticOperationFamily.PLAY_LAND) {
+                assertTrue(world.observationFragmentReuse("p0").first > 0,
+                    "Accepted non-priority transitions must carry forward previous safe fragments")
+            }
+            assertEquals(fork.informationState("p0"), world.informationState("p0"))
+            seen += choice.operationFamily
+        }
+        assertTrue(SemanticOperationFamily.PLAY_LAND in seen)
+        assertTrue(SemanticOperationFamily.CAST_SPELL in seen)
+        assertTrue(SemanticOperationFamily.PASS_PRIORITY in seen)
+    }
+
     private fun sampledWorldLeafStrategy() = LeafEvaluationStrategy(
         configuredEvaluatorId = LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId,
         source = LeafValueSource.SampledWorld(LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId),

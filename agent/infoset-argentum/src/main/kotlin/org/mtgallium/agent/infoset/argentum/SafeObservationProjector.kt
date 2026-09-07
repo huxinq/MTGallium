@@ -26,6 +26,7 @@ import org.mtgallium.agent.infoset.core.PolicyZoneView
 class SafeObservationProjection internal constructor(
     val observation: PolicyObservation,
     internal val references: SafeReferenceMap,
+    internal val canonicalFragments: ObservationCanonicalFragments = ObservationCanonicalFragments.build(observation),
 ) {
     /**
      * Exact projection update for the engine's pure priority-transfer transition. The matching
@@ -41,9 +42,10 @@ class SafeObservationProjection internal constructor(
             },
             observationDigest = "",
         )
-        val element = PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(), updated)
+        val fragments = ObservationCanonicalFragments.build(updated, canonicalFragments)
         return SafeObservationProjection(
-            observation = updated.copy(observationDigest = PolicyJson.digest(element)),
+            observation = updated.copy(observationDigest = fragments.digest()),
+            canonicalFragments = fragments,
             references = references,
         )
     }
@@ -71,6 +73,7 @@ class SafeObservationProjector {
         playerAliases: Map<EntityId, String>?,
         runtime: ArgentumPolicyRuntimeProjection,
         pendingDecision: PendingDecision? = null,
+        previous: SafeObservationProjection? = null,
     ): SafeObservationProjection {
         val refs = SafeReferenceMap(observation, playerAliases, runtime.cards)
         val chooserDecision = pendingDecision?.takeIf { decision ->
@@ -204,9 +207,10 @@ class SafeObservationProjector {
             },
             observationDigest = "",
         )
-        val element = PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(), safe)
+        val fragments = ObservationCanonicalFragments.build(safe, previous?.canonicalFragments)
         return SafeObservationProjection(
-            observation = safe.copy(observationDigest = PolicyJson.digest(element)),
+            observation = safe.copy(observationDigest = fragments.digest()),
+            canonicalFragments = fragments,
             references = refs,
         )
     }
