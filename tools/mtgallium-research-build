@@ -28,13 +28,19 @@ assert not git(repo, 'status', '--porcelain') and not git(engine, 'status', '--p
 source = git(repo, 'rev-parse', 'HEAD')
 pin = git(repo, 'rev-parse', 'HEAD:third_party/argentum-engine')
 assert pin == git(engine, 'rev-parse', 'HEAD'), 'Argentum pin mismatch'
-command = ['bash', 'tools/mtgallium-gradle', 'clean', ':argentum-engine:clean', ':evaluation:search-teacher:researchRuntimeClasspath', '--rerun-tasks', '--no-build-cache', '-Pkotlin.incremental=false']
+commands = [
+    ['bash', 'third_party/argentum-engine/gradlew', '--project-dir', 'third_party/argentum-engine', 'clean', '--no-daemon'],
+    ['bash', 'tools/mtgallium-gradle', 'clean', ':evaluation:search-teacher:researchRuntimeClasspath', '--rerun-tasks', '--no-build-cache', '-Pkotlin.incremental=false'],
+]
 output.mkdir(parents=True)
 started = time.monotonic()
 with (output / 'build.log').open('w') as log:
-    result = subprocess.run(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
+    for command in commands:
+        result = subprocess.run(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
+        if result.returncode != 0:
+            break
 record = dict(schemaVersion=1, repository=str(repo), sourceCommitBefore=source, engineCommitBefore=pin,
-              command=command, exitCode=result.returncode, elapsedMillis=(time.monotonic()-started)*1000,
+              commands=commands, exitCode=result.returncode, elapsedMillis=(time.monotonic()-started)*1000,
               logSha256=hashlib.sha256((output/'build.log').read_bytes()).hexdigest())
 (output/'build-invocation.json').write_text(json.dumps(record, indent=2)+'\n')
 result.check_returncode()

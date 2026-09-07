@@ -14,7 +14,7 @@ data class ResearchBuildInvocation(
     val repository: String,
     val sourceCommitBefore: String,
     val engineCommitBefore: String,
-    val command: List<String>,
+    val commands: List<List<String>>,
     val exitCode: Int,
     val elapsedMillis: Double,
     val logSha256: String,
@@ -22,12 +22,15 @@ data class ResearchBuildInvocation(
     init {
         require(schemaVersion == 1 && Path.of(repository).isAbsolute && exitCode == 0)
         require(elapsedMillis.isFinite() && elapsedMillis >= 0 && logSha256.matches(Regex("[0-9a-f]{64}")))
-        require(command == RESEARCH_BUILD_COMMAND) { "Build record does not describe the supported forced rebuild" }
+        require(commands == RESEARCH_BUILD_COMMANDS) { "Build record does not describe the supported forced rebuild" }
     }
 }
 
-val RESEARCH_BUILD_COMMAND = listOf("bash", "tools/mtgallium-gradle", "clean", ":argentum-engine:clean",
-    ":evaluation:search-teacher:researchRuntimeClasspath", "--rerun-tasks", "--no-build-cache", "-Pkotlin.incremental=false")
+val RESEARCH_BUILD_COMMANDS = listOf(
+    listOf("bash", "third_party/argentum-engine/gradlew", "--project-dir", "third_party/argentum-engine", "clean", "--no-daemon"),
+    listOf("bash", "tools/mtgallium-gradle", "clean", ":evaluation:search-teacher:researchRuntimeClasspath",
+        "--rerun-tasks", "--no-build-cache", "-Pkotlin.incremental=false"),
+)
 
 @Serializable
 data class ResearchBuildReport(

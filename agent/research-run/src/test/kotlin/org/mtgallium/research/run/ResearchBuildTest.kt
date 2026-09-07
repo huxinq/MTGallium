@@ -18,7 +18,7 @@ class ResearchBuildTest {
         Files.writeString(path.resolve("build.log"), "synthetic successful build")
         Files.writeString(path.resolve("classpath.txt"), "synthetic-runtime")
         val invocation = ResearchBuildInvocation(repository = "/synthetic/repository", sourceCommitBefore = tree.revision,
-            engineCommitBefore = tree.revision, command = RESEARCH_BUILD_COMMAND, exitCode = 0, elapsedMillis = 1.0,
+            engineCommitBefore = tree.revision, commands = RESEARCH_BUILD_COMMANDS, exitCode = 0, elapsedMillis = 1.0,
             logSha256 = researchSha256File(path.resolve("build.log")))
         val bindings = researchBuildBindings(source, invocation, runtime)
         Files.writeString(path.resolve("build-invocation.json"), json.encodeToString(invocation))
@@ -38,9 +38,9 @@ class ResearchBuildTest {
     }
 
     @Test fun `an incremental or unsuccessful build cannot become a forced-build attestation`() {
-        fun invocation(command: List<String>, exit: Int) = ResearchBuildInvocation(repository = "/synthetic", sourceCommitBefore = "source",
-            engineCommitBefore = "engine", command = command, exitCode = exit, elapsedMillis = 0.0, logSha256 = "a".repeat(64))
-        assertFails { invocation(RESEARCH_BUILD_COMMAND - "--rerun-tasks", 0) }
-        assertFails { invocation(RESEARCH_BUILD_COMMAND, 1) }
+        fun invocation(commands: List<List<String>>, exit: Int) = ResearchBuildInvocation(repository = "/synthetic", sourceCommitBefore = "source",
+            engineCommitBefore = "engine", commands = commands, exitCode = exit, elapsedMillis = 0.0, logSha256 = "a".repeat(64))
+        assertFails { invocation(RESEARCH_BUILD_COMMANDS.map { it - "--rerun-tasks" }, 0) }
+        assertFails { invocation(RESEARCH_BUILD_COMMANDS, 1) }
     }
 }
