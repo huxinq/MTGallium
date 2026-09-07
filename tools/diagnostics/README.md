@@ -3,7 +3,7 @@
 `ObservationFragmentBenchmark.java` provides a bounded, manifest-verified screen
 of canonical observation fragment reuse. Compile it against the packaged research
 runtime, then pass a finalized gameplay directory, its expected research-run
-identity, repository root, and a new private output directory. It checks every registered p0 decision observation against the full
+identity, repository root, and a new output path relative to the configured private evidence root. It checks every registered p0 decision observation against the full
 serializer and retained digest before measuring six alternating rounds of digest
 construction and current-thread allocations. Each stream starts with an empty
 fragment cache. It runs no games and measures neither safe projection nor overall

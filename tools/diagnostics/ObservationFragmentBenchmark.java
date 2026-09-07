@@ -12,7 +12,7 @@ import org.mtgallium.research.run.*;
 public final class ObservationFragmentBenchmark {
     private static volatile String consumed;
     public static void main(String[] args) throws Exception {
-        if (args.length != 4) throw new IllegalArgumentException("input-directory expected-input-identity repository-root output-directory");
+        if (args.length != 4) throw new IllegalArgumentException("input-directory expected-input-identity repository-root output-relative-path");
         Path input = Path.of(args[0]), repository = Path.of(args[2]).toAbsolutePath();
         Path output = PrivateEvidencePaths.INSTANCE.resolve(repository, args[3]);
         if (Files.exists(output)) throw new IllegalArgumentException("Output already exists");
