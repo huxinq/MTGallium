@@ -202,3 +202,14 @@ so persistent residuals cannot distinguish model error from posterior error,
 nor identify a preferred representation or learning intervention. Source revisions
 remain separately recorded. Sample-max regrets are optimistic and inspected
 development data do not constitute fresh confirmation.
+
+## Large gameplay reports
+
+Calibration and sequential-gameplay reports retain their existing JSON schema
+and bytes but stream JSON to an atomic temporary file. Completed-run resume,
+sequential transfer auditing and position-bank import stream the report parser
+after their existing manifest checks. This avoids whole-report String and UTF-8
+byte-array allocation, including the single-String size limit. The full decoded
+report object still resides in memory; streaming JSON does not imply bounded
+heap use independent of the number of games. Size the heap and private storage
+for the declared cap, and preserve checkpoint recovery and all population checks.

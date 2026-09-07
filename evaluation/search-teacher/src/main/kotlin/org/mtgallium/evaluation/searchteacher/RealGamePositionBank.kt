@@ -393,7 +393,7 @@ internal fun loadCompletedSequentialCalibration(directory: Path, expectedIdentit
     fun registered(relative: String): Path = ResearchRunFiles.resolveBelow(directory, relative).also {
         require(entries.getValue(relative).sha256 == sha256File(it))
     }
-    val report = evidenceJson.decodeFromString<SearchTeacherCalibrationReport>(Files.readString(registered("report.json")))
+    val report = readEvidenceJson(registered("report.json"), SearchTeacherCalibrationReport.serializer())
     requireRealGamePositionBankSourceIdentity(report, expectedIdentity, completedSequential = true)
     require(evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(Files.readString(registered("plan.json"))) == report.plan)
     require(evidenceJson.decodeFromString<SearchTeacherSequentialPlan>(Files.readString(registered("sequential-plan.json"))) ==
@@ -442,7 +442,7 @@ private fun readBankSource(input: RealGamePositionBankSource): BankSource {
     val entries = artifacts.artifacts.associateBy { it.relativePath }
     val reportPath = ResearchRunFiles.resolveBelow(directory, "report.json")
     require(entries.getValue("report.json").sha256 == sha256File(reportPath))
-    val report = evidenceJson.decodeFromString<SearchTeacherCalibrationReport>(Files.readString(reportPath))
+    val report = readEvidenceJson(reportPath, SearchTeacherCalibrationReport.serializer())
     requireRealGamePositionBankSourceIdentity(report, input.expectedRunIdentity)
     require(entries.containsKey("plan.json"))
     require(evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(Files.readString(directory.resolve("plan.json"))) == report.plan)

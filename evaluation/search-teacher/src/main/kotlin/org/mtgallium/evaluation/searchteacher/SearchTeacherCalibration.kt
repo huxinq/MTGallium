@@ -346,7 +346,7 @@ internal class SearchTeacherCalibrationRunner(
             manifest.deckHash(), manifest.cardPoolHash(), workerThreads, sequentialRule).identity
         if (Files.exists(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))) {
             ResearchRunArtifacts.loadAndVerify(directory, identity)
-            return evidenceJson.decodeFromString<SearchTeacherCalibrationReport>(Files.readString(directory.resolve("report.json")))
+            return readEvidenceJson(directory.resolve("report.json"), SearchTeacherCalibrationReport.serializer())
                 .also { require(it.runIdentity == identity && it.plan == plan && it.sequentialRule == sequentialRule) }
         }
         val planPath = directory.resolve("plan.json")
@@ -419,7 +419,7 @@ internal class SearchTeacherCalibrationRunner(
             sequentialRule = sequentialRule, sequentialResult = sequential?.result,
             sequentialOvershootPairs = sequential?.let { it.pairs.drop(it.result.inspectedPairs) },
             sequentialOperationalValid = sequential?.operationalValid, sequentialPopulation = sequential?.population)
-        writeJsonAtomically(directory.resolve("report.json"), report)
+        writeEvidenceJsonStream(directory.resolve("report.json"), report, SearchTeacherCalibrationReport.serializer())
         writeTextAtomically(directory.resolve("report.md"), renderSearchTeacherCalibration(report))
         ResearchRunArtifacts(directory, identity).also { artifacts ->
             listOf("plan.json", "report.json", "report.md").forEach(artifacts::register)
