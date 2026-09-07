@@ -11,3 +11,5 @@
 
 Historical research chronology, canonical evidence, and private operation
 instructions are deliberately outside this source release.
+
+- [Reusable terminal research workflow](research-workflow.md): verified builds, fixed study composition, campaign data use, target sensitivity and deployment links.

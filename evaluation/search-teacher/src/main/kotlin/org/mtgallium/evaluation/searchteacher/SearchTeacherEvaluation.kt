@@ -68,6 +68,37 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         return
     }
 
+    if (options.suite == "terminal-kernel-study") {
+        val plan = evidenceJson.decodeFromString<TerminalKernelStudyPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = TerminalKernelStudyRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Terminal kernel study ${report.identity}: exploratory gate=${report.gate.passed}; not a gameplay-strength result")
+        return
+    }
+    if (options.suite == "terminal-target-sensitivity") {
+        val plan = evidenceJson.decodeFromString<TerminalTargetSensitivityPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = TerminalTargetSensitivityRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Terminal target sensitivity ${report.identity}: ${report.cells.size} declared cells; no target or model selection")
+        return
+    }
+    if (options.suite == "research-transfer-audit") {
+        val plan = evidenceJson.decodeFromString<ResearchTransferAuditPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = ResearchTransferAuditRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)))
+        println("Screen-to-gameplay audit ${report.identity}: ${report.observations.size} authenticated links, ${report.inconclusiveGameplay} inconclusive gameplay results")
+        return
+    }
+    if (options.suite == "campaign-data-use") {
+        val plan = evidenceJson.decodeFromString<CampaignDataUsePlan>(Files.readString(requireNotNull(options.profilePath)))
+        val record = CampaignDataRegistry(root, diagnosticOutput(requireNotNull(options.outputPath)), plan.campaignId).record(plan)
+        println("Campaign population use ${record.identity}: ${record.seedGroups.size} seed groups, ${record.rootIds.size} roots")
+        return
+    }
+    if (options.suite == "campaign-data-snapshot") {
+        val plan = evidenceJson.decodeFromString<CampaignSnapshotPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val snapshot = retainCampaignSnapshot(root, plan, diagnosticOutput(requireNotNull(options.outputPath)))
+        println("Campaign snapshot: ${snapshot.records.size} records, ${snapshot.groups.size} seed groups; unregistered access is unknown")
+        return
+    }
+
     if (options.suite == "decision-local-learnability-pilot") {
         val output = diagnosticOutput(requireNotNull(options.outputPath))
         val report = DecisionLocalLearnabilityPilot(root).run(requireNotNull(options.precisionParent),

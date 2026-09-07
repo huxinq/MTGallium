@@ -9,6 +9,15 @@ import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.evaluation.searchteacher.evidence.EvidenceStore
 import org.mtgallium.research.run.*
 
+/** Keeps production terminal targets distinct from diagnostic continuation interventions. */
+internal fun requireProductionTerminalTarget(screen: PositionBankScreenPlan) {
+    require(screen.mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS && screen.policies.size == 1)
+    val policy = screen.policies.single().search
+    require(policy.rolloutHeuristicProbability == 1.0 && policy.rootCloningFit == null && policy.rootKernelRolloutFit == null)
+    require(policy.rootRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
+    require(policy.opponentRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
+}
+
 /** A fixed target intervention; validation cannot choose the fit or its ridge. */
 @Serializable
 internal data class TerminalRootKernelExperimentPlan(
@@ -24,11 +33,7 @@ internal data class TerminalRootKernelExperimentPlan(
         for (screen in listOf(development, validation)) {
             require(screen.mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS && screen.rootIds.isNotEmpty())
             require(screen.policies.size == 1 && screen.rootLimit == screen.rootIds.size)
-            val policy = screen.policies.single().search
-            require(policy.rolloutHeuristicProbability == 1.0 && policy.rootCloningFit == null)
-            require(policy.rootRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
-            require(policy.rootKernelRolloutFit == null) { "Production terminal targets cannot silently use a learned continuation" }
-            require(policy.opponentRolloutPolicy in listOf(null, SearchTeacherCalibrationRolloutPolicy.PRODUCTION_ARGENTUM))
+            requireProductionTerminalTarget(screen)
         }
         require(development.policies == validation.policies && development.repetitions == validation.repetitions)
         require(development.terminalContinuation == validation.terminalContinuation)

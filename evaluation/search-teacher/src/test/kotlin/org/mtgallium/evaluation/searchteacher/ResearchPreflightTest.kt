@@ -62,6 +62,17 @@ class ResearchPreflightTest {
     }
 
     @Test
+    fun `explicit smoke selections shrink with the root limit and preserve the frozen subset`() {
+        val policy = SearchTeacherCalibrationPolicy("reference", 8, 64, 32, 1.4, true, 1.0)
+        val plan = PositionBankScreenPlan(bankDirectory = "/tmp/bank", expectedBankIdentity = "bank",
+            partition = PositionBankScreenPartition.VALIDATION, mode = PositionBankScreenMode.SEARCH,
+            rootLimit = 3, repetitions = 2, rootIds = listOf("b", "d", "f"), policies = listOf(PositionBankScreenPolicy(policy, MonoRedVisibleEvaluatorConfig())))
+        val smoke = positionScreenPreflightPlan(plan, ResearchPreflightWork.PositionScreen("/tmp/plan", "/tmp/deck", 2, smokeRootLimit = 2))
+        assertEquals(2, smoke.rootLimit)
+        assertEquals(listOf("b", "d"), smoke.rootIds)
+    }
+
+    @Test
     fun `runtime fingerprints serialize canonical map content`() {
         val first = linkedMapOf("java" to "jvm", "classpath-0" to "classes")
         val reordered = linkedMapOf("classpath-0" to "classes", "java" to "jvm")

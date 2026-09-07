@@ -388,14 +388,13 @@ internal fun completedSequentialBankPairs(report: SearchTeacherCalibrationReport
     return pairs
 }
 
-private fun readCompletedSequentialReferenceBankSource(input: RealGamePositionBankSource): BankSource {
-    val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
-    val entries = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity).artifacts.associateBy { it.relativePath }
+internal fun loadCompletedSequentialCalibration(directory: Path, expectedIdentity: String): SearchTeacherCalibrationReport {
+    val entries = ResearchRunArtifacts.loadAndVerify(directory, expectedIdentity).artifacts.associateBy { it.relativePath }
     fun registered(relative: String): Path = ResearchRunFiles.resolveBelow(directory, relative).also {
         require(entries.getValue(relative).sha256 == sha256File(it))
     }
     val report = evidenceJson.decodeFromString<SearchTeacherCalibrationReport>(Files.readString(registered("report.json")))
-    requireRealGamePositionBankSourceIdentity(report, input.expectedRunIdentity, completedSequential = true)
+    requireRealGamePositionBankSourceIdentity(report, expectedIdentity, completedSequential = true)
     require(evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(Files.readString(registered("plan.json"))) == report.plan)
     require(evidenceJson.decodeFromString<SearchTeacherSequentialPlan>(Files.readString(registered("sequential-plan.json"))) ==
         SearchTeacherSequentialPlan(report.plan, requireNotNull(report.sequentialRule)))
@@ -415,6 +414,14 @@ private fun readCompletedSequentialReferenceBankSource(input: RealGamePositionBa
         require(sha256File(registered("replays/${game.gameId}.privileged.replay.jsonl.gz")) == game.replaySha256)
     } }
     require(entries.keys.filter { it.startsWith("checkpoints/") }.toSet() == expectedCheckpoints)
+    return report
+}
+
+private fun readCompletedSequentialReferenceBankSource(input: RealGamePositionBankSource): BankSource {
+    val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
+    val report = loadCompletedSequentialCalibration(directory, input.expectedRunIdentity)
+    val entries = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity).artifacts.associateBy { it.relativePath }
+    val pairs = completedSequentialBankPairs(report)
     val games = pairs.flatMap { it.games }
     val comparison = calibrationComparison(report.plan, report.plan.candidates.single(), pairs, games, pairs.size)
     return BankSource(RealGamePositionBankSourceBinding(directory.toString(), report.runIdentity,

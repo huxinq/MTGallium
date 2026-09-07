@@ -10,6 +10,11 @@ internal object SearchTeacherSuites {
         "smoke",
         "research-preflight",
         "research-preflight-verify",
+        "terminal-kernel-study",
+        "terminal-target-sensitivity",
+        "research-transfer-audit",
+        "campaign-data-use",
+        "campaign-data-snapshot",
         "arena",
         "arena-shard",
         "arena-merge",
@@ -218,10 +223,10 @@ internal data class SearchTeacherCli(
 
         private fun SearchTeacherCli.validate() {
             SearchTeacherSuites.require(suite)
-            if (suite in setOf("research-preflight", "research-preflight-verify")) {
+            if (suite in setOf("research-preflight", "research-preflight-verify", "campaign-data-use", "campaign-data-snapshot", "research-transfer-audit")) {
                 require(profilePath != null && outputPath != null) { "$suite requires --profile and --output" }
             }
-            if (suite in setOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen")) {
+            if (suite in setOf("search-teacher-calibration", "search-teacher-sequential", "real-game-position-bank", "position-bank-screen", "terminal-kernel-study", "terminal-target-sensitivity")) {
                 require(profilePath != null && outputPath != null && deckManifest != null) {
                     "$suite requires an explicit JSON plan via --profile, --output, and --deck-manifest"
                 }

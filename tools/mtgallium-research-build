@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Force a local source build and retain a frozen private runtime and build record."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import time
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output', type=Path, required=True)
+args = parser.parse_args()
+repo = Path(__file__).resolve().parents[1]
+output = Path(os.path.abspath(args.output))
+private = Path(os.environ['MTGALLIUM_PRIVATE_EVIDENCE_ROOT']).resolve()
+work = private / 'search-teacher' / 'work'
+assert private != repo and repo not in private.parents, 'Private evidence root must be outside the checkout'
+assert output != work and work in output.parents and not output.exists(), 'Choose a fresh child of the private Search Teacher work directory'
+# Refuse symlink routes before creating any output, including absent descendants.
+for parent in [output, *output.parents]:
+    assert not parent.is_symlink(), f'Symlink output route: {parent}'
+def git(root, *arguments):
+    return subprocess.check_output(['git', *arguments], cwd=root, text=True).strip()
+engine = repo / 'third_party' / 'argentum-engine'
+assert not git(repo, 'status', '--porcelain') and not git(engine, 'status', '--porcelain'), 'Commit clean treatment and engine first'
+source = git(repo, 'rev-parse', 'HEAD')
+pin = git(repo, 'rev-parse', 'HEAD:third_party/argentum-engine')
+assert pin == git(engine, 'rev-parse', 'HEAD'), 'Argentum pin mismatch'
+command = ['bash', 'tools/mtgallium-gradle', 'clean', ':argentum-engine:clean', ':evaluation:search-teacher:researchRuntimeClasspath', '--rerun-tasks', '--no-build-cache', '-Pkotlin.incremental=false']
+output.mkdir(parents=True)
+started = time.monotonic()
+with (output / 'build.log').open('w') as log:
+    result = subprocess.run(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
+record = dict(schemaVersion=1, repository=str(repo), sourceCommitBefore=source, engineCommitBefore=pin,
+              command=command, exitCode=result.returncode, elapsedMillis=(time.monotonic()-started)*1000,
+              logSha256=hashlib.sha256((output/'build.log').read_bytes()).hexdigest())
+(output/'build-invocation.json').write_text(json.dumps(record, indent=2)+'\n')
+result.check_returncode()
+assert source == git(repo, 'rev-parse', 'HEAD') and pin == git(engine, 'rev-parse', 'HEAD')
+assert not git(repo, 'status', '--porcelain') and not git(engine, 'status', '--porcelain'), 'Source changed during build'
+(output/'lib').mkdir()
+artifacts = (repo/'evaluation/search-teacher/build/research/runtime-classpath.txt').read_text().strip().split(os.pathsep)
+frozen = []
+for index, item in enumerate(artifacts):
+    original = Path(item)
+    assert original.is_file() and original.suffix == '.jar'
+    target = output/'lib'/f'{index:04d}-{original.name}'
+    shutil.copy2(original, target)
+    frozen.append(str(target))
+classpath = os.pathsep.join(frozen)
+(output/'classpath.txt').write_text(classpath+'\n')
+subprocess.run(['java', '-cp', classpath, 'org.mtgallium.research.run.ResearchBuildKt', str(repo), str(output)], check=True, cwd=repo)

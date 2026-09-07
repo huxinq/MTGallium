@@ -124,3 +124,17 @@ worker-chunk overshoot, and every executed checkpoint before deriving positions.
 The bank retains executed games, including overshoot, while the source binding
 keeps planned, inspected and unexecuted populations separate. An inconclusive
 stop is admissible data provenance, not a strength result or a full schedule.
+
+### Composed terminal research and campaign data use
+
+The terminal-kernel study composes authenticated bank/target/fit APIs in a fixed
+order, requires a verified local build and development-only preflight, freezes
+the fit before validation-target access, and preserves historical identities on
+explicit completed-stage reuse. A separate sensitivity command measures changed
+conditional targets without changing the fitted target or selecting a winner.
+Campaign records derive seed groups from verified banks and retain intended or
+retrospective use; absence of a recorded overlap is not evidence of pristine
+validation. The transfer audit joins exact model/role/budget identities and keeps
+inconclusive gameplay distinct from transfer success or failure. Stage cost
+records separate wall time, JVM CPU, overlapping component time and historical
+reused work. See [the workflow contract](research-workflow.md).

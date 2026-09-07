@@ -87,6 +87,7 @@ internal fun gameplayPreflightPlan(plan: SearchTeacherCalibrationPlan, work: Res
 internal fun positionScreenPreflightPlan(plan: PositionBankScreenPlan, work: ResearchPreflightWork.PositionScreen): PositionBankScreenPlan {
     require(plan.mode != PositionBankScreenMode.FEATURES) { "Position preflight must exercise search" }
     return plan.copy(rootLimit = minOf(plan.rootLimit, work.smokeRootLimit),
+        rootIds = if (plan.rootIds.isEmpty()) emptyList() else plan.rootIds.take(work.smokeRootLimit),
         repetitions = minOf(plan.repetitions, work.smokeRepetitions),
         policies = plan.policies.map { it.copy(search = it.search.copy(simulations = minOf(it.search.simulations, work.smokeSimulations))) })
 }
@@ -314,8 +315,8 @@ internal class ResearchPreflightRunner(private val root: Path) {
                             .run(smoke, output.resolve("screen"), work.threads)
                         ResearchRunArtifacts.loadAndVerify(output.resolve("screen"), report.researchRunIdentity)
                         val bank = loadVerifiedRealGamePositionBank(absolutePreflightPath(smoke.bankDirectory), smoke.expectedBankIdentity)
-                        val expectedRoots = bank.roots.filter { it.partition.name == smoke.partition.name }.sortedBy { it.rootId }
-                            .take(smoke.rootLimit).associate { it.rootId to it.reconstructedCandidates }
+                        val expectedRoots = selectPositionScreenRoots(smoke, bank.roots.filter { it.partition.name == smoke.partition.name }.sortedBy { it.rootId })
+                            .associate { it.rootId to it.reconstructedCandidates }
                         requirePositionScreenPreflightComplete(report, smoke, expectedRoots)
                         children["screen"] = report.researchRunIdentity
                         workload.putAll(mapOf("full-plan-sha256" to researchSha256(planBytes), "worker-threads" to work.threads.toString(),
