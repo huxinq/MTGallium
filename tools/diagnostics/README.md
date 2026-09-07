@@ -133,3 +133,50 @@ include diagnostic observation/evidence overhead and the arena's shadow
 comparator, which is omitted at unsearched roots. They are not a production
 full-game or strength result. The ordinary default remains disabled, preserving
 existing callers' search-label contract and historical behavior identities.
+
+## Automated continuation progress
+
+`tools/mtgallium-continuation-monitor` installs a passive monitor beside an
+existing parent-linked continuation. Develop and commit it in a separate
+worktree while gameplay is running. It compiles the diagnostic consumer against
+the treatment's retained frozen runtime; its own source and compiled classes
+are sealed separately. It never invokes gameplay, changes the stopping rule,
+or edits treatment artifacts.
+
+```sh
+MTGALLIUM_PUBLIC_SOURCE=1 MTGALLIUM_PRIVATE_EVIDENCE_ROOT=/private/evidence \
+  tools/mtgallium-continuation-monitor \
+  --game-output /private/evidence/search-teacher/work/continuation \
+  --durable-state /private/operational-state/the-existing-run \
+  --output /private/evidence/search-teacher/work/continuation-monitor \
+  --trials 2000 --poll-seconds 60 --start
+```
+
+The low-priority systemd user service refreshes `latest.md` and `latest.json`
+every minute and seals a new statistical snapshot only when the coordinator
+has announced a new completed batch. It verifies source-owned parent and batch
+manifests/checkpoints, the contiguous population and the cumulative stopping
+result before admitting scores. Within the process, verified immutable inputs
+are reused; changed manifests and verification failures are reported as errors,
+with the last verified snapshot clearly identified. A restart reauthenticates
+inputs. An incomplete batch and post-stop overshoot are excluded from WR and CI.
+The service stops after the workload reports terminal execution, and sends no
+external messages. Synthetic tests cover cap exhaustion, source-rule stopping,
+worker-batch overshoot, invalid observations and deterministic snapshots.
+
+WR counts wins, with draws reported separately. Its descriptive 95% interval
+uses the existing 10,000-resample paired bootstrap, preserving the two legs of
+each seed as a block. The betting test continues to use pair point scores,
+including half-credit for a draw. The descriptive CI is not an anytime
+confidence sequence and does not replace the stopping rule.
+
+The stopping forecast uses 2,000 deterministic Monte Carlo paths conditional
+on the current complete prefix. Future paired point scores are resampled from
+the observed pair-score distribution; every path runs the treatment's exact
+`pairedSequentialTest`. The sealed setup binds the complete continuation plan. The report gives expected additional **executed** games
+including final-batch overshoot and any in-flight batch, a modelled 5th–95th percentile range, Monte
+Carlo SE, and upper-only stopping probability. Any stop includes futility
+and exhausted budget. This is a plug-in forecast, not games guaranteed to show
+superiority, and its range omits uncertainty in the estimated future score
+distribution. Cost-gate success and non-game interruptions are not forecast. It does not select a treatment,
+change budgets, or promote a policy.
