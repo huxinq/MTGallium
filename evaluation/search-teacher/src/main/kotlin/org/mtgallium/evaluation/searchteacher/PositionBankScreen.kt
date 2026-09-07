@@ -21,6 +21,10 @@ import org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 import org.mtgallium.agent.searchteacher.MonoRedVisibleFeatures
 import org.mtgallium.agent.searchteacher.MonoRedTacticalEvaluator
 import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
+import org.mtgallium.agent.infoset.core.OpponentPolicy
+import org.mtgallium.agent.infoset.core.OpponentPolicyDecision
+import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionDiagnostic
+import org.mtgallium.agent.infoset.core.PolicyAnnotatedSearchWorld
 import org.mtgallium.agent.searchteacher.SearchTeacherPolicySession
 import org.mtgallium.agent.searchteacher.SearchTeacherSearchFactory
 import org.mtgallium.agent.searchteacher.defaultMonoRedOpponentPolicy
@@ -31,7 +35,7 @@ import org.mtgallium.research.run.ResearchRunBindings
 import org.mtgallium.research.run.ResearchRunFiles
 
 @Serializable
-internal enum class PositionBankScreenMode { FEATURES, SEARCH, ACTION_CONDITIONAL, ACTION_CONDITIONAL_V2_TRACES, TERMINAL_CONTINUATIONS }
+internal enum class PositionBankScreenMode { FEATURES, SEARCH, ACTION_CONDITIONAL, ACTION_CONDITIONAL_V2_TRACES, TERMINAL_CONTINUATIONS, ROOT_ROLLOUT_SELECTION }
 
 @Serializable
 internal enum class PositionBankScreenPartition { DEVELOPMENT, VALIDATION }
@@ -88,7 +92,7 @@ internal data class PositionBankScreenPlan(
 }
 
 @Serializable
-internal enum class PositionBankScreenDisposition { SCORED, SEARCHED, AUTOMATIC_SELECTION, ACTION_CONDITIONAL, TERMINAL_CONTINUATIONS, REFUSED }
+internal enum class PositionBankScreenDisposition { SCORED, SEARCHED, AUTOMATIC_SELECTION, ACTION_CONDITIONAL, TERMINAL_CONTINUATIONS, REFUSED, ROLLOUT_SELECTED }
 
 @Serializable
 internal data class PositionBankScreenRow(
@@ -120,6 +124,8 @@ internal data class PositionBankScreenRow(
     val terminalRootActions: List<TerminalRootActionSamples> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val terminalBeliefWeights: List<Double> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutPolicyDecision: OpponentPolicyDecisionDiagnostic? = null,
 )
 
 @Serializable
@@ -244,7 +250,15 @@ internal class PositionBankScreenRunner(
                     val searchSeed = ComponentSeeds.derive(position.sourceGameId, position.decisionIndex,
                         position.baseSeed, plan.searchSeedDomain, repetition)
                     val selectionStarted = System.nanoTime()
-                    if (plan.mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS) {
+                    if (plan.mode == PositionBankScreenMode.ROOT_ROLLOUT_SELECTION) {
+                        val selected = selectPositionScreenRollout(actual, position.actor, candidates,
+                            arenaPolicy.effectiveRootRolloutPolicy(), searchSeed)
+                        accounted.copy(disposition = PositionBankScreenDisposition.ROLLOUT_SELECTED,
+                            policyIdentity = session.policyIdentity, searchSeed = searchSeed,
+                            chosen = selected.choice, selectionKind = "ROOT_ROLLOUT_POLICY",
+                            rolloutPolicyDecision = selected.diagnostic,
+                            selectionMillis = (System.nanoTime() - selectionStarted) / 1_000_000.0)
+                    } else if (plan.mode == PositionBankScreenMode.TERMINAL_CONTINUATIONS) {
                         val search = SearchTeacherSearchFactory.create(parameters.searchConfig(), defaultMonoRedOpponentPolicy(),
                             arenaPolicy.effectiveRootRolloutPolicy(), arenaPolicy.effectiveOpponentRolloutPolicy(), evaluator,
                             InformationSetSearchReuseConfig.DISABLED)
@@ -299,7 +313,10 @@ internal class PositionBankScreenRunner(
             generatedAtUtc = Instant.now().toString(), plan = plan, workerThreads = workerThreads,
             eligibleRoots = eligible.size, selectedRootIds = selected.map { it.rootId }, rows = rows,
             valid = rows.none { it.disposition == PositionBankScreenDisposition.REFUSED }).let { report ->
-            if (plan.mode != PositionBankScreenMode.TERMINAL_CONTINUATIONS) report else report.copy(limitations = report.limitations + listOf(
+            if (plan.mode == PositionBankScreenMode.ROOT_ROLLOUT_SELECTION) report.copy(limitations = report.limitations + listOf(
+                "Root-rollout selection calls the configured root continuation policy at the reconstructed position, with its required adapter annotations and the exact saved semantic menu. It does not search, advance the game, or produce values/backups.",
+                "An admission-menu change or evidence-invalidating policy replacement refuses the row. The chosen action is a policy proposal, not an accepted transition or a correctness label.",
+            )) else if (plan.mode != PositionBankScreenMode.TERMINAL_CONTINUATIONS) report else report.copy(limitations = report.limitations + listOf(
                 "Terminal-continuation mode forces each admitted root action, then uses the declared root/opponent rollout policies until actual terminal payoff; it never invokes a leaf evaluator or produces search visits/backups.",
                 "Terminal targets are conditional on the fixed sampled posterior and continuation policies, not optimal values or authoritative hidden truth. Siblings share declared posterior draws and future seeds; divergent random-event consumption can weaken coupling.",
                 "A root stops at its first non-game failure. Completed samples are retained, incomplete action means are absent, and remaining continuations are explicitly unexecuted. A refused row cannot become a training target.",
@@ -325,6 +342,32 @@ internal class PositionBankScreenRunner(
         }
         return report
     }
+}
+
+/** Diagnose the actual continuation control, never its annotation-free fallback. */
+internal fun selectPositionScreenRollout(
+    world: PolicyAnnotatedSearchWorld,
+    actor: String,
+    savedMenu: List<SemanticChoice>,
+    policy: OpponentPolicy,
+    seed: Long,
+): OpponentPolicyDecision {
+    val information = world.informationState(actor)
+    require(world.actorToAct() == actor && information.actingPlayerId == actor)
+    val menu = (if (policy.requiresPolicyAnnotations) world.expandChoicesWithPolicyAnnotations()
+        else world.expandChoicesForPolicyAdmission()).candidates
+    // An admission anchor or a changed semantic payload would make retained all-action targets incomplete.
+    val saved = savedMenu.associateBy { it.signature }
+    require(saved.size == savedMenu.size && menu.size == savedMenu.size &&
+        menu.map { it.signature }.toSet() == saved.keys && menu.all { choice ->
+            choice.copy(display = saved.getValue(choice.signature).display) == saved.getValue(choice.signature)
+        }) { "Rollout admission differs from the saved semantic menu" }
+    val selected = policy.select(information, menu, seed, ComponentSeeds.derive(seed, "position-screen-rollout-sample-v1"))
+    require(selected.diagnostic.replacement?.invalidatesEvidence != true) {
+        "Rollout selection contains an evidence-invalidating policy replacement"
+    }
+    require(selected.choice in menu) { "Rollout policy selected outside the admitted menu" }
+    return selected.copy(choice = saved.getValue(selected.choice.signature))
 }
 
 internal fun requireValidScreenSearch(diagnostics: InformationSetSearchDiagnostics) {

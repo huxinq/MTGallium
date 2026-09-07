@@ -79,6 +79,12 @@ the state projection across each supplied menu. The serialized fit and feature
 meaning remain unchanged; guidance identity also records the scorer version
 because changed floating-point summation order can affect near ties.
 
+Saved-position rollout-selection diagnostics call the configured root
+continuation policy with its required adapter annotations. They require the
+admitted semantic menu to match the saved menu and refuse evidence-invalidating
+policy replacements. These selections neither advance the game nor produce
+search backups, values, or accepted-action evidence.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout
