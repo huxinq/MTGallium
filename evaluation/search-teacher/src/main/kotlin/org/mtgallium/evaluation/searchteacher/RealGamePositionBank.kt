@@ -30,8 +30,13 @@ internal data class RealGamePositionBankSource(
     val runDirectory: String, val expectedRunIdentity: String,
     /** Authenticate the retained raw plan; only its reference policy is executable/admitted. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val retainedReferenceOnly: Boolean = false,
+    /** Modern completed sequential evidence: admit actual executed reference-player positions. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val completedSequentialReferenceOnly: Boolean = false,
 ) {
-    init { require(Path.of(runDirectory).isAbsolute && expectedRunIdentity.isNotBlank()) }
+    init {
+        require(Path.of(runDirectory).isAbsolute && expectedRunIdentity.isNotBlank())
+        require(!(retainedReferenceOnly && completedSequentialReferenceOnly))
+    }
 }
 
 @Serializable
@@ -82,6 +87,8 @@ internal data class RealGamePositionBankSourceBinding(
     val assignedGames: Int,
     val validPairGames: Int,
     val searchedDecisions: Int,
+    /** assignedGames counts retained executed games; the original planned schedule stays explicit here. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val sequentialPopulation: SearchTeacherSequentialPopulation? = null,
 )
 
 /** Inventory of every retained searched decision, including unselected and refused roots. No values or labels. */
@@ -273,8 +280,9 @@ private data class BankSource(
     val baseSeed get() = binding.sourcePlan.getValue("baseSeed").jsonPrimitive.long
 }
 
-internal fun requireRealGamePositionBankSourceIdentity(report: SearchTeacherCalibrationReport, expectedIdentity: String) {
-    require(report.sequentialRule == null && report.sequentialResult == null &&
+internal fun requireRealGamePositionBankSourceIdentity(report: SearchTeacherCalibrationReport, expectedIdentity: String,
+    completedSequential: Boolean = false) {
+    if (!completedSequential) require(report.sequentialRule == null && report.sequentialResult == null &&
         report.sequentialOvershootPairs == null && report.sequentialOperationalValid == null && report.sequentialPopulation == null) {
         "Position bank v1 does not admit sequential calibration populations"
     }
@@ -285,7 +293,7 @@ internal fun requireRealGamePositionBankSourceIdentity(report: SearchTeacherCali
     require(report.policies.all { it.policy.id == it.descriptor.id && it.binding.sourceProvenance == report.sourceProvenance })
     require(searchTeacherCalibrationBindings(report.plan, report.sourceProvenance,
         report.policies.associate { it.descriptor.id to it.binding.identity }, report.deckHash, report.cardPoolHash,
-        report.workerThreads).identity == report.runIdentity)
+        report.workerThreads, if (completedSequential) requireNotNull(report.sequentialRule) else null).identity == report.runIdentity)
 }
 
 /** Full recorded schedules may carry sequential metadata; admission does not reinterpret its test result. */
@@ -341,8 +349,86 @@ internal fun requireRetainedBankPairPopulation(report: RetainedCalibrationClonin
     }
 }
 
+/** Retain all executed pairs, including overshoot, without turning an inconclusive stop into a full schedule. */
+internal fun completedSequentialBankPairs(report: SearchTeacherCalibrationReport): List<SearchBudgetFrontierPair> {
+    require(report.workerThreads > 0)
+    val rule = requireNotNull(report.sequentialRule)
+    SearchTeacherSequentialPlan(report.plan, rule)
+    val comparison = report.comparisons.single()
+    val candidate = report.plan.candidates.single()
+    require(comparison.candidateId == candidate.id)
+    val pairs = comparison.pairs + requireNotNull(report.sequentialOvershootPairs)
+    require(pairs.isNotEmpty() && pairs.size <= report.plan.pairCount)
+    pairs.forEachIndexed { offset, pair ->
+        require(pair.pairIndex == report.plan.pairOffset + offset && pair.seed == report.plan.pairSeed(pair.pairIndex))
+        require(pair == searchBudgetFrontierPair(pair.pairIndex, pair.seed, pair.games, candidate.id))
+        require(pair.games.size == 2)
+        pair.games.forEachIndexed { leg, game ->
+            require(game.gameId == "${candidate.id}-pair-${pair.pairIndex}-leg-$leg" && game.seed == pair.seed)
+            require(game.p0PolicyId == if (leg == 0) report.plan.control.id else candidate.id)
+            require(game.p1PolicyId == if (leg == 0) candidate.id else report.plan.control.id)
+        }
+    }
+    val result = pairedSequentialTest(rule, pairs.map { pair ->
+        PairedSequentialScore(pair.pairIndex, if (pair.valid) requireNotNull(pair.treatmentPoints) / 2.0 else null,
+            pair.invalidationReasons)
+    }, report.plan.pairOffset)
+    require(result == report.sequentialResult)
+    val execution = PairedSequentialExecution(pairs, result)
+    require(execution.valid && execution.operationalValid) { "Sequential bank requires a completed, operationally valid source" }
+    require(report.valid == execution.valid && report.sequentialOperationalValid == execution.operationalValid)
+    require(report.sequentialPopulation == execution.population)
+    require(comparison.pairs == pairs.take(result.inspectedPairs))
+    // A producer dispatches one fixed worker-sized chunk at a time and no chunk after stopping.
+    val expectedExecuted = minOf(rule.maximumPairs.toLong(),
+        ((result.inspectedPairs.toLong() + report.workerThreads - 1) / report.workerThreads) * report.workerThreads)
+    require(pairs.size.toLong() == expectedExecuted)
+    require(comparison == calibrationComparison(report.plan, candidate, comparison.pairs,
+        pairs.flatMap { it.games }, result.inspectedPairs))
+    return pairs
+}
+
+private fun readCompletedSequentialReferenceBankSource(input: RealGamePositionBankSource): BankSource {
+    val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
+    val entries = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity).artifacts.associateBy { it.relativePath }
+    fun registered(relative: String): Path = ResearchRunFiles.resolveBelow(directory, relative).also {
+        require(entries.getValue(relative).sha256 == sha256File(it))
+    }
+    val report = evidenceJson.decodeFromString<SearchTeacherCalibrationReport>(Files.readString(registered("report.json")))
+    requireRealGamePositionBankSourceIdentity(report, input.expectedRunIdentity, completedSequential = true)
+    require(evidenceJson.decodeFromString<SearchTeacherCalibrationPlan>(Files.readString(registered("plan.json"))) == report.plan)
+    require(evidenceJson.decodeFromString<SearchTeacherSequentialPlan>(Files.readString(registered("sequential-plan.json"))) ==
+        SearchTeacherSequentialPlan(report.plan, requireNotNull(report.sequentialRule)))
+    val pairs = completedSequentialBankPairs(report)
+    val expectedCheckpoints = mutableSetOf<String>()
+    pairs.forEach { pair -> pair.games.forEachIndexed { leg, game ->
+        val relative = "checkpoints/${game.gameId}.json"
+        require(expectedCheckpoints.add(relative))
+        val path = registered(relative)
+        val envelope = ResearchRunCheckpoints.load(path)
+        require(envelope.parentPayloadSha256 == null)
+        require(loadSearchTeacherCalibrationCheckpoint(path, directory, report.runIdentity,
+            pair.pairIndex, leg, pair.seed, game.p0PolicyId, game.p1PolicyId, game.gameId) == game)
+        val checkpoint = evidenceJson.decodeFromString<SearchTeacherCalibrationCheckpoint>(envelope.payload().decodeToString())
+        checkpoint.artifactSha256.forEach { (name, hash) -> require(entries.getValue(name).sha256 == hash) }
+        require(game.replayVerified && game.replayVerificationDiagnostic == null)
+        require(sha256File(registered("replays/${game.gameId}.privileged.replay.jsonl.gz")) == game.replaySha256)
+    } }
+    require(entries.keys.filter { it.startsWith("checkpoints/") }.toSet() == expectedCheckpoints)
+    val games = pairs.flatMap { it.games }
+    val comparison = calibrationComparison(report.plan, report.plan.candidates.single(), pairs, games, pairs.size)
+    return BankSource(RealGamePositionBankSourceBinding(directory.toString(), report.runIdentity,
+        entries.getValue("report.json").sha256, sha256File(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE)),
+        report.sourceProvenance, report.deckHash, report.cardPoolHash,
+        evidenceJson.encodeToJsonElement(report.plan).jsonObject,
+        report.policies.map { evidenceJson.encodeToJsonElement(it).jsonObject }, games.size, games.size,
+        games.sumOf { game -> game.seatDiagnostics.values.sumOf { it.searchDecisionsDetail.size } }, report.sequentialPopulation),
+        listOf(comparison), listOf(report.policies.single { it.descriptor == report.plan.control }))
+}
+
 /** Modern calibration-only admission: identity, registered report/plan and checkpoint population must agree. */
 private fun readBankSource(input: RealGamePositionBankSource): BankSource {
+    if (input.completedSequentialReferenceOnly) return readCompletedSequentialReferenceBankSource(input)
     if (input.retainedReferenceOnly) return readRetainedReferenceBankSource(input)
     val directory = Path.of(input.runDirectory).toAbsolutePath().normalize()
     val artifacts = ResearchRunArtifacts.loadAndVerify(directory, input.expectedRunIdentity)

@@ -117,3 +117,10 @@ settings. It retains each input manifest, rejects duplicate root weighting and
 validation group overlap, and freezes the expanded fit before reading reused
 validation targets. Added positions within existing groups do not create new
 independent game or seed-group evidence.
+
+Position-bank admission can explicitly select the reference player from a completed
+modern sequential trial. It verifies the original stopping rule, ordered prefix,
+worker-chunk overshoot, and every executed checkpoint before deriving positions.
+The bank retains executed games, including overshoot, while the source binding
+keeps planned, inspected and unexecuted populations separate. An inconclusive
+stop is admissible data provenance, not a strength result or a full schedule.
