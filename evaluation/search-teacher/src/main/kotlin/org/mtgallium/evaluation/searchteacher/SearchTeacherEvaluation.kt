@@ -34,6 +34,14 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
     fun diagnosticOutput(path: Path): Path =
         store.requireDiagnosticOutput(path, "the ${suite.id} command output")
 
+    if (options.suite == "search-profile-summary") {
+        require(options.outputPath == null) { "Profile inspection writes to stdout; it does not modify retained evidence" }
+        print(summarizeRegisteredSearchProfile(requireNotNull(options.profilePath) {
+            "Pass a JFR registered in its parent directory's finalized manifest via --profile"
+        }, options.sourceRunIdentity))
+        return
+    }
+
     // This audit verifies already-finalized private artifacts. It is intentionally outside normal
     // run-provenance capture: the checked-out source must not be misrepresented as the historical
     // trainer, and the audit neither creates nor changes research evidence.

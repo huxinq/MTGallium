@@ -119,7 +119,7 @@ public final class SearchAdapterProfile {
                                 OpponentPolicyReplacementEvidenceDisposition.INVALIDATES_EVIDENCE), fixture.getId(),
                             SearchTeacherSearchFactory.INSTANCE.rootRolloutPolicy(),
                             SearchTeacherSearchFactory.INSTANCE.opponentRolloutPolicy(), null,
-                            new SearchTeacherIntegrationSpecification(), ArgentumBeliefProposalAuditSink.Companion.getNONE()));
+                            new SearchTeacherIntegrationSpecification(), ArgentumBeliefProposalAuditSink.Companion.getNONE(), null));
                     var session = construction.value();
                     if (repetition == -1) Files.writeString(output.resolve(fixture.getId() + "-behavior.json"),
                         Json.Default.encodeToString(SearchTeacherBehaviorSpecification.Companion.serializer(), session.getBehaviorSpecification()));
@@ -171,13 +171,17 @@ public final class SearchAdapterProfile {
         Files.writeString(output.resolve("measurement-summary.txt"), "All calls returned for " + repetitions
             + " measured repetitions of four fresh roots; " + (bundle == null ? "one" : "two")
             + " warmups per root. Only the finalized artifact manifest establishes completion.\n");
+        Files.writeString(output.resolve("search-cost-summary.md"), SearchProfileSummaryKt.renderSearchProfileSummary(
+            SearchProfileSummaryKt.readSearchProfileSummary(output.resolve("profile.jfr")),
+            "Recording and execution provenance are bound by this run's finalized artifact manifest."));
         var artifacts = new ResearchRunArtifacts(output, bindings.getIdentity());
         for (String name : List.of("provenance.json", "deck.json", "SearchAdapterProfile.java", "classpath.init.gradle",
-                "runtime-configuration.txt", "runtime.txt", "bindings.json", "results.jsonl", "profile.jfr", "measurement-summary.txt")) artifacts.register(name);
+                "runtime-configuration.txt", "runtime.txt", "bindings.json", "results.jsonl", "profile.jfr", "measurement-summary.txt", "search-cost-summary.md")) artifacts.register(name);
         for (String caseId : CASES) artifacts.register(caseId + "-behavior.json");
         if (bundle != null) artifacts.register("runtime-factory-bundle.txt");
         artifacts.finalize();
         var verified = ResearchRunArtifacts.Companion.loadAndVerify(output, bindings.getIdentity());
         System.out.println("Verified " + verified.getResearchRunIdentity() + " artifacts=" + verified.getArtifacts().size());
+        System.out.println("Read " + output.resolve("search-cost-summary.md") + " for sampled search cost attribution.");
     }
 }

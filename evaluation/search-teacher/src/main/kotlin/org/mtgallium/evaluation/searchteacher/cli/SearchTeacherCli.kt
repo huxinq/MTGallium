@@ -10,6 +10,7 @@ internal object SearchTeacherSuites {
         "smoke",
         "research-preflight",
         "research-preflight-verify",
+        "search-profile-summary",
         "terminal-prediction-diagnostic",
         "terminal-kernel-study",
         "terminal-target-sensitivity",

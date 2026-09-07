@@ -154,7 +154,11 @@ the historical behavior and serialized rule bytes; do not retrofit it onto a
 running or completed experiment's original report.
 
 After completion, verify the research-run manifest and checkpoints before using
-`report.json` or `report.md`. `sequentialResult` gives the stopping disposition;
+`report.json` or `report.md`. Read the compact `report.md` first: it includes
+policy configuration differences, W/L/draw counts, stopping disposition,
+confidence sequence, population accounting and scoped timing. Reserve the full
+JSON report for questions requiring individual games or decisions.
+`sequentialResult` gives the stopping disposition;
 `sequentialPopulation` separates planned, executed, inspected, unexecuted and
 overshoot pairs. `comparisons[0].pairs` owns the inference prefix, while
 `sequentialOvershootPairs` retains extra work. `BUDGET_EXHAUSTED` and `FUTILITY` are inconclusive;

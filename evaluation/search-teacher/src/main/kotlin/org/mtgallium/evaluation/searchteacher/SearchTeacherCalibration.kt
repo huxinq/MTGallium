@@ -486,8 +486,21 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     appendLine("Run `${report.runIdentity}`; source `${report.sourceProvenance.outer.revision}`; Argentum `${report.sourceProvenance.argentum.revision}`.")
     appendLine("Control `${report.plan.control.id}`; pairs ${report.plan.pairOffset} until ${report.plan.pairOffset + report.plan.pairCount}; valid=${report.valid}.")
     appendLine("Worker threads: ${report.workerThreads}. Timing describes this concurrent arena workload.")
+    appendLine("Current calibration attempt through report construction: ${report.currentAttemptElapsedMillis / 1_000.0} seconds; excludes caller setup, prior resumed attempts and subsequent report writing/finalization/verification.")
+    (listOf(report.plan.control) + report.plan.candidates).forEach { policy ->
+        appendLine("Policy `${policy.id}`: particles=${policy.particles}, simulations=${policy.simulations}, decision horizon=${policy.maxPolicyDecisions}.")
+    }
+    val controlFields = evidenceJson.encodeToJsonElement(SearchTeacherCalibrationPolicy.serializer(), report.plan.control) as kotlinx.serialization.json.JsonObject
+    report.plan.candidates.forEach { candidate ->
+        val fields = evidenceJson.encodeToJsonElement(SearchTeacherCalibrationPolicy.serializer(), candidate) as kotlinx.serialization.json.JsonObject
+        val changed = (controlFields.keys + fields.keys).filter { it != "id" && controlFields[it] != fields[it] }.sorted()
+        appendLine("Configuration changes for `${candidate.id}` (excluding display ID): ${changed.joinToString { field -> "$field: ${controlFields[field] ?: "default"} → ${fields[field] ?: "default"}" }.ifEmpty { "none" }}.")
+    }
     report.sequentialResult?.let { result ->
         appendLine("Sequential rule: ${result.disposition} after ${result.inspectedPairs} inspected pairs; ${result.operationalOvershootPairs} completed overshoot pairs.")
+        if (result.disposition == PairedSequentialDisposition.BUDGET_EXHAUSTED) {
+            appendLine("Inconclusive: the pair cap was reached without satisfying the declared stopping criterion.")
+        }
         result.confidenceSequence?.let { interval ->
             val acceptance = requireNotNull(result.rule.practicalAcceptance)
             appendLine("Practical objective=${acceptance.objective}; margin=${acceptance.margin}; score floor=${result.rule.nullPointRate}; equivalence band=(${result.rule.nullPointRate}, ${result.rule.targetPointRate}).")
@@ -507,6 +520,7 @@ internal fun renderSearchTeacherCalibration(report: SearchTeacherCalibrationRepo
     }
     report.comparisons.forEach { comparison ->
         appendLine("- ${comparison.candidateId}: ${comparison.validPairs}/${comparison.assignedPairs} valid ${if (report.sequentialResult == null) "pairs" else "inspected pairs"}; point rate=${comparison.candidatePointRate}; paired bootstrap 95%=[${comparison.pairedBootstrap95Lower}, ${comparison.pairedBootstrap95Upper}].")
+        appendLine("  Candidate W/L/draw=${comparison.candidateBySeat.sumOf { it.wins }}/${comparison.candidateBySeat.sumOf { it.losses }}/${comparison.candidateBySeat.sumOf { it.draws }} over ${comparison.validGames} complete valid games; invalid pairs=${comparison.invalidPairs}; incomplete pairs=${comparison.incompletePairs}. Counts use the comparison prefix, excluding sequential overshoot.")
         comparison.operationalByPolicy.forEach { cost ->
             appendLine("  ${cost.search.policyId}: searched ${cost.search.searchedDecisions}/${cost.selections} selections; singleton=${cost.selectionCounts[SearchTeacherSelectionKind.POLICY_SINGLETON_ACTION] ?: 0}; search ms/selection=${cost.searchedMillisPerSelection}; search ms/game=${cost.searchedMillisPerGame}; shared game ms=${cost.sharedWholeGameMeanMillis}.")
         }

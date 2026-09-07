@@ -78,6 +78,21 @@ class SequentialPositionBankTest {
     }
 
     @Test
+    fun `compact report counts only inspected games and names the configuration intervention`() {
+        val report = report()
+        val rendered = renderSearchTeacherCalibration(report)
+        // Six split inspected pairs score 6-6; the two split overshoot pairs must not make it 8-8.
+        assertTrue("Candidate W/L/draw=6/6/0 over 12 complete valid games" in rendered)
+        assertFalse("Candidate W/L/draw=8/8/0" in rendered)
+        assertTrue("simulations: 64 → 56" in rendered)
+        assertTrue("decision horizon=32" in rendered)
+        assertTrue("through report construction" in rendered)
+        assertTrue("subsequent report writing/finalization/verification" in rendered)
+        val budget = report.copy(sequentialResult = report.sequentialResult!!.copy(disposition = PairedSequentialDisposition.BUDGET_EXHAUSTED))
+        assertTrue("Inconclusive: the pair cap" in renderSearchTeacherCalibration(budget))
+    }
+
+    @Test
     fun `sequential admission rejects forged outcome population missing overshoot and ongoing work`() {
         val r = report()
         assertFailsWith<IllegalArgumentException> { completedSequentialBankPairs(r.copy(sequentialPopulation = null)) }
