@@ -42,6 +42,13 @@ internal data class AttackKernelGameplayReport(
     val interpretation: String = "Fresh complete seat-swapped pairs test one frozen attack fit against its incumbent. The first sequential stopping prefix determines strength; all executed games, including overshoot, determine accumulated player search-time-per-game cost. Invalid or stopped work is never a game outcome. Per-test confidence assumes independent-seed common conditional pair means; no automatic promotion or campaign-wide multiplicity claim follows."
 )
 
+internal fun attackGameplayBindings(plan: AttackKernelGameplayPlan, source: ResearchRunProvenance,
+    calibration: SearchTeacherCalibrationPlan): ResearchRunBindings =
+    ResearchRunBindings(protocol = "attack-kernel-fresh-gameplay-v1", material = mapOf(
+        "plan" to sha256(evidenceJson.encodeToString(AttackKernelGameplayPlan.serializer(), plan)),
+        "source" to sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), source)),
+        "calibration" to sha256(evidenceJson.encodeToString(SearchTeacherCalibrationPlan.serializer(), calibration))))
+
 internal class AttackKernelGameplayRunner(private val root: Path) {
     fun run(plan: AttackKernelGameplayPlan, output: Path, deckPath: Path): AttackKernelGameplayReport {
         val source = ResearchRunProvenance.capture(root).also { it.requireReady() }
@@ -74,16 +81,14 @@ internal class AttackKernelGameplayRunner(private val root: Path) {
         val directory = EvidenceStore(root).requireDiagnosticOutput(output, "attack kernel fresh gameplay")
         require(!Files.exists(directory)) { "Inspect retained gameplay; never restart this test" }
         Files.createDirectories(directory)
-        val bindings = ResearchRunBindings(protocol = "attack-kernel-fresh-gameplay-v1", material = mapOf(
-            "plan" to sha256(evidenceJson.encodeToString(AttackKernelGameplayPlan.serializer(), plan)),
-            "source" to sha256(evidenceJson.encodeToString(ResearchRunProvenance.serializer(), source)),
-            "calibration" to sha256(evidenceJson.encodeToString(SearchTeacherCalibrationPlan.serializer(), calibration))))
+        val bindings = attackGameplayBindings(plan, source, calibration)
         writeJsonAtomically(directory.resolve("plan.json"), plan)
         writeJsonAtomically(directory.resolve("bindings.json"), bindings)
         val deadline = minOf(plan.absoluteDeadlineEpochSeconds, System.currentTimeMillis() / 1000.0 + 7200)
         val rule = attackGameplayRule()
         val scores = mutableListOf<PairedSequentialScore>()
         val chunks = mutableListOf<ContinuationChunkBinding>()
+        val lengthRows = mutableListOf<GameplayLengthObservation>()
         val costs = listOf(control, candidate).map { ContinuationPolicyCost(it.id, 0, 0, 0.0) }.toMutableList()
         val issues = mutableListOf<String>()
         var valid = true
@@ -101,6 +106,7 @@ internal class AttackKernelGameplayRunner(private val root: Path) {
             require(report.plan == chunkPlan && report.workerThreads == plan.workers)
             require(report.sourceProvenance == source.sourceProvenance)
             val pairs = report.comparisons.single().pairs
+            lengthRows += gameplayLengthObservations(pairs, candidate.id)
             require(report.comparisons.single() == calibrationComparison(chunkPlan, candidate, pairs))
             pairs.flatMap { it.games }.forEach { game -> game.seatDiagnostics.values.forEach { seat ->
                 val expected = report.policies.single { it.descriptor.id == seat.policyId }
@@ -153,6 +159,10 @@ internal class AttackKernelGameplayRunner(private val root: Path) {
         val report = AttackKernelGameplayReport(bindings.identity, plan, source, calibration, chunks, scores, result,
             valid, issues, costs, ratio, attackSelections, stop ?: result.disposition.name, passed)
         writeJsonAtomically(directory.resolve("report.json"), report)
+        writeTextAtomically(directory.resolve("report.md"), "# Attack gameplay: ${report.disposition}\n" +
+            "Run `${report.identity}`; source `${source.outerCommit}`; Argentum `${source.checkedOutArgentumCommit}`.\n" +
+            "Strength/cost gate=${report.strengthAndCostGatePassed}; search-time-per-game ratio=${report.searchedTimePerGameRatio}.\n" +
+            renderGameplayLengths(lengthRows, result.inspectedPairs, calibration.pairOffset))
         finalizeStudyArtifacts(directory, bindings.identity)
         return report
     }

@@ -1245,6 +1245,7 @@ internal class SearchTeacherArena(
                 winner = winner,
                 terminal = terminal,
                 disposition = if (terminal) GameRunDisposition.GAME_ENDED else GameRunDisposition.STOPPED_LIMIT,
+                terminalTurnNumber = if (terminal) world.authoritativeStateForHost().turnNumber else null,
                 decisions = decisions,
                 searchSeat = searchSeat,
                 searchScore = searchSeat?.let { seat ->

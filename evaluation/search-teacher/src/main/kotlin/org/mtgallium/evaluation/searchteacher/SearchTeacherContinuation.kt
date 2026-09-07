@@ -116,6 +116,13 @@ internal data class SearchTeacherContinuationReport(
     val interpretation: String = "The unchanged cumulative betting process includes the authenticated parent prefix exactly once. The original stopped parent remains immutable. Per-process anytime error control assumes the original conditional-mean null relative to all information used to continue; this is not fresh confirmation, conditional-on-prefix error control, campaign multiplicity control or automatic promotion. Costs retain parent/new/combined execution populations including batch overshoot; the new and combined mean searched-decision cost gates must both pass. Source compatibility is an explicit reviewed statement, not proved by equal configuration hashes.",
 )
 
+internal fun continuationBindings(plan: SearchTeacherContinuationPlan, source: PolicySourceProvenance,
+    parentRule: PairedSequentialRule, rule: PairedSequentialRule): ResearchRunBindings =
+    ResearchRunBindings(protocol = if (plan.seekSuperiority) "search-teacher-confidence-sequence-superiority-v1" else "search-teacher-optional-continuation-v1", material = mapOf(
+            "plan" to sha256(evidenceJson.encodeToString(plan)), "source" to sha256(evidenceJson.encodeToString(source)),
+            "parent-rule" to sha256(evidenceJson.encodeToString(parentRule)),
+            "continuation-rule" to sha256(evidenceJson.encodeToString(rule))))
+
 internal class SearchTeacherContinuationRunner(private val root: Path, private val registry: CardRegistry,
     private val manifest: DeckManifest) {
     fun run(plan: SearchTeacherContinuationPlan, output: Path, preflightOnly: Boolean = false): SearchTeacherContinuationReport? {
@@ -150,10 +157,7 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
         }
         val directory = EvidenceStore(root).requireDiagnosticOutput(output, "Search Teacher optional continuation")
         require(!directory.startsWith(parentDirectory) && !parentDirectory.startsWith(directory))
-        val identity = ResearchRunBindings(protocol = if (plan.seekSuperiority) "search-teacher-confidence-sequence-superiority-v1" else "search-teacher-optional-continuation-v1", material = mapOf(
-            "plan" to sha256(evidenceJson.encodeToString(plan)), "source" to sha256(evidenceJson.encodeToString(source)),
-            "parent-rule" to sha256(evidenceJson.encodeToString(parentResult.rule)),
-            "continuation-rule" to sha256(evidenceJson.encodeToString(rule)))).identity
+        val identity = continuationBindings(plan, source, parentResult.rule, rule).identity
         val finalPath = directory.resolve(ResearchRunArtifacts.MANIFEST_FILE)
         val finalized = Files.exists(finalPath)
         if (finalized) ResearchRunArtifacts.loadAndVerify(directory, identity)
@@ -165,6 +169,7 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
         val parentCosts = costs.map { costFor(it, parentPairs) }
         val newCosts = costs.map { ContinuationPolicyCost(it, 0, 0, 0.0) }.toMutableList()
         val chunks = mutableListOf<ContinuationChunkBinding>()
+        val lengthRows = gameplayLengthObservations(parentPairs, parent.plan.candidates.single().id).toMutableList()
         val issues = mutableListOf<String>()
         var valid = true
         publishDurableRunProgress(System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of),
@@ -180,6 +185,7 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
             verifyCompletedCalibration(chunkDirectory, report.runIdentity)
             require(report.plan == chunkPlan && report.sourceProvenance == source && report.workerThreads == plan.workerThreads)
             val pairs = report.comparisons.single().pairs
+            lengthRows += gameplayLengthObservations(pairs, parent.plan.candidates.single().id)
             require(report.comparisons.single() == calibrationComparison(chunkPlan, chunkPlan.candidates.single(), pairs))
             require(report.policies.map { it.binding.behaviorSpecificationSha256 } == parent.policies.map { it.binding.behaviorSpecificationSha256 })
             pairs.forEach { pair -> pair.games.forEach { game -> game.seatDiagnostics.values.forEach { seat ->
@@ -216,7 +222,7 @@ internal class SearchTeacherContinuationRunner(private val root: Path, private v
             continuationCosts("combined", parentCosts.indices.map { addCost(parentCosts[it], newCosts[it]) }))
         val report = continuationReport(plan, identity, source, parent.sourceProvenance, parentResult,
             parentPairs.size, scores, chunks, result, valid, issues, epochs)
-        retainContinuationReport(directory, report)
+        retainContinuationReport(directory, report, renderGameplayLengths(lengthRows, result.inspectedPairs, first))
         return report
     }
 }
@@ -244,15 +250,18 @@ internal fun continuationReport(plan: SearchTeacherContinuationPlan, identity: S
         }
 }
 
-internal fun retainContinuationReport(directory: Path, report: SearchTeacherContinuationReport) {
+internal fun retainContinuationReport(directory: Path, report: SearchTeacherContinuationReport, gameLengths: String? = null) {
     if (Files.exists(directory.resolve(ResearchRunArtifacts.MANIFEST_FILE))) {
         ResearchRunArtifacts.loadAndVerify(directory, report.identity)
         require(readEvidenceJson(directory.resolve("report.json"), SearchTeacherContinuationReport.serializer()) == report)
     } else {
         writeJsonAtomically(directory.resolve("report.json"), report)
         writeJsonAtomically(directory.resolve("progress.json"), report.result)
+        if (gameLengths != null) writeTextAtomically(directory.resolve("report.md"),
+            "# Search Teacher continuation: ${report.result.disposition}\nRun `${report.identity}`; source `${report.source.outer.revision}`.\n" + gameLengths)
         ResearchRunArtifacts(directory, report.identity).also { artifacts ->
             listOf("plan.json", "report.json", "progress.json").forEach(artifacts::register)
+            if (gameLengths != null) artifacts.register("report.md")
             report.chunks.forEach { artifacts.register("${it.directory}/${ResearchRunArtifacts.MANIFEST_FILE}") }
             artifacts.finalize()
         }
