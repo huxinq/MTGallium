@@ -1,6 +1,9 @@
 package org.mtgallium.evaluation.searchteacher
 
 import org.mtgallium.agent.infoset.argentum.ArgentumRawTransition
+import com.wingedsheep.engine.core.ActivateAbility
+import com.wingedsheep.engine.core.AbilityActivatedEvent
+import com.wingedsheep.engine.core.GameAction
 import com.wingedsheep.engine.core.AbilityResolvedEvent
 import com.wingedsheep.engine.core.AbilityTriggeredEvent
 import com.wingedsheep.engine.core.DecisionContext
@@ -11,6 +14,8 @@ import com.wingedsheep.engine.core.PassPriority
 import com.wingedsheep.engine.core.SubmitDecision
 import com.wingedsheep.engine.core.MayAbilityContinuation
 import com.wingedsheep.engine.core.suspendForDecision
+import com.wingedsheep.engine.handlers.ObjectReferenceEnvironment
+import com.wingedsheep.engine.state.ObjectRef
 import com.wingedsheep.engine.handlers.EffectContext
 import com.wingedsheep.engine.core.YesNoDecision
 import com.wingedsheep.engine.core.YesNoResponse
@@ -27,6 +32,7 @@ import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.PlayerYields
 import com.wingedsheep.engine.state.components.battlefield.LastKnownPermanentComponent
 import com.wingedsheep.engine.state.components.identity.CardComponent
+import com.wingedsheep.engine.state.components.stack.ActivatedAbilityOnStackComponent
 import com.wingedsheep.engine.state.components.stack.EntitySnapshot
 import com.wingedsheep.engine.state.components.stack.TriggeredAbilityOnStackComponent
 import com.wingedsheep.sdk.core.CardType
@@ -711,6 +717,224 @@ class OutcomeStateCorpusTest {
         )
         assertTrue(difference != null)
         assertTrue(difference.reason.contains("normalized more than once"))
+    }
+
+    @Test
+    fun `activated resolution keys correlate only until stack removal and retain a separate audit`() {
+        val creation = syntheticActivatedTransition()
+        val equivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
+        // Paying for the activation may emit separate mana-ability events without stack entities.
+        val manaEvent = AbilityActivatedEvent(EntityId.of("mana-source"), "Synthetic Land",
+            SYNTHETIC_CONTROLLER_ID, isManaAbility = true, costsTap = true)
+        val withManaPayment = creation.copy(expectedEvents = listOf(manaEvent) + creation.expectedEvents,
+            actualEvents = listOf(manaEvent) + creation.actualEvents)
+        assertEquals(null, withManaPayment.difference(equivalence, 0))
+        assertEquals(0, equivalence.admittedSyntheticAbilityMappings)
+        val removal = creation.copy(
+            action = PassPriority(SYNTHETIC_CONTROLLER_ID),
+            expectedBefore = creation.expectedAfter,
+            actualBefore = creation.actualAfter,
+            expectedAfter = creation.expectedAfter.withoutSyntheticStackAbility(),
+            actualAfter = creation.actualAfter.withoutSyntheticStackAbility(),
+            expectedEvents = emptyList(), actualEvents = emptyList(),
+        )
+        assertEquals(null, removal.difference(equivalence, 1))
+        assertEquals(null, equivalence.finalDifference(removal.expectedAfter, removal.actualAfter, 2))
+        assertEquals(null, equivalence.safeInspectionBundleDifference(fixtureInspectionBundle()))
+        val audit = equivalence.completedAudit()
+        assertEquals(0, audit.syntheticAbilityMappingCount)
+        assertEquals(1, audit.activatedResolutionKeyMappings.size)
+        val episode = audit.activatedResolutionKeyMappings.single()
+        assertEquals(0, episode.creationRawOrdinal)
+        assertEquals(1, episode.retirementRawOrdinal)
+        assertTrue(episode.normalizedStatePath.endsWith("ActivatedAbilityOnStackComponent/objectReferences/resolutionKey"))
+        audit.requireForRawTransitionCount(2)
+        assertFailsWith<IllegalArgumentException> { audit.requireForRawTransitionCount(1) }
+        val encoded = evidenceJson.encodeToString(audit)
+        assertFalse(encoded.contains(SYNTHETIC_EXPECTED_ABILITY_ID))
+        assertFalse(encoded.contains(SYNTHETIC_ACTUAL_ABILITY_ID))
+        assertFailsWith<IllegalArgumentException> {
+            audit.copy(algorithm = OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE)
+        }
+    }
+
+    @Test
+    fun `activated resolution correspondence refuses missing ambiguous or unequal creation evidence`() {
+        val creation = syntheticActivatedTransition()
+        fun refused(candidate: SyntheticDelayedAbilityTransition) {
+            assertTrue(candidate.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0) != null)
+        }
+        val event = creation.expectedEvents.single() as AbilityActivatedEvent
+        refused(creation.copy(expectedEvents = emptyList(), actualEvents = emptyList()))
+        refused(creation.copy(expectedEvents = listOf(event, event), actualEvents = listOf(event, event)))
+        refused(creation.copy(actualEvents = listOf(event.copy(costsTap = true))))
+        refused(creation.copy(expectedEvents = listOf(event.copy(sourceName = "wrong")),
+            actualEvents = listOf(event.copy(sourceName = "wrong"))))
+        refused(creation.copy(actualAfter = creation.actualAfter.changeActivation {
+            copy(objectReferences = objectReferences.copy(source = ObjectRef(SYNTHETIC_SOURCE_ID, 170)))
+        }))
+        refused(creation.copy(actualAfter = creation.actualAfter.changeActivation { copy(effect = GainLifeEffect(3)) }))
+        refused(creation.copy(actualAfter = creation.actualAfter.changeActivation {
+            copy(objectReferences = objectReferences.copy(resolutionKey = null))
+        }))
+        refused(creation.copy(expectedAfter = creation.expectedAfter.copy(stack = listOf(SYNTHETIC_STACK_ID, SYNTHETIC_STACK_ID)),
+            actualAfter = creation.actualAfter.copy(stack = listOf(SYNTHETIC_STACK_ID, SYNTHETIC_STACK_ID))))
+        refused(creation.copy(expectedBefore = creation.expectedBefore.copy(entities = creation.expectedBefore.entities +
+            (SYNTHETIC_STACK_ID to ComponentContainer.of(SYNTHETIC_CARD))),
+            actualBefore = creation.actualBefore.copy(entities = creation.actualBefore.entities +
+                (SYNTHETIC_STACK_ID to ComponentContainer.of(SYNTHETIC_CARD)))))
+        refused(creation.copy(expectedAfter = creation.expectedAfter.copy(entities = creation.expectedAfter.entities +
+            (SYNTHETIC_STACK_ID to creation.expectedAfter.getEntity(SYNTHETIC_STACK_ID)!!.with(SYNTHETIC_CARD))),
+            actualAfter = creation.actualAfter.copy(entities = creation.actualAfter.entities +
+                (SYNTHETIC_STACK_ID to creation.actualAfter.getEntity(SYNTHETIC_STACK_ID)!!.with(SYNTHETIC_CARD)))))
+        assertTrue(creation.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0,
+            expectedAccepted = false, actualAccepted = false) != null)
+        assertTrue(creation.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0,
+            actualAction = (creation.action as ActivateAbility).copy(xValue = 1)) != null)
+        assertTrue(creation.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0,
+            expectedAction = PassPriority(SYNTHETIC_CONTROLLER_ID), actualAction = PassPriority(SYNTHETIC_CONTROLLER_ID)) != null)
+    }
+
+    @Test
+    fun `activated resolution correspondence refuses prior strings other paths and continuation frames`() {
+        val creation = syntheticActivatedTransition()
+        val equivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
+        val prior = creation.expectedBefore.withSyntheticYield(SYNTHETIC_EXPECTED_ABILITY_ID)
+        assertEquals(null, equivalence.initialDifference(prior, prior))
+        assertTrue(creation.difference(equivalence, 0) != null)
+        fun refused(candidate: SyntheticDelayedAbilityTransition) {
+            assertTrue(candidate.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0) != null)
+        }
+        refused(creation.copy(expectedAfter = creation.expectedAfter.withSyntheticYield(SYNTHETIC_EXPECTED_ABILITY_ID),
+            actualAfter = creation.actualAfter.withSyntheticYield(SYNTHETIC_ACTUAL_ABILITY_ID)))
+        refused(creation.copy(expectedAfter = creation.expectedAfter.withFixtureQuestion(syntheticPendingDecision("ordinary prompt")),
+            actualAfter = creation.actualAfter.withFixtureQuestion(syntheticPendingDecision("ordinary prompt"))))
+        val cross = creation.expectedAfter.withSyntheticYield(SYNTHETIC_ACTUAL_ABILITY_ID)
+        refused(creation.copy(expectedAfter = cross))
+        val action = (creation.action as ActivateAbility).copy(abilityId = AbilityId(SYNTHETIC_EXPECTED_ABILITY_ID))
+        refused(creation.copy(action = action))
+        val event = (creation.expectedEvents.single() as AbilityActivatedEvent).copy(sourceName = SYNTHETIC_EXPECTED_ABILITY_ID)
+        refused(creation.copy(expectedEvents = listOf(event), actualEvents = listOf(event),
+            expectedAfter = creation.expectedAfter.changeActivation { copy(sourceName = SYNTHETIC_EXPECTED_ABILITY_ID) },
+            actualAfter = creation.actualAfter.changeActivation { copy(sourceName = SYNTHETIC_EXPECTED_ABILITY_ID) }))
+    }
+
+    @Test
+    fun `activated resolution keys refuse final live mappings retirement reuse and inspection leaks`() {
+        val creation = syntheticActivatedTransition()
+        fun started() = RecordedReplayStateEquivalence(historicalProjectionAuthority()).also {
+            assertEquals(null, creation.difference(it, 0))
+        }
+        assertTrue(started().finalDifference(creation.expectedAfter, creation.actualAfter, 1) != null)
+        val removal = creation.copy(
+            action = PassPriority(SYNTHETIC_CONTROLLER_ID),
+            expectedBefore = creation.expectedAfter, actualBefore = creation.actualAfter,
+            expectedAfter = creation.expectedAfter.withoutSyntheticStackAbility(),
+            actualAfter = creation.actualAfter.withoutSyntheticStackAbility(),
+            expectedEvents = emptyList(), actualEvents = emptyList(),
+        )
+        val tombstone = started()
+        assertEquals(null, removal.difference(tombstone, 1))
+        assertTrue(creation.copy(expectedBefore = removal.expectedAfter, actualBefore = removal.actualAfter,
+            action = PassPriority(SYNTHETIC_CONTROLLER_ID), expectedEvents = emptyList(), actualEvents = emptyList()
+        ).difference(tombstone, 2) != null)
+        val reusedKey = started()
+        assertEquals(null, removal.difference(reusedKey, 1))
+        fun GameState.moveStackEntity(): GameState = copy(
+            entities = (entities - SYNTHETIC_STACK_ID) +
+                (SYNTHETIC_SECOND_STACK_ID to requireNotNull(getEntity(SYNTHETIC_STACK_ID))),
+            stack = listOf(SYNTHETIC_SECOND_STACK_ID),
+        )
+        val secondEvent = (creation.expectedEvents.single() as AbilityActivatedEvent)
+            .copy(abilityEntityId = SYNTHETIC_SECOND_STACK_ID)
+        assertTrue(creation.copy(expectedBefore = removal.expectedAfter, actualBefore = removal.actualAfter,
+            expectedAfter = creation.expectedAfter.moveStackEntity(), actualAfter = creation.actualAfter.moveStackEntity(),
+            expectedEvents = listOf(secondEvent), actualEvents = listOf(secondEvent),
+        ).difference(reusedKey, 2) != null)
+        val continuation = started()
+        assertTrue(removal.copy(
+            expectedAfter = creation.expectedAfter.withFixtureQuestion(syntheticPendingDecision("ordinary prompt")),
+            actualAfter = creation.actualAfter.withFixtureQuestion(syntheticPendingDecision("ordinary prompt")),
+        ).difference(continuation, 1) != null)
+        val leakage = started()
+        assertEquals(null, removal.difference(leakage, 1))
+        assertEquals(null, leakage.finalDifference(removal.expectedAfter, removal.actualAfter, 2))
+        assertTrue(leakage.safeInspectionBundleDifference(
+            fixtureInspectionBundle().copy(policyVersion = SYNTHETIC_ACTUAL_ABILITY_ID)) != null)
+        val laterAction = removal.copy(action = ActivateAbility(SYNTHETIC_CONTROLLER_ID,
+            SYNTHETIC_SOURCE_ID, AbilityId(SYNTHETIC_EXPECTED_ABILITY_ID)))
+        assertTrue(laterAction.difference(started(), 1) != null)
+    }
+
+    @Test
+    fun `legacy replay audit retains its literal algorithm and serialization`() {
+        val literal = """{"schemaVersion":2,"algorithm":"argentum-fixed-historical-boundary-correlated-step-delayed-ability-and-time-lord-lki-v2","eventEquivalenceAlgorithm":"argentum-boundary-correlated-decision-routing-and-fixed-3eda-time-lord-type-line-events-v2","syntheticAbilityMappings":[],"syntheticAbilityMappingCount":0,"legacyTimeLordTypeLineNormalizations":[],"legacyTimeLordTypeLineNormalizationCount":0,"activeLegacyTimeLordTypeLineMappingsAtFinal":0,"activeMappingsAtFinal":0,"forbiddenOccurrenceCount":0}"""
+        val decoded = evidenceJson.decodeFromString<OutcomeStateReplayCompatibilityAudit>(literal)
+        assertEquals(OUTCOME_STATE_CORPUS_LEGACY_TRANSITION_STATE_EQUIVALENCE, decoded.algorithm)
+        assertEquals(emptyList(), decoded.activatedResolutionKeyMappings)
+        decoded.requireForRawTransitionCount(0)
+        assertEquals(evidenceJson.parseToJsonElement(literal), evidenceJson.parseToJsonElement(evidenceJson.encodeToString(decoded)))
+    }
+
+    private fun GameState.changeActivation(
+        change: ActivatedAbilityOnStackComponent.() -> ActivatedAbilityOnStackComponent,
+    ): GameState {
+        val container = requireNotNull(getEntity(SYNTHETIC_STACK_ID))
+        val component = requireNotNull(container.get<ActivatedAbilityOnStackComponent>())
+        return copy(entities = entities + (SYNTHETIC_STACK_ID to container.with(component.change())))
+    }
+
+    private fun syntheticActivatedTransition(): SyntheticDelayedAbilityTransition {
+        val before = syntheticState(null, null)
+        fun after(key: String): GameState {
+            val component = ActivatedAbilityOnStackComponent(
+                sourceId = SYNTHETIC_SOURCE_ID, sourceName = SYNTHETIC_SOURCE_NAME,
+                controllerId = SYNTHETIC_CONTROLLER_ID, effect = SYNTHETIC_EFFECT,
+                objectReferences = ObjectReferenceEnvironment(captured = true,
+                    origin = ObjectRef(SYNTHETIC_SOURCE_ID, 169), source = ObjectRef(SYNTHETIC_SOURCE_ID, 169),
+                    resolutionKey = key),
+            )
+            return before.copy(entities = before.entities + (SYNTHETIC_STACK_ID to ComponentContainer.of(component)),
+                stack = listOf(SYNTHETIC_STACK_ID))
+        }
+        val event = AbilityActivatedEvent(SYNTHETIC_SOURCE_ID, SYNTHETIC_SOURCE_NAME,
+            SYNTHETIC_CONTROLLER_ID, SYNTHETIC_STACK_ID)
+        return SyntheticDelayedAbilityTransition(
+            ActivateAbility(SYNTHETIC_CONTROLLER_ID, SYNTHETIC_SOURCE_ID, AbilityId("printed-activation")),
+            listOf(event), listOf(event), before, before,
+            after(SYNTHETIC_EXPECTED_ABILITY_ID), after(SYNTHETIC_ACTUAL_ABILITY_ID),
+        )
+    }
+
+    @Test
+    fun `consumed delayed trigger retains exact captured object references`() {
+        val references = ObjectReferenceEnvironment(
+            captured = true,
+            origin = ObjectRef(SYNTHETIC_SOURCE_ID, 169),
+            source = ObjectRef(SYNTHETIC_SOURCE_ID, 169),
+        )
+        fun GameState.capturedBefore() = copy(
+            delayedTriggers = delayedTriggers.map { it.copy(objectReferences = references) },
+        )
+        fun GameState.capturedAfter(refs: ObjectReferenceEnvironment = references): GameState {
+            val container = requireNotNull(getEntity(SYNTHETIC_STACK_ID))
+            val component = requireNotNull(container.get<TriggeredAbilityOnStackComponent>())
+            return copy(entities = entities + (SYNTHETIC_STACK_ID to
+                container.with(component.copy(objectReferences = refs))))
+        }
+        val base = syntheticDelayedAbilityTransition()
+        val captured = base.copy(
+            expectedBefore = base.expectedBefore.capturedBefore(),
+            actualBefore = base.actualBefore.capturedBefore(),
+            expectedAfter = base.expectedAfter.capturedAfter(),
+            actualAfter = base.actualAfter.capturedAfter(),
+        )
+        assertEquals(null, captured.difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0))
+        val changed = references.copy(source = ObjectRef(SYNTHETIC_SOURCE_ID, 170))
+        assertTrue(captured.copy(
+            expectedAfter = base.expectedAfter.capturedAfter(changed),
+            actualAfter = base.actualAfter.capturedAfter(changed),
+        ).difference(RecordedReplayStateEquivalence(historicalProjectionAuthority()), 0) != null)
     }
 
     @Test
@@ -1481,7 +1705,7 @@ class OutcomeStateCorpusTest {
     }
 
     private data class SyntheticDelayedAbilityTransition(
-        val action: PassPriority,
+        val action: GameAction,
         val expectedEvents: List<GameEvent>,
         val actualEvents: List<GameEvent>,
         val expectedBefore: GameState,

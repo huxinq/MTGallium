@@ -32,6 +32,16 @@ inspection and public artifacts are derived evidence, not a second canonical
 record. A safe-looking artifact is not safe solely because a path guard accepts
 it.
 
+Replay reconstruction compares captured object references as part of the full
+state. A uniquely consumed END-step delayed trigger must carry the same references
+onto its new stack component. A fresh activated-ability resolution key may be
+matched only at an equal accepted activation with one corresponding non-mana
+stack event and otherwise equal components. Its spelling must remain confined to
+that component, with no continuation frames, action or event occurrences, or
+later reuse. New audits record these resolution-key episodes separately under
+the v3 correspondence algorithm; historical v2 audits retain their original
+algorithm and bytes. Unsupported correspondence remains a reconstruction refusal.
+
 ### Source and evidence authority
 
 This public repository is the implementation authority for new first-party
