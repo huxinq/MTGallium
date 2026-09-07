@@ -369,3 +369,9 @@ object ComponentSeeds {
         }
     }
 }
+
+/** Optional diagnostic sink for actual bounded-rollout choices; it cannot replace the choice. */
+interface BoundedRolloutObserver {
+    fun observeBoundedRollout(information: () -> PolicyInformationState, candidates: List<SemanticChoice>,
+        complete: Boolean, choice: SemanticChoice, searchSeed: Long, simulationIndex: Int, depth: Int)
+}

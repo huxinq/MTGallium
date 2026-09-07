@@ -16,6 +16,17 @@ class TerminalRootContinuationsTest {
     private fun sample(index: Int, value: Double) = TerminalRootSample(index, index % 2, index.toLong(), index.toLong(), value, 0,
         OpponentPolicyDecisionSummary(), OpponentPolicyDecisionSummary(), 0.0)
 
+    @Test fun `selected action union preserves menu order and rejects duplicate or foreign actions`() {
+        val menu = listOf(action("a"), action("b"), action("c"))
+        assertEquals(listOf(menu[0], menu[2]), selectTerminalActionSubset(menu,
+            listOf(menu[2].signature, menu[0].signature).sorted()))
+        assertFails { selectTerminalActionSubset(menu, listOf("foreign")) }
+        assertFails { selectTerminalActionSubset(menu, listOf(menu[0].signature, menu[0].signature)) }
+        assertFails { selectTerminalActionSubset(menu, emptyList()) }
+        assertEquals(4096, terminalRootWorkload(TerminalRootContinuationConfig(16,
+            maximumTotalContinuations = 4096), List(32) { 8 }, 1, 1))
+    }
+
     @Test fun `terminal targets retain samples and pair coordinates without inventing visits or means`() {
         val menu = listOf(action("a"), action("b"))
         val result = collectTerminalRootActions(menu, 2) { a, i -> sample(i, if (a == menu[0]) 1.0 else -1.0) }

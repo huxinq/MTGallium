@@ -947,6 +947,9 @@ class InformationSetSearch(
                     sampleSeed = ComponentSeeds.derive(searchSeed, simulationIndex, depth, "rollout-sample"),
                 )
                 audit.record(actor == rootPlayer, decision.diagnostic)
+                (policy as? BoundedRolloutObserver)?.observeBoundedRollout(
+                    { world.informationState(actor) }, policyExpansion.candidates,
+                    policyExpansion.isProfileExhaustive, decision.choice, searchSeed, simulationIndex, depth)
                 decision.choice
             }
             // Cache exact world prefixes, never the rollout policy's distribution or sampled choice.

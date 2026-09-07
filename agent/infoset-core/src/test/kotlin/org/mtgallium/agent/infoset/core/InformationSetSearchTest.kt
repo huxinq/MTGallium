@@ -10,6 +10,31 @@ import kotlin.test.assertFailsWith
 class InformationSetSearchTest {
 
     @Test
+    fun `bounded rollout observation preserves search choices and backups with exact depths`() {
+        val seen = mutableListOf<Pair<Int, Int>>()
+        val policy = object : OpponentPolicy by UniformOpponentPolicy, BoundedRolloutObserver {
+            override fun observeBoundedRollout(information: () -> PolicyInformationState,
+                candidates: List<SemanticChoice>, complete: Boolean, choice: SemanticChoice,
+                searchSeed: Long, simulationIndex: Int, depth: Int) {
+                assertEquals(71L, searchSeed)
+                assertTrue(choice in candidates && complete)
+                assertTrue(information().actingPlayerId != null)
+                seen += simulationIndex to depth
+            }
+        }
+        val config = InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 4,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.ARGENTUM_BOARD_V1))
+        val plain = coreSearch(config, UniformOpponentPolicy, rolloutPolicy = UniformOpponentPolicy,
+            rolloutOpponentPolicy = UniformOpponentPolicy).search("p0", batch(listOf(FakeWorld(terminalAtDepth = 5))), 71L)
+        val observed = coreSearch(config, UniformOpponentPolicy, rolloutPolicy = policy,
+            rolloutOpponentPolicy = policy).search("p0", batch(listOf(FakeWorld(terminalAtDepth = 5))), 71L)
+        assertTrue(seen.isNotEmpty())
+        assertTrue(seen.all { (simulation, depth) -> simulation in 0..1 && depth in 1..3 })
+        assertEquals(plain.copy(diagnostics = plain.diagnostics.copy(evaluatorNanos = 0)),
+            observed.copy(diagnostics = observed.diagnostics.copy(evaluatorNanos = 0)))
+    }
+
+    @Test
     fun `bounded and terminal rollouts retain the actual incomplete menu witness`() {
         class IncompleteWorld(private val wrapped: SearchWorld) : SearchWorld by wrapped {
             override fun fork(): SearchWorld = IncompleteWorld(wrapped.fork())

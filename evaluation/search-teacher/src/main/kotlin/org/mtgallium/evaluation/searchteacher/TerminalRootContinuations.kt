@@ -88,7 +88,10 @@ internal fun sampleTerminalRootActions(
     belief: BeliefBatch<Weighted<SearchWorld>>, information: PolicyInformationState,
     candidates: List<SemanticChoice>, search: InformationSetSearch,
     config: TerminalRootContinuationConfig, searchSeed: Long,
+    selectedActions: List<SemanticChoice> = candidates,
 ): List<TerminalRootActionSamples> {
+    require(selectedActions.isNotEmpty() && selectedActions.distinct().size == selectedActions.size &&
+        selectedActions.all { it in candidates })
     val actor = requireNotNull(information.actingPlayerId)
     require(actor == information.observation.perspectivePlayerId && !information.terminated)
     val menu = candidates.map { it.signature }.toSet()
@@ -101,7 +104,7 @@ internal fun sampleTerminalRootActions(
         world
     }
     val indices = InformationSetSearch.productionRootParticleIndices(belief.particles.map { it.weight }, searchSeed, config.samplesPerAction)
-    return collectTerminalRootActions(candidates, config.samplesPerAction) { action, index ->
+    return collectTerminalRootActions(selectedActions, config.samplesPerAction) { action, index ->
         val started = System.nanoTime()
         // These coordinates intentionally omit the action: siblings share a posterior draw and
         // future stream. Divergent event consumption still prevents a claim of exact coupling.
@@ -151,14 +154,14 @@ internal fun terminalRootScreenAccounting(report: PositionBankScreenReport, bank
     require(report.rows.groupBy { it.rootId to it.policyId }.values.all { rows ->
         rows.map { it.terminalBeliefWeights }.filter { it.isNotEmpty() }.distinct().size <= 1
     })
-    val requested = terminalRootWorkload(config, report.selectedRootIds.map { roots.getValue(it).reconstructedCandidates.size },
+    val requested = terminalRootWorkload(config, report.selectedRootIds.map { terminalScreenActions(report.plan, roots.getValue(it)).size },
         report.plan.repetitions, report.plan.policies.size)
     val samples = report.rows.flatMap { row ->
         require(row.disposition in setOf(PositionBankScreenDisposition.TERMINAL_CONTINUATIONS, PositionBankScreenDisposition.REFUSED))
         require(row.searchDiagnostics == null && row.searchRootValue == null && row.candidateStatistics.isEmpty() && row.rootActionEstimates.isEmpty())
         if (row.terminalRootActions.isEmpty()) require(row.disposition == PositionBankScreenDisposition.REFUSED)
         else {
-            require(row.terminalRootActions.map { it.action } == roots.getValue(row.rootId).reconstructedCandidates)
+            require(row.terminalRootActions.map { it.action } == terminalScreenActions(report.plan, roots.getValue(row.rootId)))
             require(row.terminalRootActions.all { it.requestedSamples == config.samplesPerAction })
             require(row.terminalBeliefWeights.isNotEmpty() && row.terminalBeliefWeights.all { it.isFinite() && it >= 0 })
             val seed = requireNotNull(row.searchSeed)
