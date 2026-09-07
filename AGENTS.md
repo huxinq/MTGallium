@@ -154,10 +154,27 @@ Optimize total agent work while preserving research correctness, authorized
 completion, and required verification. Reuse relevant context and successful
 checks; avoid duplicate exploration, reviews, and polling.
 
-For Astra, use the project effort default unless the owner selects otherwise
-or relevant task observations justify escalation. Escalate for a concrete
-reasoning gap, not missing inputs, tool failures, or slow compute. Report
-effort as unknown unless confirmed.
+Prefer Astra for the coordinator and specialist roles. Choose starting effort
+by task, unless the owner selects otherwise (Light means `low`):
+
+- Low: source navigation, mechanical or well-specified routine implementation,
+  and explanation of verified results without extending their claims.
+- Medium: changes requiring judgment about research-critical invariants,
+  scientific/engineering interpretation, tradeoffs, and bounded next-step advice.
+- High: research direction, causal inference, changes to experimental objectives,
+  substantial compute or architectural recommendations, and unresolved subtle
+  cross-system failures or consequential competing interpretations.
+
+Settled decisions can make boundary-touching work routine. Choose effort upfront;
+do not rely only on noticing a reasoning gap. Increase it for concrete reasoning
+difficulties, not missing inputs, tool failures, or slow compute. Report effort
+as unknown unless confirmed; configured defaults do not confirm active effort.
+These are starting defaults, not measured capability or cost guarantees.
+
+Ground interpretation and advice in verified evidence, distinguish uncertainty,
+and explain the recommendation and what observation would change it. Use focused
+independent review for consequential advice resting on contested evidence or
+fragile inference; higher effort does not replace verification or owner judgment.
 
 Delegate only when a bounded question reduces total work or independent
 review materially improves confidence. Use the established specialist roles,
