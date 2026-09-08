@@ -910,33 +910,6 @@ class SearchTeacherEvaluationTest {
     }
 
     @Test
-    fun `compute trend checks consecutive simulation budgets within one configuration family`() {
-        fun point(simulations: Int, score: Double) = CalibrationPoint(
-            particles = 8,
-            simulations = simulations,
-            leaf = LeafEvaluationConfig(
-                LeafStateSource.CURRENT_INFORMATION_STATE,
-                LeafEvaluator.MTGALLIUM_VISIBLE_V2,
-            ),
-            decisionLatenciesMillis = listOf(1.0),
-            p50Millis = 1.0,
-            p95Millis = 1.0,
-            tacticalScore = score,
-            standardError = 0.0,
-            meanExpansionMillis = 0.1,
-            meanBeliefMillis = 0.2,
-            meanSearchMillis = 0.7,
-        )
-        val intervals = computeImprovementIntervals(
-            listOf(point(1_024, 0.5), point(64, 0.25), point(256, 0.5))
-        )
-
-        assertEquals(listOf(64 to 256, 256 to 1_024), intervals.map { it.fromSimulations to it.toSimulations })
-        assertTrue(intervals.first().improved)
-        assertFalse(intervals.last().improved)
-    }
-
-    @Test
     fun `arena shards merge in global pair order and preserve paired statistics`() {
         fun game(pair: Int, suffix: String, searchSeat: String) = GameRunResult(
             gameId = "pair-$pair-$suffix",

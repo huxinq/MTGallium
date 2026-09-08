@@ -11,14 +11,29 @@ class TerminalKernelStudyTest {
 
     @Test fun `unequal root populations and repeated target estimates do not change group weighting`() {
         val rows = listOf(row("r1", "g1", listOf(.5, .5)), row("r2", "g1", listOf(.5, .5)), row("r3", "g2", listOf(-.5, -.5)))
-        val comparison = terminalStudyComparison(rows)
+        val comparison = terminalTargetComparison(rows)
         assertEquals(0.0, comparison.equalGroupMeanDifference)
         assertEquals(listOf(0.0, 0.0), comparison.equalGroupMeanByTargetRepetition)
         assertEquals(1, comparison.positiveGroups); assertEquals(1, comparison.negativeGroups)
         assertFalse(terminalStudyGate(TerminalStudyGate(1), comparison, comparison).passed)
-        val conflicting = terminalStudyComparison(listOf(row("r", "g", listOf(.5, -.25))))
+        val conflicting = terminalTargetComparison(listOf(row("r", "g", listOf(.5, -.25))))
         assertTrue(conflicting.equalGroupMeanDifference > 0)
         assertFalse(terminalStudyGate(TerminalStudyGate(1), conflicting, conflicting).passed)
+    }
+
+    @Test fun `shared raw score choices keep the first menu tie and all target repetitions`() {
+        assertEquals("z-first", terminalModelChoice(listOf("z-first", "a-second", "third"), listOf(.5, .5, -.5)))
+        assertEquals("a-second", terminalModelChoice(listOf("z-first", "a-second"), listOf(-.5, .5)))
+        val row = terminalTargetRegretRow("r", "g", listOf(
+            linkedMapOf("old" to -.5, "new" to .5, "other" to 1.0),
+            linkedMapOf("old" to .5, "new" to -.5, "other" to 1.0),
+        ), "old", "new")
+        assertEquals(listOf(1.0, -1.0), row.candidateMinusBaselineByReferenceRepetition)
+        assertEquals(0.0, row.candidateMinusBaseline)
+        val comparison = terminalTargetComparison(listOf(row))
+        assertEquals(listOf(1.0, -1.0), comparison.equalGroupMeanByTargetRepetition)
+        assertEquals(1, comparison.tiedGroups)
+        assertFails { terminalTargetComparison(listOf(row, row)) }
     }
 
     @Test fun `study cannot substitute learned terminal continuation or validation training groups`() {
@@ -26,6 +41,12 @@ class TerminalKernelStudyTest {
         val dev = PositionBankScreenPlan(bankDirectory = "/tmp/bank", expectedBankIdentity = "bank", partition = PositionBankScreenPartition.DEVELOPMENT,
             mode = PositionBankScreenMode.TERMINAL_CONTINUATIONS, rootLimit = 1, repetitions = 2, policies = listOf(policy), rootIds = listOf("d"),
             terminalContinuation = TerminalRootContinuationConfig(8, maximumTotalContinuations = 1000))
+        val pilot = terminalResearchPilotPlan(dev, listOf("d"))
+        assertEquals(1, pilot.repetitions)
+        assertEquals(2, pilot.terminalContinuation?.samplesPerAction)
+        // Every policy, seed, belief and operational bound survives the pilot projection.
+        assertEquals(dev, pilot.copy(repetitions = dev.repetitions,
+            terminalContinuation = pilot.terminalContinuation?.copy(samplesPerAction = dev.terminalContinuation!!.samplesPerAction)))
         val validation = dev.copy(partition = PositionBankScreenPartition.VALIDATION, rootIds = listOf("v"))
         val control = validation.copy(mode = PositionBankScreenMode.ROOT_ROLLOUT_SELECTION, repetitions = 1, terminalContinuation = null)
         val fit = RootKernelFitReference("/tmp/fit", "research-run-v1-sha256:"+"a".repeat(64), "b".repeat(64))

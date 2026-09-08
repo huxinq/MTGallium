@@ -129,7 +129,7 @@ internal class DirectAttackKernelScreenRunner(private val repository: Path) {
             val report = DirectAttackKernelScreenReport(bindings.identity, source, plan, assigned, selection.toList(),
                 terminals.toList(), disposition, rows, gate)
             writeJsonAtomically(directory.resolve("report.json"), report)
-            finalizeStudyArtifacts(directory, bindings.identity)
+            finalizeResearchWorkflowArtifacts(directory, bindings.identity)
             return report
         }
         val runner = PositionBankScreenRunner(repository, buildRegistry(), loadDeckManifest(deckPath))

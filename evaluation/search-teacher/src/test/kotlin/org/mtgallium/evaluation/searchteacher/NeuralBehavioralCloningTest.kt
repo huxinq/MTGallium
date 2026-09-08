@@ -5,6 +5,7 @@ import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.gym.GameEnvironment
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
+import org.junit.jupiter.api.Tag
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -245,6 +246,7 @@ class NeuralBehavioralCloningTest {
     }
 
     @Test
+    @Tag("public-source")
     fun `sparse Adam exposure counts actual aggregated parameter update calls`() {
         val config = NeuralBcModelConfig(stateDimension = 8, candidateDimension = 8, hiddenDimension = 4)
         val artifact = CandidateConditionedNeuralPolicy.initialize(config, seed = 73L).artifact
@@ -269,7 +271,7 @@ class NeuralBehavioralCloningTest {
         assertTrue(exposure.stateWeightUpdateCounts.all { it in 0L..1L })
         assertTrue(exposure.candidateWeightUpdateCounts.all { it in 0L..1L })
 
-        val reconstructed = reconstructSparseAdamUpdateExposure(listOf(decision), config, epochs = 1)
+        val reconstructed = expectedSparseAdamUpdateExposure(listOf(decision), config, epochs = 1)
         assertContentEquals(exposure.stateWeightUpdateCounts, reconstructed.stateWeightUpdateCounts)
         assertContentEquals(exposure.stateBiasUpdateCounts, reconstructed.stateBiasUpdateCounts)
         assertContentEquals(exposure.candidateWeightUpdateCounts, reconstructed.candidateWeightUpdateCounts)
@@ -510,4 +512,39 @@ class NeuralBehavioralCloningTest {
         val input = BoundedPolicyInputCompiler.compile(world.informationState(actor))
         return world to input
     }
+}
+
+// Independent reference counts from sparse input support, without calling the optimizer.
+private fun expectedSparseAdamUpdateExposure(
+    decisions: List<EncodedBcDecision>,
+    modelConfig: NeuralBcModelConfig,
+    epochs: Int,
+): SparseAdamUpdateExposure {
+    require(decisions.isNotEmpty() && epochs >= 0)
+    val state = LongArray(modelConfig.hiddenDimension * modelConfig.stateDimension)
+    val candidate = LongArray(modelConfig.hiddenDimension * modelConfig.candidateDimension)
+    decisions.forEach { decision ->
+        repeat(modelConfig.hiddenDimension) { hidden ->
+            val stateOffset = hidden * modelConfig.stateDimension
+            decision.state.indices.forEach { bucket -> state[stateOffset + bucket]++ }
+        }
+        val candidateBuckets = linkedSetOf<Int>()
+        decision.candidates.forEach { vector -> vector.indices.forEach(candidateBuckets::add) }
+        repeat(modelConfig.hiddenDimension) { hidden ->
+            val candidateOffset = hidden * modelConfig.candidateDimension
+            candidateBuckets.forEach { bucket -> candidate[candidateOffset + bucket]++ }
+        }
+    }
+    fun scaled(values: LongArray): LongArray = LongArray(values.size) { index ->
+        Math.multiplyExact(values[index], epochs.toLong())
+    }
+    val denseUpdates = Math.multiplyExact(decisions.size.toLong(), epochs.toLong())
+    return SparseAdamUpdateExposure(
+        decisionSteps = Math.multiplyExact(decisions.size, epochs),
+        stateWeightUpdateCounts = scaled(state),
+        stateBiasUpdateCounts = LongArray(modelConfig.hiddenDimension) { denseUpdates },
+        candidateWeightUpdateCounts = scaled(candidate),
+        candidateBiasUpdateCounts = LongArray(modelConfig.hiddenDimension) { denseUpdates },
+        globalQueryUpdateCounts = LongArray(modelConfig.hiddenDimension) { denseUpdates },
+    )
 }

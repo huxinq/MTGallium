@@ -239,6 +239,13 @@ execution's evidence identity and manifest hash. Field retrieval preserves
 recorded values and failures, while semantic feature generation continues through
 the existing FEATURES screen. See [the CLI guide](research-workbench.md).
 
+The native suite catalog and dispatch share explicit registrations grouped by
+domain. Each registration preserves its source-readiness and initialization
+contract; moving a command does not change whether it captures current provenance
+or builds an arena. Terminal study, sensitivity and transfer runners share retained
+input verification, target comparison and artifact helpers while keeping their
+distinct access order and conclusions. See [source ownership](research-tooling-development.md).
+
 The terminal-kernel study composes authenticated bank/target/fit APIs in a fixed
 order, requires a verified local build and development-only preflight, freezes
 the fit before validation-target access, and preserves historical identities on

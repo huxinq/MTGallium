@@ -2,6 +2,8 @@
 
 - [Research CLI workbench](research-workbench.md) — design, freeze, preflight,
   launch, retrieve, diagnose and review an experiment from one human interface.
+- [Research tooling development](research-tooling-development.md) — source ownership,
+  command registration and shared terminal workflow components.
 
 - [`../AGENTS.md`](../AGENTS.md) — coding-agent guidance and semantic invariants.
 - [`glossary.md`](glossary.md) — plain-language definitions, tools and subsystems, aliases, and source references.

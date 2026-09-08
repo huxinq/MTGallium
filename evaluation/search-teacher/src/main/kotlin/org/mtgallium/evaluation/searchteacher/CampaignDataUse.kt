@@ -185,6 +185,6 @@ internal fun retainCampaignSnapshot(repository: Path, plan: CampaignSnapshotPlan
         "records" to sha256(evidenceJson.encodeToString(CampaignDataUseSnapshot.serializer(), snapshot))))
     writeJsonAtomically(destination.resolve("bindings.json"), bindings)
     writeJsonAtomically(destination.resolve("snapshot.json"), snapshot)
-    finalizeStudyArtifacts(destination, bindings.identity)
+    finalizeResearchWorkflowArtifacts(destination, bindings.identity)
     return snapshot
 }

@@ -108,7 +108,7 @@ internal class TerminalTargetSensitivityRunner(private val repository: Path) {
         val bank = loadVerifiedRealGamePositionBank(Path.of(plan.bank.directory), plan.bank.researchRunIdentity)
         val roots = bank.roots.filter { it.rootId in plan.rootIds }.sortedBy { it.rootId }
         require(roots.map { it.rootId } == plan.rootIds && roots.all { it.partition == RealGamePositionPartition.VALIDATION && it.profileExpansionExhaustive })
-        val pilotIds = terminalStudyPilotRoots(roots)
+        val pilotIds = terminalResearchPilotRoots(roots)
         val total = plan.variants.sumOf { v ->
             terminalRootWorkload(requireNotNull(v.plan.terminalContinuation), roots.map { it.reconstructedCandidates.size }, v.plan.repetitions, 1).toLong() +
                 roots.filter { it.rootId in pilotIds }.sumOf { it.reconstructedCandidates.size.toLong() * 2 }
@@ -121,7 +121,8 @@ internal class TerminalTargetSensitivityRunner(private val repository: Path) {
             "bank-manifest" to researchSha256File(Path.of(plan.bank.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
             "baseline-target-manifest" to researchSha256File(Path.of(plan.baselineTargets.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE)),
             "control-manifest" to researchSha256File(Path.of(plan.productionControl.directory).resolve(ResearchRunArtifacts.MANIFEST_FILE))))
-        writeJsonAtomically(destination.resolve("bindings.json"), bindings); writeJsonAtomically(destination.resolve("plan.json"), plan)
+        writeJsonAtomically(destination.resolve("bindings.json"), bindings)
+        writeJsonAtomically(destination.resolve("plan.json"), plan)
         val campaign = CampaignDataRegistry(repository, Path.of(plan.campaignDirectory), plan.campaignId)
         campaign.record(CampaignDataUsePlan(campaignId = plan.campaignId, studyIdentity = bindings.identity,
             role = CampaignDataRole.METHOD_SELECTION, timing = CampaignDataTiming.PROSPECTIVE_RESERVATION,
@@ -138,52 +139,111 @@ internal class TerminalTargetSensitivityRunner(private val repository: Path) {
                 require(variant.plan.terminalContinuation?.seedRule == baseline.plan.terminalContinuation?.seedRule)
             }
             val controlPlan = evidenceJson.decodeFromString<PositionBankScreenPlan>(Files.readString(Path.of(plan.productionControl.directory).resolve("plan.json")))
-            val control = loadStudyScreen(plan.productionControl, controlPlan)
-            requireTerminalStudyControl(control, controlPlan)
+            val control = loadRetainedTerminalResearchScreen(plan.productionControl, controlPlan)
+            requireProductionRolloutControl(control, controlPlan)
             require(controlPlan.expectedBankIdentity == bank.bankIdentity && plan.rootIds.all { it in control.selectedRootIds })
             val oldModel = CompiledRootActionKernel(plan.baselineModel.loadFrozenModel().model)
             val newModel = CompiledRootActionKernel(plan.candidateModel.loadFrozenModel().model)
             val runner = PositionBankScreenRunner(repository, buildRegistry(), loadDeckManifest(deckPath))
-            val targets = linkedMapOf("baseline" to (plan.baselineTargets to baseline))
+            val targets = linkedMapOf("baseline" to TerminalTargetStage(plan.baselineTargets, baseline))
             for (variant in plan.variants) {
-                val pilot = costs.measure("${variant.id}-preflight", describe = { terminalWork(it, bank) }, validate = { terminalRootTrainingData(bank, it, PositionBankScreenPartition.VALIDATION) }) {
-                    runner.run(variant.plan.copy(rootIds = pilotIds, rootLimit = pilotIds.size, repetitions = 1,
-                        terminalContinuation = requireNotNull(variant.plan.terminalContinuation).copy(samplesPerAction = 2)), destination.resolve("${variant.id}-preflight"), plan.workers)
+                val pilot = costs.measure("${variant.id}-preflight", describe = { terminalMeasuredWork(it, bank) }, validate = { terminalRootTrainingData(bank, it, PositionBankScreenPartition.VALIDATION) }) {
+                    runner.run(terminalResearchPilotPlan(variant.plan, pilotIds), destination.resolve("${variant.id}-preflight"), plan.workers)
                 }
                 val accounting = terminalRootScreenAccounting(pilot, bank)
                 val workload = terminalRootWorkload(requireNotNull(variant.plan.terminalContinuation), roots.map { it.reconstructedCandidates.size }, variant.plan.repetitions, 1)
-                require(accounting.accumulatedSelectionMillis / accounting.completedTerminalSamples * workload / plan.workers / 1000 <= plan.maximumProjectedCollectionSeconds)
+                require(projectedTerminalCollectionSeconds(accounting, workload.toLong(), plan.workers) <= plan.maximumProjectedCollectionSeconds)
                 val path = destination.resolve(variant.id)
-                val report = costs.measure(variant.id, describe = { terminalWork(it, bank) }, validate = { terminalRootTrainingData(bank, it, PositionBankScreenPartition.VALIDATION) }) {
+                val report = costs.measure(variant.id, describe = { terminalMeasuredWork(it, bank) }, validate = { terminalRootTrainingData(bank, it, PositionBankScreenPartition.VALIDATION) }) {
                     runner.run(variant.plan, path, plan.workers)
                 }
-                targets[variant.id] = SavedRootPolicyInput(path.toString(), report.researchRunIdentity, variant.plan.policies.single().search.id) to report
+                targets[variant.id] = TerminalTargetStage(SavedRootPolicyInput(path.toString(), report.researchRunIdentity, variant.plan.policies.single().search.id), report)
             }
             val cells = costs.measure("compare-target-grid") {
-                targets.flatMap { (id, pair) -> plan.samplePrefixes.map { prefix ->
-                    val oldRows = mutableListOf<SavedRootRegretRow>(); val prodRows = mutableListOf<SavedRootRegretRow>()
-                    val ranks = roots.map { root ->
-                        val features = rootActionKernelFeatures(root.information, root.reconstructedCandidates)
-                        fun choice(model: CompiledRootActionKernel): String { val scores = model.scores(features); return root.reconstructedCandidates[scores.indices.maxBy { scores[it] }].signature }
-                        val candidate = choice(newModel); val old = choice(oldModel)
-                        val production = requireNotNull(control.rows.single { it.rootId == root.rootId }.chosen).signature
-                        val values = terminalTargetPrefixValues(pair.second, root.rootId, prefix)
-                        fun row(base: String): SavedRootRegretRow { val (b, c, d) = savedRootReferenceComparison(values, base, candidate); return SavedRootRegretRow(root.rootId, root.seedGroupId, 0, base, candidate, b, c, d.average(), d) }
-                        oldRows += row(old); prodRows += row(production)
-                        val full = terminalTargetPrefixValues(baseline, root.rootId, requireNotNull(baseline.plan.terminalContinuation).samplesPerAction)
-                        fun means(reps: List<Map<String, Double>>) = reps.first().keys.associateWith { a -> reps.map { it.getValue(a) }.average() }
-                        targetRankingChange(root.rootId, root.seedGroupId, means(full), means(values))
-                    }
-                    TerminalTargetSensitivityCell(id, prefix, pair.first, terminalStudyComparison(oldRows), terminalStudyComparison(prodRows), ranks,
-                        ranks.groupBy { it.seedGroupId }.values.map { group -> group.map { it.reversedStrictPairs.toDouble()/it.actionPairs }.average() }.average(),
-                        ranks.count { (it.baselineBestActions intersect it.variantBestActions.toSet()).isEmpty() })
-                } }
+                val frozenRoots = freezeTerminalSensitivityChoices(roots, oldModel, newModel, control, baseline)
+                terminalSensitivityGrid(targets, plan.samplePrefixes, frozenRoots)
             }
             return TerminalTargetSensitivityReport(bindings.identity, source, plan, cells, costs.snapshot()).also {
-                writeJsonAtomically(destination.resolve("report.json"), it); finalizeStudyArtifacts(destination, bindings.identity)
+                writeJsonAtomically(destination.resolve("report.json"), it)
+                finalizeResearchWorkflowArtifacts(destination, bindings.identity)
             }
         } catch (failure: Exception) {
-            costs.persist(); writeTextAtomically(destination.resolve("failure.txt"), "${failure.javaClass.simpleName}: ${failure.message}\n"); throw failure
+            costs.persist()
+            writeTextAtomically(destination.resolve("failure.txt"), "${failure.javaClass.simpleName}: ${failure.message}\n")
+            throw failure
         }
+    }
+}
+
+
+/** Scoring depends on the root and frozen models, never on the target variant or sample prefix. */
+internal data class FrozenTerminalSensitivityRoot(
+    val rootId: String,
+    val seedGroupId: String,
+    val candidate: String,
+    val baseline: String,
+    val production: String,
+    val fullBaselineMeans: Map<String, Double>,
+)
+
+private fun freezeTerminalSensitivityChoices(
+    roots: List<RealGamePositionBankRoot>,
+    baselineModel: CompiledRootActionKernel,
+    candidateModel: CompiledRootActionKernel,
+    control: PositionBankScreenReport,
+    baselineTargets: PositionBankScreenReport,
+): List<FrozenTerminalSensitivityRoot> = roots.map { root ->
+    val features = rootActionKernelFeatures(root.information, root.reconstructedCandidates)
+    val signatures = root.reconstructedCandidates.map { it.signature }
+    val candidate = terminalModelChoice(signatures, candidateModel.scores(features))
+    val baseline = terminalModelChoice(signatures, baselineModel.scores(features))
+    val production = requireNotNull(control.rows.single { it.rootId == root.rootId }.chosen).signature
+    val fullBaselineValues = terminalTargetPrefixValues(
+        baselineTargets,
+        root.rootId,
+        requireNotNull(baselineTargets.plan.terminalContinuation).samplesPerAction,
+    )
+    FrozenTerminalSensitivityRoot(
+        rootId = root.rootId,
+        seedGroupId = root.seedGroupId,
+        candidate = candidate,
+        baseline = baseline,
+        production = production,
+        fullBaselineMeans = terminalRepetitionMeans(fullBaselineValues),
+    )
+}
+
+private fun terminalRepetitionMeans(repetitions: List<Map<String, Double>>): Map<String, Double> =
+    repetitions.first().keys.associateWith { action -> repetitions.map { it.getValue(action) }.average() }
+
+/** Pure, ordered grid evaluation. The full retained baseline remains the ranking reference in every cell. */
+internal fun terminalSensitivityGrid(
+    targets: Map<String, TerminalTargetStage>,
+    samplePrefixes: List<Int>,
+    roots: List<FrozenTerminalSensitivityRoot>,
+): List<TerminalTargetSensitivityCell> = targets.flatMap { (id, target) ->
+    samplePrefixes.map { prefix ->
+        val oldRows = mutableListOf<SavedRootRegretRow>()
+        val productionRows = mutableListOf<SavedRootRegretRow>()
+        val rankings = roots.map { root ->
+            val values = terminalTargetPrefixValues(target.report, root.rootId, prefix)
+            oldRows += terminalTargetRegretRow(root.rootId, root.seedGroupId, values, root.baseline, root.candidate)
+            productionRows += terminalTargetRegretRow(root.rootId, root.seedGroupId, values, root.production, root.candidate)
+            targetRankingChange(root.rootId, root.seedGroupId, root.fullBaselineMeans, terminalRepetitionMeans(values))
+        }
+        TerminalTargetSensitivityCell(
+            variantId = id,
+            samplesPerAction = prefix,
+            targets = target.reference,
+            candidateVersusOld = terminalTargetComparison(oldRows),
+            candidateVersusProduction = terminalTargetComparison(productionRows),
+            rankings = rankings,
+            equalGroupStrictReversalFraction = rankings.groupBy { it.seedGroupId }.values.map { group ->
+                group.map { it.reversedStrictPairs.toDouble() / it.actionPairs }.average()
+            }.average(),
+            disjointBestActionSets = rankings.count {
+                (it.baselineBestActions intersect it.variantBestActions.toSet()).isEmpty()
+            },
+        )
     }
 }
