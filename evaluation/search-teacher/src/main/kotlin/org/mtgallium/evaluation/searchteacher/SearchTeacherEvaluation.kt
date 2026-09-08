@@ -87,6 +87,13 @@ internal fun runSearchTeacher(root: Path, args: Array<String>) {
         println("Terminal prediction diagnostic ${report.identity}: ${report.roots.size} development roots; descriptive only")
         return
     }
+    if (options.suite == "direct-attack-kernel-gameplay") {
+        val plan = evidenceJson.decodeFromString<DirectAttackKernelGameplayPlan>(Files.readString(requireNotNull(options.profilePath)))
+        val report = DirectAttackKernelGameplayRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+        println("Direct attack gameplay " + report.identity + ": comparator=" + plan.comparator +
+            "; passed=" + report.comparisonStrengthAndCostGatePassed)
+        return
+    }
     if (options.suite == "attack-kernel-gameplay") {
         val plan = evidenceJson.decodeFromString<AttackKernelGameplayPlan>(Files.readString(requireNotNull(options.profilePath)))
         val report = AttackKernelGameplayRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))

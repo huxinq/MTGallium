@@ -108,6 +108,75 @@ entire requested plan, and a reused fit must match the exact appended training
 plan. Reuse preserves original producer identities and does not count historical
 samples or fitting as new work.
 
+## Direct attack deployment comparisons
+
+`direct-attack-kernel-gameplay` uses a separate protocol from the historical
+`attack-kernel-gameplay` rollout experiment. Supply `--profile`, `--output` and
+`--deck-manifest`. The JSON profile is a `DirectAttackKernelGameplayPlan`:
+
+| Field | Meaning |
+| --- | --- |
+| `build` | Verified clean build for this gameplay source and engine |
+| `screen`, `screenManifestSha256` | Exact finalized direct development screen reference and manifest hash |
+| `comparator` | `PLANNER` or `DIRECT_HEURISTIC`; one comparison per plan and output |
+| `baseSeed` | Explicit shared seed basis; each comparator derives a separate domain |
+| `rule` | Explicit prospective parity rule, error allocations, bets and maximum pairs |
+| `maximumWallSeconds`, `absoluteDeadlineEpochSeconds` | Relative and absolute invocation limits; the earlier deadline applies |
+| `workers` | Worker-sized dispatch chunks, from 1 through 8 |
+
+Admission requires `DEVELOPMENT_GATE_PASSED_GAMEPLAY_REQUIRED`, an exactly
+reproduced positive gate over the planned roots, authenticated source/bank/fit
+artifacts and the same engine as the screen. `DEVELOPMENT_GATE_FAILED`, partial
+screens and inconsistent gates are refused before gameplay output is created.
+Changing the gate or screen identity to admit a failed fit is not supported.
+
+The candidate copies the screen's frozen fast16/V2 search configuration
+(8 particles, 56 simulations) and casting continuation fit for both rollouts,
+then enables that screen's frozen direct attack fit. The `PLANNER` control keeps
+the copied search policy; `DIRECT_HEURISTIC` samples the copied frozen fast
+incumbent on the identical complete attack/decline scope. All other decisions
+retain search fallback, and both rollout policies remain fixed. The fit,
+scorer, scope, direct sampling rule and incumbent behavior stay bound in the
+policy evidence identity.
+
+Freeze both intended comparisons before inspecting their outcomes. Each planned seed is
+checked against the entire allowed 256-pair domain for the opposite comparator.
+Each actual gameplay seed group must also be absent from the
+fit's recorded training and the entire source bank, including roots not selected
+for the screen. These exclusions do not establish absence of other campaign
+inspection or supply a campaign-wide multiplicity correction.
+
+The rule requires both directional boundaries at `.5`, disables practical
+acceptance and futility, and allows at most 256 complete seat-swapped pairs.
+The first sequential crossing owns strength inference. A combined pass requires
+`ABOVE_NULL` with the confidence-sequence lower bound above `.5`, at least one
+learned direct selection in the inspected prefix, and, for the same-role
+comparison, at least one control direct selection there. Exposure only in
+overshoot cannot satisfy this condition; planner control direct selections
+anywhere invalidate the treatment.
+
+Cumulative cost uses the arena's common all-selection measurement for both
+players: from before actual information/expansion construction through selection,
+including direct scoring and failed selection calls. It includes **all executed
+games**, including stopped/invalid work and dispatched overshoot. Every game must
+identify both policies once and retain valid measured timings. The report keeps
+executed and measured game/attempt counts, per-game totals, cumulative time,
+per-game means and the candidate/control ratio. Null timing is unknown, a genuine
+empty measured list is zero, and an absent or nonpositive control denominator
+cannot pass. Search-only latency retains its separate meaning.
+
+The combined gate requires a ratio at most `1.10`, complete valid gameplay,
+unchanged treatment and no exceeded runtime limit. The runner checks the deadline
+before dispatch and after each completed chunk; it does not interrupt a running
+chunk. Runtime limits are at most 7,200 seconds, and an overrun prevents a pass.
+All completed chunk manifests and overshoot remain retained. Existing output is
+refused; inspect retained work instead of restarting its test.
+
+A pass concerns the declared comparator only. Separate planner and stochastic
+same-role comparisons address deployment and attribution; recursive learnability
+would still require a further improvement over a learned incumbent. This command
+does not fit a new model, pool comparator outcomes or promote a policy.
+
 ## Campaign population usage
 
 `campaign-data-use --profile use.json --output REGISTRY` appends one immutable,

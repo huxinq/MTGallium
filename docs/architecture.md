@@ -191,6 +191,26 @@ construction, and is reported as accumulated decision computation per game.
 Legacy search-only latency fields remain separate. Absent configuration preserves
 historical policy identities and serialization; historical unmeasured cost is null.
 
+A separate direct attack gameplay protocol admits only a finalized development
+screen whose passed gate reproduces over its exact planned roots. A failed screen
+remains ineligible. It copies that screen's frozen search, evaluator and both
+rollout configurations, changing only the direct attack role. The planner and
+same-role stochastic heuristic are separate prospectively declared comparisons;
+new game seed groups exclude the fit's training and the entire screen bank, and
+the two comparator seed domains are checked for overlap across the bounded schedule.
+
+Strength uses the first sequential stopping prefix at parity. Learned direct
+selection must occur within that prefix; the same-role comparison also requires
+heuristic direct selection there. Later dispatched work cannot supply missing
+exposure or alter that prefix. Every executed game, including stopped or invalid
+work and overshoot, contributes to cumulative decision computation per game.
+Missing or malformed timing, invalid gameplay, changed treatment, exceeded runtime
+or a candidate/control cost ratio above 1.10 prevents a combined pass. Empty
+measured call lists mean zero work; historical null timing remains unknown. These
+records use a new protocol and leave historical rollout/search-cost artifacts
+unchanged. A passed comparison does not establish recursive learnability or
+promote a policy automatically.
+
 Production tree reuse remains disabled until visits can be justified under the
 current information-state search distribution. Terminal payoff,
 information-state evaluation, sampled-world evaluation, and bounded-rollout
