@@ -135,6 +135,11 @@ def preflight(path):
     else:
         native(['build-verify', attempt / 'build-reference.json'], request['build']['directory'], request['execution'])
         gate = 'BUILD_AND_PLAN_CHECKED; ' + request['gate'] + ' remains inside launch'
+        if request['kind'] == 'factual-residual-study' and read_json(attempt / 'plan.json').get('admissionParent'):
+            checked = native(['factual-residual-continuation-check', attempt / 'plan.json', attempt / 'deck.json'],
+                             request['build']['directory'], request['execution'])
+            atomic_json(attempt / 'continuation-check.json', checked)
+            gate += '; ADMISSION_PARENT_CHECKED'
     atomic_json(attempt / 'status.json', dict(processState='PREPARED', updatedAtUtc=now(), preflight=gate))
     return dict(attempt=str(attempt), requestSha256=digest(attempt / 'request.json'), preflight=gate,
                 next=f'research launch {attempt}')

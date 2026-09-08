@@ -366,6 +366,18 @@ materializing another complete trajectory JSON tree. Root preparation authentica
 the complete trajectory, then retains only the selected information digest and
 required replay metadata through search; unrelated trajectory rows are released.
 
+An explicitly configured `admissionParent` can link one new attempt to a finalized,
+unfitted admission failure. The source verifies the parent study, build, original
+inputs, exact allocation and every registered admitted trajectory. Reused entries
+retain their original references and record `reusedFromStudyIdentity`; only missing
+coordinates are admitted under the new producer. Refused or partial trajectories,
+post-corpus results, changed scientific plans and chained continuations are rejected.
+All 64 coordinates remain required. The continuation's `maximumSeconds` plus the
+rounded-up parent elapsed time must fit the parent's original cap. This capability
+does not authorize retries: use requires owner authorization covering continuation.
+Workbench `preflight` authenticates the parent without replay or fitting, and launch
+rechecks it within the continuation deadline. Frozen parent artifacts remain intact.
+
 The sole fit uses at most 32 equally spaced predecision frames per training leg,
 including endpoints, with equal seed-group, leg and selected-frame weight. Its
 target is the same viewer's actual terminal payoff minus visible V2. Fixed ridge

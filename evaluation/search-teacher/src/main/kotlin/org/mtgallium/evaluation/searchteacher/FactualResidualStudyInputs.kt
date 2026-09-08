@@ -53,11 +53,14 @@ internal data class FactualResidualStudyPlan(
     // Omission preserves the original plan bytes and admission concurrency.
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val admissionWorkers: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val admissionParent: FactualResidualInput? = null,
 ) {
     val effectiveAdmissionWorkers: Int get() = admissionWorkers ?: workers
 
     init {
-        require(schemaVersion == 1 && workers in 1..8 && maximumSeconds == 1800)
+        require(schemaVersion == 1 && workers in 1..8)
+        require(if (admissionParent == null) maximumSeconds == 1800 else maximumSeconds in 1..1800)
         require(effectiveAdmissionWorkers in 1..workers) { "Admission workers must be within the total worker limit" }
         require(trainingGroups == 16 && screeningGroups == 16 && maximumFittingFramesPerLeg == 32)
         require(searchRepetitions == 2 && minimumChangedGroups == 8 && maximumSelectionCostRatio == 1.10)

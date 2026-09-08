@@ -3,6 +3,7 @@ package org.mtgallium.evaluation.searchteacher
 import com.wingedsheep.engine.registry.CardRegistry
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import org.mtgallium.agent.searchteacher.*
@@ -16,8 +17,11 @@ internal data class FactualResidualCorpusEntry(
     val disposition: FactualIncumbentTrajectoryDisposition?,
     val rows: Int,
     val failure: String?,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val reusedFromStudyIdentity: String? = null,
 ) {
     init {
+        require(reusedFromStudyIdentity == null || (disposition == FactualIncumbentTrajectoryDisposition.ADMITTED && trajectory != null))
         require(rows >= 0)
         if (disposition == FactualIncumbentTrajectoryDisposition.ADMITTED) {
             require(trajectory != null && rows == allocation.semanticDecisions && failure == null)
@@ -109,7 +113,8 @@ internal class FactualResidualStudy(private val repository: Path, private val re
         require(producer.checkedOutEngineCommit == FACTUAL_INCUMBENT_ARGENTUM_REVISION)
         val bindings = factualResidualStudyBindings(plan, producer, runtime, manifest)
         val inputs = loadFactualResidualInputs(plan, manifest)
-        val inputPaths = inputs.sources.values.map { Path.of(it.directory) } + listOf(Path.of(plan.inventory.directory), Path.of(plan.build.directory))
+        val inputPaths = inputs.sources.values.map { Path.of(it.directory) } + listOf(Path.of(plan.inventory.directory), Path.of(plan.build.directory)) +
+            listOfNotNull(plan.admissionParent?.let { Path.of(it.directory) })
         require(inputPaths.none { destination.startsWith(it) || it.startsWith(destination) })
         Files.createDirectories(destination)
         writeJsonAtomically(destination.resolve("plan.json"), plan)
@@ -124,6 +129,10 @@ internal class FactualResidualStudy(private val repository: Path, private val re
         try {
             deadline.requireRemaining()
             val allocation = allocateFactualResidualStudy(plan, inputs, bindings.identity)
+            val continuation = plan.admissionParent?.let {
+                loadFactualResidualContinuation(it, plan, allocation, manifest, inputs)
+            }
+            deadline.requireRemaining()
             val allocationPath = destination.resolve("allocation")
             writeJsonAtomically(allocationPath.resolve("report.json"), allocation)
             finalizeResearchWorkflowArtifacts(allocationPath, allocation.bindings.identity)
@@ -134,6 +143,7 @@ internal class FactualResidualStudy(private val repository: Path, private val re
             val corpusPath = destination.resolve("corpus")
             val entries = parallelMapOrdered(allocation.games.size, plan.effectiveAdmissionWorkers) { index ->
                 val game = allocation.games[index]
+                continuation?.entries?.get(index)?.let { return@parallelMapOrdered it }
                 try {
                     deadline.requireRemaining()
                     val parent = inputs.parents.getValue(game.sourceRunIdentity)

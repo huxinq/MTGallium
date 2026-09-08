@@ -200,6 +200,23 @@ internal fun runResearchWorkbench(root: Path, args: Array<String>): JsonElement?
             workbenchVerify(path(1), args.getOrNull(2))
         }
         "build-verify" -> { arity(2, "build-verify BUILD_REFERENCE_JSON"); evidenceJson.encodeToJsonElement(verifyBuild(1)) }
+        "factual-residual-continuation-check" -> {
+            arity(3, "factual-residual-continuation-check PLAN DECK")
+            val plan = evidenceJson.decodeFromString<FactualResidualStudyPlan>(Files.readString(path(1)))
+            val parent = requireNotNull(plan.admissionParent)
+            val deck = loadDeckManifest(path(2))
+            val inputs = loadFactualResidualInputs(plan, deck)
+            val allocation = allocateFactualResidualStudy(plan, inputs, parent.identity)
+            val continuation = loadFactualResidualContinuation(parent, plan, allocation, deck, inputs)
+            buildJsonObject {
+                put("validation", "authenticated-admission-continuation")
+                put("parentIdentity", parent.identity)
+                put("reusedGames", continuation.entries.size)
+                put("missingGames", allocation.games.size - continuation.entries.size)
+                put("maximumSeconds", plan.maximumSeconds)
+                put("interpretation", "Retained admission identity and allocation check only; no replay, fitting or scientific gate pass.")
+            }
+        }
         "preflight" -> {
             arity(4, "preflight PROFILE DIRECTORY BUILD_REFERENCE_JSON")
             verifyBuild(3)

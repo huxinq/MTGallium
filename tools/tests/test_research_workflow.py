@@ -105,6 +105,31 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(['plan', 'build-verify'], [call[0] for call in self.calls])
         self.assertFalse((attempt / 'output').exists())
 
+    def test_continuation_preflight_authenticates_parent_without_creating_output(self):
+        self.plan.write_text('{"admissionParent":{"identity":"synthetic-parent"}}')
+        attempt = preparation.freeze(self.draft('factual-residual-study'))
+        result = preparation.preflight(attempt)
+        self.assertIn('ADMISSION_PARENT_CHECKED', result['preflight'])
+        self.assertEqual('factual-residual-continuation-check', self.calls[-1][0])
+        self.assertEqual(attempt / 'deck.json', self.calls[-1][2])
+        self.assertTrue((attempt / 'continuation-check.json').is_file())
+        self.assertFalse((attempt / 'output').exists())
+        self.assertFalse((attempt / 'submitted.json').exists())
+
+    def test_continuation_preflight_refusal_does_not_record_success(self):
+        self.plan.write_text('{"admissionParent":{"identity":"synthetic-parent"}}')
+        attempt = preparation.freeze(self.draft('factual-residual-study'))
+        def refusing(command, *args):
+            if command[0] == 'factual-residual-continuation-check':
+                raise storage.Refusal('parent changed')
+            return self.fake_native(command, *args)
+        with patch.object(preparation, 'native', side_effect=refusing):
+            with self.assertRaisesRegex(storage.Refusal, 'parent changed'):
+                preparation.preflight(attempt)
+        self.assertFalse((attempt / 'continuation-check.json').exists())
+        self.assertNotIn('preflight', storage.read_json(attempt / 'status.json'))
+        self.assertFalse((attempt / 'output').exists())
+
     def test_changed_frozen_plan_refuses_and_changed_draft_does_not_relabel_attempt(self):
         draft = self.draft()
         attempt = preparation.freeze(draft)
