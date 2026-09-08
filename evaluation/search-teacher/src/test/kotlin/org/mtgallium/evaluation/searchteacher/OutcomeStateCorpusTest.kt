@@ -63,6 +63,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.decodeFromString
@@ -466,6 +467,76 @@ class OutcomeStateCorpusTest {
         val exact = compare(reconstructed, reconstructed)
         assertEquals(null, exact.difference)
         assertTrue(exact.legacyTimeLordTypeLineNormalizations.isEmpty())
+    }
+
+    @Test
+    fun `current 3757 Time Lord codec roundtrip retains distinct scoped audit provenance`() {
+        val fixture = legacyTimeLordFixture()
+        val action = PassPriority(fixture.playerId)
+        val decoded = CanonicalReplayJson.decodeFromString(GameEvent.serializer(),
+            CanonicalReplayJson.encodeToString(GameEvent.serializer(), fixture.reconstructedEvent))
+        assertEquals(fixture.historicalEvent, decoded)
+        assertNotEquals(fixture.reconstructedEvent, decoded)
+        val comparison = recordedReplayEventComparison(listOf(decoded), listOf(fixture.reconstructedEvent),
+            action, action, fixture.base, fixture.base, fixture.historicalState, fixture.reconstructedState)
+        assertEquals(null, comparison.difference)
+        val equivalence = RecordedReplayStateEquivalence.currentEngine(FACTUAL_INCUMBENT_ARGENTUM_REVISION)
+        assertEquals(null, equivalence.initialDifference(fixture.base, fixture.base))
+        assertEquals(null, equivalence.transitionDifference(action, action,
+            listOf(decoded), listOf(fixture.reconstructedEvent), fixture.base, fixture.base,
+            fixture.historicalState, fixture.reconstructedState, true, true, 0,
+            comparison.legacyTimeLordTypeLineNormalizations))
+        assertEquals(null, equivalence.finalDifference(fixture.historicalState, fixture.reconstructedState, 1))
+        assertEquals(null, equivalence.safeInspectionBundleDifference(fixtureInspectionBundle()))
+        val audit = equivalence.completedAudit()
+        assertEquals(0, audit.legacyTimeLordTypeLineNormalizationCount)
+        assertEquals(0, audit.activeLegacyTimeLordTypeLineMappingsAtFinal)
+        val codec = requireNotNull(audit.currentEngineTimeLordCodec)
+        assertEquals(FACTUAL_INCUMBENT_ARGENTUM_REVISION, codec.engineRevision)
+        assertEquals("argentum-3757-event-correlated-time-lord-codec-equivalence-v1", codec.algorithm)
+        assertEquals(1, codec.normalizationCount)
+        assertEquals(1, codec.activeMappingsAtFinal)
+        assertEquals(fixture.entityId.value, codec.normalizations.single().entityId)
+        audit.requireForRawTransitionCount(1)
+        assertFailsWith<IllegalArgumentException> { audit.requireForRawTransitionCount(0) }
+        val encoded = evidenceJson.encodeToString(audit)
+        assertEquals(audit, evidenceJson.decodeFromString<OutcomeStateReplayCompatibilityAudit>(encoded))
+        assertTrue(encoded.contains("currentEngineTimeLordCodec"))
+        assertFailsWith<IllegalArgumentException> { codec.copy(normalizationCount = 0) }
+        assertFailsWith<IllegalArgumentException> { codec.copy(engineRevision = "unverified-engine") }
+    }
+
+    @Test
+    fun `current codec equality permits identical typed states but refuses uncorrelated and payload differences`() {
+        val fixture = legacyTimeLordFixture()
+        fun current() = RecordedReplayStateEquivalence.currentEngine(FACTUAL_INCUMBENT_ARGENTUM_REVISION)
+        assertEquals(null, current().initialDifference(fixture.reconstructedState, fixture.reconstructedState))
+        assertNotNull(current().initialDifference(fixture.historicalState, fixture.reconstructedState))
+        // Historical mode still refuses an uncorrelated Time Lord occurrence even when exactly equal.
+        assertNotNull(RecordedReplayStateEquivalence(historicalProjectionAuthority())
+            .initialDifference(fixture.reconstructedState, fixture.reconstructedState))
+        val changed = fixture.reconstructedState.copy(entities = mapOf(fixture.entityId to
+            ComponentContainer.of(LastKnownPermanentComponent(fixture.reconstructedSnapshot.copy(power = 9)))))
+        assertNotNull(current().initialDifference(fixture.reconstructedState, changed))
+        val action = PassPriority(fixture.playerId)
+        fun compare(event: ZoneChangeEvent) = recordedReplayEventComparison(
+            listOf(fixture.historicalEvent), listOf(event), action, action,
+            fixture.base, fixture.base, fixture.historicalState, fixture.reconstructedState)
+        assertNotNull(compare(fixture.reconstructedEvent.copy(entityName = "different payload")).difference)
+        val otherSubtype = fixture.reconstructedSnapshot.copy(typeLine = requireNotNull(fixture.reconstructedSnapshot.typeLine)
+            .copy(subtypes = setOf(Subtype("Time Lord"), Subtype("Goblin"))))
+        assertNotNull(compare(fixture.reconstructedEvent.copy(lastKnown = otherSubtype)).difference)
+        val normalization = compare(fixture.reconstructedEvent).legacyTimeLordTypeLineNormalizations
+        // An exact matching event cannot authorize a different state payload at its correlated path.
+        assertNotNull(current().transitionDifference(action, action,
+            listOf(fixture.historicalEvent), listOf(fixture.reconstructedEvent), fixture.base, fixture.base,
+            fixture.historicalState, changed, true, true, 0, normalization))
+        // Nor can it authorize the same mismatch under a different entity's state path.
+        val wrongPath = fixture.reconstructedState.copy(entities = mapOf(EntityId.of("other") to
+            ComponentContainer.of(LastKnownPermanentComponent(fixture.reconstructedSnapshot))))
+        assertNotNull(current().transitionDifference(action, action,
+            listOf(fixture.historicalEvent), listOf(fixture.reconstructedEvent), fixture.base, fixture.base,
+            fixture.historicalState, wrongPath, true, true, 0, normalization))
     }
 
     @Test

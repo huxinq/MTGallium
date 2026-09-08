@@ -144,15 +144,15 @@ class FactualIncumbentTrajectoryTest {
     }
 
     @Test
-    fun `historical projection authority remains fixed and current authority refuses legacy normalization`() {
+    fun `historical projection authority remains fixed and current authority refuses uncorrelated codec normalization`() {
         assertFails { RecordedReplayStateEquivalence(historicalProjectionAuthority().copy(argentumCommit = FACTUAL_INCUMBENT_ARGENTUM_REVISION)) }
         assertFails { RecordedReplayStateEquivalence.currentEngine(OUTCOME_STATE_CORPUS_ARGENTUM_COMMIT) }
         val current = RecordedReplayStateEquivalence.currentEngine(FACTUAL_INCUMBENT_ARGENTUM_REVISION)
         val state = GameState()
         assertNull(current.initialDifference(state, state))
-        assertFails { current.transitionDifference(PassPriority(EntityId("p")), PassPriority(EntityId("p")),
+        assertNotNull(current.transitionDifference(PassPriority(EntityId("p")), PassPriority(EntityId("p")),
             emptyList(), emptyList(), state, state, state, state, true, true, 0,
-            listOf(RecordedReplayLegacyTypeLineNormalization(0, EntityId("card")))) }
+            listOf(RecordedReplayLegacyTypeLineNormalization(0, EntityId("card")))))
     }
 
     private class FixtureWorld(val f: Fixture, val wrongViewer: Boolean = false, val unsupportedAt: Int? = null,
