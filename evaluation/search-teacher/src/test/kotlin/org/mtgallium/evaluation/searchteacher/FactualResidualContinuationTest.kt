@@ -35,7 +35,7 @@ class FactualResidualContinuationTest {
             assertEquals(f.runtime, original.runtime)
             assertEquals(f.parentPlan.build, original.request.build)
         }
-        val completeCoordinates = f.allocation.games.mapIndexed { index, game -> result.entries[index] ?: 
+        val completeCoordinates = f.allocation.games.mapIndexed { index, game -> result.entries[index] ?:
             FactualResidualCorpusEntry(game, null, null, 0, "Admission remains pending") }
         val corpus = FactualResidualCorpusReport(ResearchRunBindings(protocol = "synthetic-corpus-v1", material = mapOf("fixture" to "synthetic")),
             requireNotNull(f.parentReport.allocation), completeCoordinates)

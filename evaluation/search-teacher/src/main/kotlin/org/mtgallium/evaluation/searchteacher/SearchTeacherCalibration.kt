@@ -109,8 +109,14 @@ internal data class SearchTeacherCalibrationPolicy(
     val directArgentumHeuristic: Boolean = false,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val directAttackKernelFit: RootKernelFitReference? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directAttackHeuristic: Boolean = false,
 ) {
     init {
+        require(!directAttackHeuristic || (directAttackKernelFit == null && !directArgentumHeuristic &&
+            attackRootKernelRolloutFit == null && fastRootKernelRolloutFit != null)) {
+            "Direct attack heuristic requires the frozen fast root incumbent and excludes other direct or attack rollout modes"
+        }
         require(directAttackKernelFit == null || (!directArgentumHeuristic && attackRootKernelRolloutFit == null)) {
             "Direct attack deployment cannot combine with a learned attack rollout or direct heuristic"
         }
@@ -161,19 +167,25 @@ internal data class SearchTeacherCalibrationPolicy(
             rolloutHorizonSettlementOverride),
     )
 
-    fun policy(baseSeed: Long) = if (directArgentumHeuristic) ArenaPolicySpec(id, ArenaPolicyKind.HEURISTIC) else ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
-        informationEvaluator = informationEvaluator(),
-        directRootSelectionPolicy = directAttackKernelFit?.loadDirectAttackPolicy(),
-        rootRolloutPolicy = fastRootKernelRolloutFit?.loadFastRolloutPolicy()?.let { incumbent ->
-            attackRootKernelRolloutFit?.loadAttackRolloutPolicy(incumbent) ?: incumbent
-        } ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
-            it.load()
-        } ?: configuredRolloutPolicy(
-            "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),
-        ),
-        opponentRolloutPolicy = fastOpponentKernelRolloutFit?.loadFastRolloutPolicy() ?: configuredRolloutPolicy(
-            "opponent", opponentRolloutPolicy, SearchTeacherSearchFactory.opponentRolloutPolicy(),
-        ))
+    fun policy(baseSeed: Long): ArenaPolicySpec {
+        if (directArgentumHeuristic) return ArenaPolicySpec(id, ArenaPolicyKind.HEURISTIC)
+        val fastRootIncumbent = fastRootKernelRolloutFit?.loadFastRolloutPolicy()
+        return ArenaPolicySpec(id, ArenaPolicyKind.SEARCH, parameters = parameters(baseSeed),
+            informationEvaluator = informationEvaluator(),
+            directRootSelectionPolicy = directAttackKernelFit?.loadDirectAttackPolicy()
+                ?: if (directAttackHeuristic) DirectAttackHeuristicPolicy(requireNotNull(fastRootIncumbent)) else null,
+            rootRolloutPolicy = fastRootIncumbent?.let { incumbent ->
+                attackRootKernelRolloutFit?.loadAttackRolloutPolicy(incumbent) ?: incumbent
+            } ?: rootKernelRolloutFit?.loadRootRolloutPolicy() ?: rootCloningFit?.let {
+                it.load()
+            } ?: configuredRolloutPolicy(
+                "root", rootRolloutPolicy, SearchTeacherSearchFactory.rootRolloutPolicy(),
+            ),
+            opponentRolloutPolicy = fastOpponentKernelRolloutFit?.loadFastRolloutPolicy() ?: configuredRolloutPolicy(
+                "opponent", opponentRolloutPolicy, SearchTeacherSearchFactory.opponentRolloutPolicy(),
+            ))
+
+    }
 
     fun informationEvaluator(): ConfiguredInformationStateEvaluator? =
         tacticalEvaluator?.informationEvaluator() ?: evaluator?.let(::ConfiguredMonoRedInformationEvaluator)

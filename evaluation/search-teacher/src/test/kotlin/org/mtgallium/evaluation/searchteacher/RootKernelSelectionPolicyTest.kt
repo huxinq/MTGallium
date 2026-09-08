@@ -156,6 +156,31 @@ class RootKernelSelectionPolicyTest {
         assertFails { plan.copy(mode = PositionBankScreenMode.FEATURES) }
     }
 
+    @Test fun `direct heuristic wiring preserves both frozen rollout behaviors and legacy policy identity`() {
+        val world = world()
+        val info = world.informationState(requireNotNull(world.actorToAct()))
+        val features = rootActionKernelFeatures(info, world.expandChoices().candidates)
+        val fit = fixture(RootActionKernelModel(ridge = .001, centers = features,
+            coefficients = List(features.size) { 0.0 }))
+        val config = SearchTeacherCalibrationPolicy("control", 1, 1, 1, 1.4, true, 1.0,
+            fastRootKernelRolloutFit = fit, fastOpponentKernelRolloutFit = fit)
+        val control = config.policy(71L)
+        val direct = config.copy(directAttackHeuristic = true).policy(71L)
+        assertNull(control.directRootSelectionPolicy)
+        assertEquals(control.effectiveRootRolloutPolicy().behaviorSpecification,
+            direct.effectiveRootRolloutPolicy().behaviorSpecification)
+        assertEquals(control.effectiveOpponentRolloutPolicy().behaviorSpecification,
+            direct.effectiveOpponentRolloutPolicy().behaviorSpecification)
+        assertEquals(control.parameters, direct.parameters)
+        assertEquals(DirectAttackHeuristicPolicy(fit.loadFastRolloutPolicy()).configurationId,
+            direct.directRootSelectionPolicy!!.configurationId)
+        val json = evidenceJson.encodeToString(config)
+        assertFalse("directAttackHeuristic" in json)
+        val decoded = evidenceJson.decodeFromString<SearchTeacherCalibrationPolicy>(json)
+        assertEquals(control, decoded.policy(71L).copy(rootRolloutPolicy = control.rootRolloutPolicy,
+            opponentRolloutPolicy = control.opponentRolloutPolicy))
+    }
+
     /** Entirely synthetic source/report metadata; this fixture is not historical evidence. */
     private fun fixture(model: RootActionKernelModel, protocol: String = "root-action-kernel-fit-v1", actions: Int = model.centers.size,
         bindWrongPlan: Boolean = false, terminal: Boolean = false, wrongTarget: Boolean = false): RootKernelFitReference {

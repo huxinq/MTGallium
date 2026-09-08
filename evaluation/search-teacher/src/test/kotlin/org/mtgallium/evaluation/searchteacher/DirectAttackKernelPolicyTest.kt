@@ -43,6 +43,32 @@ class DirectAttackKernelPolicyTest {
                 val model = RootActionKernelModel(ridge = .001,
                     centers = listOf(features[preferred], features[controlIndex]), coefficients = listOf(10.0, -10.0))
                 val direct = DirectAttackKernelPolicy(model, "synthetic-fit", "f".repeat(64))
+                val incumbent = FastKernelRolloutPolicy(model, "synthetic-incumbent", "a".repeat(64))
+                val heuristic = DirectAttackHeuristicPolicy(incumbent)
+                val distribution = incumbent.distribution(info, expansion.candidates, 0L)
+                val mode = distribution.entries.maxBy { it.probability }.value
+                val draws = (0L until 128L).map { seed ->
+                    val choice = heuristic.select({ info }, expansion, seed)
+                    assertEquals(choice, heuristic.select({ info }, expansion, seed))
+                    assertEquals(sampleOpponentPolicyDistribution(distribution,
+                        ComponentSeeds.derive(seed, "direct-attack-heuristic-sample-v1")), choice)
+                    choice
+                }
+                assertTrue(draws.any { it != mode }, "Control must sample non-modal actions")
+                assertEquals(distribution.entries.filter { it.probability > 0 }.map { it.value }.toSet(), draws.toSet())
+                assertFailsWith<IllegalStateException> { heuristic.select({ info }, expansion) }
+                assertFailsWith<IllegalArgumentException> {
+                    heuristic.select({ info.copy(actingPlayerId = "other") }, expansion, 0L)
+                }
+                assertEquals(heuristic.configurationId, DirectAttackHeuristicPolicy(
+                    FastKernelRolloutPolicy(model, "synthetic-incumbent", "a".repeat(64))).configurationId)
+                assertNotEquals(heuristic.configurationId, DirectAttackHeuristicPolicy(
+                    FastKernelRolloutPolicy(model, "changed-incumbent", "a".repeat(64))).configurationId)
+                val heuristicSession = session(heuristic)
+                val heuristicSelection = heuristicSession.select(world, actor, 27L)
+                assertEquals(heuristic.select({ info }, expansion, 27L), heuristicSelection.choice)
+                assertEquals(SearchTeacherSelectionKind.DIRECT_POLICY_ACTION, heuristicSelection.kind)
+                assertNull(heuristicSelection.search)
                 val candidateSession = session(direct)
                 val fingerprint = world.freshAuthoritativeFingerprintForHost()
                 val selected = candidateSession.select(world, actor, 27L)
@@ -66,6 +92,16 @@ class DirectAttackKernelPolicyTest {
                 val pass = SemanticChoice.create(SemanticChoiceKind.ACTION, SemanticOperationFamily.PASS_PRIORITY,
                     display = SemanticChoiceDisplay("Pass"), canonicalPayload = kotlinx.serialization.json.JsonObject(emptyMap()))
                 assertNull(direct.select({ error("Other action menus are out of scope") }, expansion.copy(candidates = listOf(pass))))
+                for (outOfScope in listOf(
+                    expansion.copy(isExhaustive = false, isProfileExhaustive = false,
+                        omissionReasons = setOf(PolicyExpansionOmissionReason.SOURCE_NON_EXHAUSTIVE)),
+                    expansion.copy(omissionReasons = setOf(PolicyExpansionOmissionReason.SOURCE_NON_EXHAUSTIVE)),
+                    expansion.copy(candidates = mandatory), expansion.copy(candidates = large, estimatedCandidateCount = 9),
+                    expansion.copy(candidates = listOf(pass)),
+                )) {
+                    assertNull(heuristic.select({ error("Out-of-scope control must not construct information") }, outOfScope, 27L))
+                    assertNull(direct.select({ error("Out-of-scope kernel must not construct information") }, outOfScope, 27L))
+                }
                 val fallbackSession = session(object : DirectRootSelectionPolicy {
                     override val configurationId = "always-delegate-fixture"
                     override fun select(information: () -> PolicyInformationState, expansion: PolicyExpansion): SemanticChoice? = null
@@ -135,10 +171,33 @@ class DirectAttackKernelPolicyTest {
         assertFailsWith<IllegalArgumentException> { policy.copy(directArgentumHeuristic = true) }
     }
 
+    @Test fun `heuristic control requires fast incumbent and refuses ignored or conflicting settings`() {
+        val fit = RootKernelFitReference("/tmp/synthetic-fit", "research-run-v1-sha256:" + "a".repeat(64), "b".repeat(64))
+        val legacy = SearchTeacherCalibrationPolicy("control", 1, 1, 1, 1.4, true, 1.0)
+        assertFailsWith<IllegalArgumentException> { legacy.copy(directAttackHeuristic = true) }
+        val control = legacy.copy(fastRootKernelRolloutFit = fit, fastOpponentKernelRolloutFit = fit)
+        val direct = control.copy(directAttackHeuristic = true)
+        assertEquals(control, direct.copy(directAttackHeuristic = false))
+        assertEquals(direct, evidenceJson.decodeFromString(SearchTeacherCalibrationPolicy.serializer(),
+            evidenceJson.encodeToString(SearchTeacherCalibrationPolicy.serializer(), direct)))
+        assertFailsWith<IllegalArgumentException> { direct.copy(directAttackKernelFit = fit) }
+        assertFailsWith<IllegalArgumentException> { direct.copy(directArgentumHeuristic = true) }
+        assertFailsWith<IllegalArgumentException> { direct.copy(attackRootKernelRolloutFit = fit) }
+        assertFailsWith<IllegalArgumentException> { direct.copy(rootRolloutPolicy = SearchTeacherCalibrationRolloutPolicy.UNIFORM) }
+        val plan = PositionBankScreenPlan(bankDirectory = "/tmp/synthetic-bank", expectedBankIdentity = "bank",
+            partition = PositionBankScreenPartition.DEVELOPMENT, mode = PositionBankScreenMode.SEARCH,
+            rootLimit = 1, repetitions = 1, policies = listOf(PositionBankScreenPolicy(direct, MonoRedVisibleEvaluatorConfig())))
+        PositionBankScreenMode.entries.filter { it != PositionBankScreenMode.SEARCH }.forEach { mode ->
+            assertFailsWith<IllegalArgumentException> { plan.copy(mode = mode) }
+        }
+        assertFailsWith<IllegalArgumentException> { plan.copy(policies = listOf(plan.policies.single().copy(rootKernel = fit))) }
+    }
+
     @Test fun `absent direct configuration and decision timing preserve legacy serialization`() {
         val policy = SearchTeacherCalibrationPolicy("legacy", 1, 1, 1, 1.4, true, 1.0)
         val encoded = evidenceJson.encodeToString(SearchTeacherCalibrationPolicy.serializer(), policy)
         assertFalse(encoded.contains("directAttackKernelFit"))
+        assertFalse(encoded.contains("directAttackHeuristic"))
         assertEquals(policy, evidenceJson.decodeFromString(SearchTeacherCalibrationPolicy.serializer(), encoded))
         val seat = ArenaSeatDiagnostics("legacy")
         val seatEncoded = evidenceJson.encodeToString(ArenaSeatDiagnostics.serializer(), seat)

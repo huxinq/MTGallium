@@ -8,4 +8,8 @@ import org.mtgallium.agent.infoset.core.SemanticChoice
 interface DirectRootSelectionPolicy {
     val configurationId: String
     fun select(information: () -> PolicyInformationState, expansion: PolicyExpansion): SemanticChoice?
+
+    /** Per-decision seed; deterministic implementations retain their original behavior. */
+    fun select(information: () -> PolicyInformationState, expansion: PolicyExpansion, searchSeed: Long): SemanticChoice? =
+        select(information, expansion)
 }

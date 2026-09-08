@@ -19,7 +19,7 @@ class SearchTeacherCommandDispatchTest {
             smoke research-preflight research-preflight-verify
             search-profile-summary gameplay-summary terminal-prediction-diagnostic
             terminal-kernel-study attack-kernel-learning direct-attack-kernel-screen factual-residual-study
-            attack-kernel-gameplay terminal-target-sensitivity research-transfer-audit
+            attack-kernel-gameplay direct-attack-kernel-gameplay terminal-target-sensitivity research-transfer-audit
             campaign-data-use campaign-data-snapshot arena
             arena-shard arena-merge tactical
             tactical-authoring tactical-horizon-authoring tactical-horizon-check

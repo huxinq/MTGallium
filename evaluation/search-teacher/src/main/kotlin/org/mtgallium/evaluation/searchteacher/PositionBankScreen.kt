@@ -89,10 +89,10 @@ internal data class PositionBankScreenPlan(
     val terminalActionSignatures: Map<String, List<String>> = emptyMap(),
 ) {
     init {
-        require(mode == PositionBankScreenMode.SEARCH || policies.all { it.search.directAttackKernelFit == null }) {
+        require(mode == PositionBankScreenMode.SEARCH || policies.all { it.search.directAttackKernelFit == null && !it.search.directAttackHeuristic }) {
             "Direct root selection is supported only by actual-selection search screens"
         }
-        require(policies.none { it.rootKernel != null && it.search.directAttackKernelFit != null }) {
+        require(policies.none { it.rootKernel != null && (it.search.directAttackKernelFit != null || it.search.directAttackHeuristic) }) {
             "Direct root selection cannot combine with root search guidance"
         }
         require(attackInfluenceFit == null || mode == PositionBankScreenMode.SEARCH)

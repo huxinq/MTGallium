@@ -7,6 +7,10 @@ import org.mtgallium.evaluation.searchteacher.cli.CommandPreparation
 
 internal val researchWorkflowCommands = listOf(
     SearchTeacherCommand(
+        "direct-attack-kernel-gameplay", CommandPreparation.HANDLER,
+        SearchTeacherCommandContext::runDirectAttackKernelGameplay,
+    ),
+    SearchTeacherCommand(
         "research-preflight", CommandPreparation.HANDLER,
         SearchTeacherCommandContext::runResearchPreflight,
     ),
@@ -201,4 +205,11 @@ private fun SearchTeacherCommandContext.runSearchTeacherCalibration() {
     val report = SearchTeacherCalibrationRunner(root, registry, manifest).run(plan, output, options.threads)
     println("Search Teacher calibration ${plan.phase}: valid=${report.valid}; report=${output.resolve("report.md")}")
     check(report.valid) { "Calibration includes invalid pairs; inspect the retained report" }
+}
+
+private fun SearchTeacherCommandContext.runDirectAttackKernelGameplay() {
+    val plan = readPlan<DirectAttackKernelGameplayPlan>()
+    val report = DirectAttackKernelGameplayRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
+    println("Direct attack gameplay " + report.identity + ": comparator=" + plan.comparator +
+        "; passed=" + report.comparisonStrengthAndCostGatePassed)
 }

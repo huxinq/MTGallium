@@ -15,8 +15,7 @@ internal class DirectAttackKernelPolicy(
         "profile-complete-pure-attack-decline-menu-2-through-8:raw-score-argmax-first-menu-order"
 
     override fun select(information: () -> PolicyInformationState, expansion: PolicyExpansion): SemanticChoice? {
-        if (!attackKernelScope(expansion.candidates, expansion.isProfileExhaustive) ||
-            expansion.omissionReasons.any { !it.intentionalProfileOmission }) return null
+        if (!directAttackScope(expansion)) return null
         val state = information()
         require(state.actingPlayerId == state.observation.perspectivePlayerId)
         val scores = scorer.scores(rootActionKernelFeatures(state, expansion.candidates))
@@ -27,3 +26,8 @@ internal class DirectAttackKernelPolicy(
 
 internal fun RootKernelFitReference.loadDirectAttackPolicy() =
     DirectAttackKernelPolicy(loadFrozenModel().model, researchRunIdentity, manifestSha256)
+
+/** Shared actual-action scope, including the absence of accidental proposal omissions. */
+internal fun directAttackScope(expansion: PolicyExpansion): Boolean =
+    attackKernelScope(expansion.candidates, expansion.isProfileExhaustive) &&
+        expansion.omissionReasons.none { !it.intentionalProfileOmission }
