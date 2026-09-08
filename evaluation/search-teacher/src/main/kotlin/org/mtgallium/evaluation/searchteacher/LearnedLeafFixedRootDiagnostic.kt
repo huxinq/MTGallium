@@ -1,5 +1,7 @@
 package org.mtgallium.evaluation.searchteacher
 
+import org.mtgallium.agent.infoset.core.SemanticChoice
+
 import com.wingedsheep.engine.core.GameAction
 import com.wingedsheep.engine.core.GameEvent
 import com.wingedsheep.engine.state.GameState
@@ -1142,12 +1144,26 @@ internal fun replayFixedRootPrefix(
     actual: ArgentumSearchWorld,
     session: SearchTeacherPolicySession?,
     beforeDecision: (Int) -> Unit = {},
+) = replaySemanticPrefix(
+    decisionIndex, replay, ArgentumSemanticReplayWorld(actual),
+    RecordedReplayStateEquivalence(historicalProjectionAuthority()), beforeDecision,
+) { index, actor, choice, privateToActor ->
+    session?.observeAccepted(actual, actor, choice, index, privateToActor)
+}
+
+/** Shared accepted-transition verifier; consumers publish only after the requested prefix returns. */
+internal fun replaySemanticPrefix(
+    decisionIndex: Int,
+    replay: VerifiedCanonicalSemanticReplay,
+    actual: SemanticReplayWorld,
+    stateEquivalence: RecordedReplayStateEquivalence,
+    beforeDecision: (Int) -> Unit = {},
+    afterDecision: (Int, String, SemanticChoice, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
     require(decisionIndex in 0..replay.decisions.size)
-    val stateEquivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
     requireFixedRootReplayStateMatch(
         difference = stateEquivalence.initialDifference(
-            replay.states.first(), actual.authoritativeStateForHost(),
+            replay.states.first(), actual.authoritativeState(),
         ),
         gameId = replay.header.gameId,
         semanticDecisionIndex = 0,
@@ -1158,7 +1174,7 @@ internal fun replayFixedRootPrefix(
         // return before retaining a collection that claims verification of the entire prefix.
         beforeDecision(decision.decisionIndex)
         val actor = requireNotNull(actual.actorToAct())
-        val exact = actual.expandChoices().candidates.singleOrNull { it.signature == decision.choice.signature }
+        val exact = actual.expandChoices().singleOrNull { it.signature == decision.choice.signature }
             ?: error("Canonical semantic choice ${decision.decisionIndex} is no longer legal")
         require(exact == decision.choice) { "Canonical semantic choice changed meaning" }
         val applied = actual.stepWithReplayTrace(exact)
@@ -1193,7 +1209,7 @@ internal fun replayFixedRootPrefix(
                 rawOrdinal = expected.ordinal,
             )
         }
-        session?.observeAccepted(actual, actor, exact, decision.decisionIndex, applied.result.privateToActor)
+        afterDecision(decision.decisionIndex, actor, exact, applied.result.privateToActor)
     }
 }
 

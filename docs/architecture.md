@@ -63,6 +63,21 @@ menu. Current generation limits exclude whole games; absent historical omission
 metadata stays unknown. These derived examples do not manufacture historical
 trajectory sidecars or relax the separate public-corpus admission contract.
 
+Factual incumbent-trajectory admission binds an explicitly selected completed
+calibration game and viewer to its original source, engine, both policies,
+seed group, checkpoint and canonical replay. The trusted projector retains the
+viewer's actual nonterminal information, including represented history and exact
+knowledge. V2 evaluation and that viewer's eventual actual terminal payoff are
+separate fields; the payoff is joined only after complete, supported replay.
+Refused or incomplete trajectories supply no outcome labels. Projection has its
+own source identity and does not relabel the game's execution.
+
+These are factual game states under the recorded behavior policies. They are
+not sampled search cutoffs, optimal values, or counterfactual action targets;
+multiple frames from one game do not create independent outcomes. This bounded
+admission path is separate from the fixed historical outcome corpus and does
+not change its compatibility or training contract.
+
 Public CI verifies explicitly self-contained public capabilities. Verification
 whose meaning requires private historical evidence remains separate; generic
 invariants should use synthetic or public-safe fixtures rather than treating a

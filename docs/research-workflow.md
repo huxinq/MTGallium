@@ -10,6 +10,34 @@ samples, one frozen fit and saved-position validation. They do not declare
 playing strength or select a winning model automatically. Generated data, plans,
 build bundles and campaign records belong under the private evidence root.
 
+## Factual incumbent-trajectory admission
+
+`FactualIncumbentTrajectoryRequest` identifies one completed calibration game
+and one viewer. This source API authenticates the exact source run and manifest,
+original source and engine revisions, calibration plan and both seat policies,
+seed group, game, checkpoint, replay and projection build. The original game and
+the later projection keep separate identities.
+
+Admission replays the complete recorded game through the trusted adapter. Each
+pre-decision nonterminal boundary supplies that fixed viewer's actual
+`PolicyInformationState` and V2 evaluation, including boundaries where the other
+player acts. The eventual actual terminal payoff is joined from the same
+viewer's perspective only after the complete replay passes. No future outcome
+is inserted into the information state. A refusal supplies no training labels;
+it does not silently remove a bad frame from an otherwise admitted trajectory.
+
+The retained report distinguishes admitted and refused execution and preserves
+the evidence bindings needed to load the rows again. Canonical replay remains
+private. Its derived factual rows also belong outside the public checkout.
+
+This bounded API does not construct a train/validation split, fit a model, or
+change the fixed historical outcome-corpus and trainer contracts. Frames from
+the same game share one outcome and seed group. These labels describe actual
+game trajectories under the recorded policies; they do not estimate alternative
+actions, reconstruct hypothetical cutoff histories, or establish transfer into
+search. Any later learner must declare its own target, weighting, population and
+deployment test.
+
 ## Build once and execute the retained runtime
 
 Commit a clean treatment with the intended Argentum pin, then run:
