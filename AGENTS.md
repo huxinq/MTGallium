@@ -87,6 +87,40 @@ Reviewers should flag concrete defects in these interpretation-bearing areas:
 
 ## Source and evidence workflow
 
+### Primary experiment interface
+
+Use the [research workbench](docs/research-workbench.md) as agents' primary
+interface with experiments. Start with `python3 tools/mtgallium-research catalog`
+and use its supported commands for design, plan inspection, build/readiness,
+preflight, launch, status, diagnosis, retrieval, verification, extraction and
+review. Prefer `--json` for structured results. Reuse known capabilities and
+existing drafts, attempts and verified artifacts rather than repeating discovery
+or work that is already complete.
+
+For supported workflows, use the workbench instead of assembling direct JVM or
+Gradle experiment invocations, writing one-off launch/inspection scripts, or
+manually reconstructing records it already exposes. Change an experiment through
+its editable draft or `fork`/`diff`; keep frozen attempts and historical evidence
+intact. Ordinary source navigation, development and tests can use their normal
+tools without an experiment wrapper.
+
+When the workbench lacks a required capability, use the documented specialized
+native route or the smallest source-owned adapter that preserves its existing
+checks. State the concrete gap and record the fallback command, source/input
+identities and output location in authorized private handoff updates; for read-only
+work, report the fallback without writing records. A refusal is not a reason
+to bypass a gate. Recurring gaps should improve the workbench within the
+authorized task rather than create a parallel research interface. Do not rerun
+or migrate historical work just to make it fit a new wrapper.
+
+This interface preference adds no approval gate and grants no new experiment
+authorization. Read-only tasks stay read-only: commands that create drafts,
+rehearsals, exports, packets or population-use records still need authorization
+covering those writes. Existing native scientific authorities and the distinction
+between byte verification and research validity remain unchanged.
+
+### Source identity and private evidence
+
 Treat substantial work as:
 
 ```text

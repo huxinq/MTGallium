@@ -18,6 +18,16 @@ The three durable records have different authority: the **draft** expresses
 intent, the **attempt** records exactly what was requested, and the **native
 manifest** authenticates the producer's retained artifacts.
 
+## Agent use
+
+The workbench is the primary experiment interface for agents as well as human
+researchers. Follow the [agent interface policy](../AGENTS.md#primary-experiment-interface):
+use supported commands and structured `--json` output, reuse retained work, and
+record a concrete capability gap when a documented specialized route is needed.
+The command sequences below apply to both users. Source development and tests
+keep their normal tools; using the workbench does not authorize new experiments
+or turn a read-only task into permission to create records.
+
 ## Start here
 
 Use Python 3.11+, JDK 21 and the repository's ordinary build prerequisites.

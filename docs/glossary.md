@@ -41,7 +41,8 @@ Follow the linked definitions for the concepts each part uses.
 
 ### Research workbench
 
-A command-line interface (CLI) for preparing experiment drafts, checking plans,
+A command-line interface (CLI), used as the primary experiment interface by both
+human researchers and agents, for preparing experiment drafts, checking plans,
 launching bounded runs, and inspecting and reviewing retained outputs. It connects
 the existing research commands; those commands still define the experiment and
 its evidence checks. A draft describes the intended work, while a frozen attempt
@@ -53,8 +54,9 @@ Start with `python3 tools/mtgallium-research --help` or
 Durable launches use a Linux user systemd manager to keep bounded work running
 outside the interactive session. Generated work stays outside the source checkout.
 
-See [the workbench guide](research-workbench.md) and
-[the CLI entry point](../tools/mtgallium-research), both included in this checkout.
+See [the workbench guide](research-workbench.md),
+[the agent interface policy](../AGENTS.md#primary-experiment-interface), and
+[the CLI entry point](../tools/mtgallium-research), all included in this checkout.
 
 ### Native research commands
 
