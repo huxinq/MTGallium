@@ -38,5 +38,38 @@ class TerminalTargetSensitivityTest {
         assertEquals(0.0, terminalTargetPrefixValues(report, "r", 4).single().getValue(action.signature))
         assertFails { terminalTargetPrefixValues(report, "r", 5) }
         assertFails { terminalTargetPrefixValues(report.copy(rows = listOf(row.copy(disposition = PositionBankScreenDisposition.REFUSED))), "r", 2) }
+
+        val alternative = SemanticChoice.create(kind = SemanticChoiceKind.ACTION, operationFamily = SemanticOperationFamily.PASS_PRIORITY,
+            display = SemanticChoiceDisplay("other"), canonicalPayload = buildJsonObject { put("test", "other") })
+        val alternativeSamples = samples.map { it.copy(payoff = -it.payoff) }
+        val twoActions = row.copy(terminalRootActions = row.terminalRootActions +
+            TerminalRootActionSamples(alternative, 4, alternativeSamples, TerminalRootActionDisposition.COMPLETE))
+        val rootIds = listOf("r1", "r2", "r3")
+        val repeatedRows = rootIds.flatMap { rootId ->
+            listOf(twoActions.copy(rootId = rootId), twoActions.copy(rootId = rootId, repetition = 1))
+        }
+        val gridReport = report.copy(plan = plan.copy(rootLimit = 3, rootIds = rootIds, repetitions = 2),
+            selectedRootIds = rootIds, eligibleRoots = 3, rows = repeatedRows)
+        val reference = SavedRootPolicyInput("/tmp/targets", "synthetic", "target")
+        val targets = linkedMapOf("baseline" to TerminalTargetStage(reference, gridReport),
+            "variant" to TerminalTargetStage(reference, gridReport))
+        val frozen = rootIds.map { rootId ->
+            // The larger group favors one fixed candidate; the smaller group favors the other.
+            FrozenTerminalSensitivityRoot(rootId, if (rootId == "r3") "g2" else "g1",
+                if (rootId == "r3") action.signature else alternative.signature,
+                if (rootId == "r3") alternative.signature else action.signature,
+                action.signature, mapOf(action.signature to 0.0, alternative.signature to 0.0))
+        }
+        val cells = terminalSensitivityGrid(targets, listOf(2, 4), frozen)
+        assertEquals(listOf("baseline", "baseline", "variant", "variant"), cells.map { it.variantId })
+        assertEquals(listOf(2, 4, 2, 4), cells.map { it.samplesPerAction })
+        assertEquals(listOf(0.0, 0.0), cells.first().candidateVersusOld.equalGroupMeanByTargetRepetition)
+        assertEquals(0.0, cells.first().candidateVersusOld.equalGroupMeanDifference)
+        assertEquals(listOf(-2.0, -2.0), cells.first().candidateVersusOld.rows.first().candidateMinusBaselineByReferenceRepetition)
+        assertEquals(listOf(0.0, 0.0), cells[1].candidateVersusOld.rows.first().candidateMinusBaselineByReferenceRepetition)
+        assertEquals(cells.first().candidateVersusOld, cells[2].candidateVersusOld)
+        assertTrue(cells.all { cell -> cell.rankings.all { it.baselineBestActions.size == 2 } })
+        assertFails { terminalSensitivityGrid(mapOf("duplicate" to TerminalTargetStage(reference,
+            gridReport.copy(rows = repeatedRows + repeatedRows.first()))), listOf(2), frozen) }
     }
 }

@@ -277,6 +277,8 @@ plan; forking neither continues a statistical test nor resets its boundaries.
 `ResearchWorkbench.kt` owns serializer introspection and routes into scientific
 APIs. Python owns drafts, execution records, process supervision, retrieval and
 presentation. There is no alternate payoff, feature, gate or population definition.
+See [research tooling development](research-tooling-development.md) for module
+ownership, native command registration and the shared terminal workflow helpers.
 
 For a recurring workflow, add its actual native serializer and precise gate,
 reuse its runner/verifier, and expose matching human purpose/output/worker semantics

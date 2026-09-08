@@ -76,6 +76,11 @@ internal fun requireKernelRolloutTransferDescriptors(model: RootKernelFitReferen
 internal fun inconclusiveTransferGameplay(disposition: PairedSequentialDisposition): Boolean = disposition in listOf(
     PairedSequentialDisposition.FUTILITY, PairedSequentialDisposition.BUDGET_EXHAUSTED, PairedSequentialDisposition.BOTH_BOUNDARIES_CROSSED)
 
+private data class AuditedTransferLink(
+    val observation: ResearchTransferObservation,
+    val manifestHashes: Map<String, String>,
+)
+
 internal class ResearchTransferAuditRunner(private val repository: Path) {
     fun run(plan: ResearchTransferAuditPlan, output: Path): ResearchTransferAuditReport {
         val destination = EvidenceStore(repository).requireDiagnosticOutput(output, "screen-to-gameplay transfer audit")
@@ -84,53 +89,9 @@ internal class ResearchTransferAuditRunner(private val repository: Path) {
         require(!source.outerDirty && !source.engineDirty)
         val manifests = sortedMapOf<String, String>()
         val observations = plan.links.map { link ->
-            link.model.loadFrozenModel()
-            val bank = loadVerifiedRealGamePositionBank(Path.of(link.bank.directory), link.bank.researchRunIdentity)
-            val terminal = loadTerminalRootScreen(link.terminalTargets, bank)
-            requireProductionTerminalTarget(terminal.plan)
-            val targets = terminalRootTrainingData(bank, terminal, PositionBankScreenPartition.VALIDATION)
-            val controlPlan = evidenceJson.decodeFromString<PositionBankScreenPlan>(Files.readString(Path.of(link.rolloutControl.directory).resolve("plan.json")))
-            val control = loadStudyScreen(link.rolloutControl, controlPlan)
-            val controlRoots = selectPositionScreenRoots(controlPlan, bank.roots.filter { it.partition.name == controlPlan.partition.name }.sortedBy { it.rootId })
-            requireTerminalStudyControl(control, controlPlan, controlRoots.map { it.rootId })
-            require(controlPlan.expectedBankIdentity == bank.bankIdentity && control.selectedRootIds == terminal.selectedRootIds)
-            require(controlPlan.policies.single().search.rootKernelRolloutFit == null && controlPlan.policies.single().search.rootCloningFit == null)
-            val model = CompiledRootActionKernel(link.model.loadFrozenModel().model)
-            val rows = compareTerminalStudyChoices(bank, terminal, targets, model) { root, _ -> requireNotNull(control.rows.single { it.rootId == root.rootId }.chosen).signature }
-            val comparison = terminalStudyComparison(rows)
-            val gamePath = Path.of(link.gameplay.directory)
-            val gameplay = loadCompletedSequentialCalibration(gamePath, link.gameplay.researchRunIdentity)
-            require(gameplay.sourceProvenance.argentum.revision == terminal.sourceProvenance.argentum.revision) { "Target and gameplay engine differ" }
-            requireKernelRolloutTransferPolicy(link, gameplay)
-            val pairs = completedSequentialBankPairs(gameplay)
-            val candidate = gameplay.plan.candidates.single()
-            pairs.flatMap { it.games }.forEach { game -> game.seatDiagnostics.values.forEach { seat -> seat.searchDecisionsDetail.forEach { decision ->
-                val d = decision.searchDiagnostics; val candidateSeat = seat.policyId == candidate.id
-                require(d.freshSimulations == if (candidateSeat) candidate.simulations else gameplay.plan.control.simulations)
-                require(d.reusedSimulations == 0 && d.rootSelectionGuidance == null)
-                require(d.rootRolloutPolicyId == if (candidateSeat) "cast-context-root-kernel-rollout-v1" else "root-argentum-production-rollout-v2")
-                require(d.opponentRolloutPolicyId == "opponent-argentum-production-rollout-v2")
-                requireValidScreenSearch(d)
-            } } }
-            val costs = gameplay.comparisons.single().operationalByPolicy
-            val candidateCost = costs.single { it.search.policyId == candidate.id }
-            val controlCost = costs.single { it.search.policyId == gameplay.plan.control.id }
-            val ratio = requireNotNull(candidateCost.search.latencyMeanMillis) / requireNotNull(controlCost.search.latencyMeanMillis)
-            require(ratio.isFinite() && ratio > 0)
-            val gameRatio = requireNotNull(candidateCost.searchedMillisPerGame) / requireNotNull(controlCost.searchedMillisPerGame)
-            val modelPath = Path.of(link.model.directory)
-            require(ResearchRunArtifacts.loadAndVerify(modelPath, link.model.researchRunIdentity).artifacts.any { it.relativePath == "development.json" })
-            val train = evidenceJson.decodeFromString<List<RootActionKernelTrainingRoot>>(Files.readString(modelPath.resolve("development.json"))).map { it.seedGroupId }.toSet()
-            val gameplayGroups = pairs.map { realGamePositionSeedGroup(gameplay.deckHash, gameplay.cardPoolHash, it.seed) }.toSet()
-            val screenGroups = targets.map { it.seedGroupId }.toSet()
-            listOf(link.model.directory, link.bank.directory, link.terminalTargets.directory, link.rolloutControl.directory, link.gameplay.directory).forEach { dir ->
-                manifests[dir] = researchSha256File(Path.of(dir).resolve(ResearchRunArtifacts.MANIFEST_FILE))
-            }
-            val result = requireNotNull(gameplay.sequentialResult)
-            ResearchTransferObservation(link, comparison, gameplay.sourceProvenance, requireNotNull(gameplay.sequentialPopulation), result.disposition,
-                requireNotNull(gameplay.comparisons.single().candidatePointRate), candidate.simulations, gameplay.plan.control.simulations, ratio, gameRatio,
-                result.disposition == PairedSequentialDisposition.ABOVE_NULL, ratio <= 1.0,
-                (train intersect gameplayGroups).sorted(), (screenGroups intersect gameplayGroups).sorted())
+            val audited = auditLink(link)
+            manifests.putAll(audited.manifestHashes)
+            audited.observation
         }
         val bindings = ResearchRunBindings(protocol = "research-screen-gameplay-transfer-v1", material = mapOf(
             "plan" to sha256(evidenceJson.encodeToString(ResearchTransferAuditPlan.serializer(), plan)),
@@ -140,9 +101,87 @@ internal class ResearchTransferAuditRunner(private val repository: Path) {
             observations.count { it.savedPositionComparison.equalGroupMeanDifference > 0 },
             observations.count { it.savedPositionComparison.equalGroupMeanDifference > 0 && it.evidenceForStrengthIncrease },
             observations.count { inconclusiveTransferGameplay(it.disposition) })
-        writeJsonAtomically(destination.resolve("bindings.json"), bindings); writeJsonAtomically(destination.resolve("report.json"), report)
+        writeJsonAtomically(destination.resolve("bindings.json"), bindings)
+        writeJsonAtomically(destination.resolve("report.json"), report)
         writeJsonAtomically(destination.resolve("plan.json"), plan)
-        finalizeStudyArtifacts(destination, bindings.identity)
+        finalizeResearchWorkflowArtifacts(destination, bindings.identity)
         return report
+    }
+
+    private fun auditLink(link: ResearchTransferLink): AuditedTransferLink {
+        link.model.loadFrozenModel()
+        val bank = loadVerifiedRealGamePositionBank(Path.of(link.bank.directory), link.bank.researchRunIdentity)
+        val terminal = loadTerminalRootScreen(link.terminalTargets, bank)
+        requireProductionTerminalTarget(terminal.plan)
+        val targets = terminalRootTrainingData(bank, terminal, PositionBankScreenPartition.VALIDATION)
+        val controlPlan = evidenceJson.decodeFromString<PositionBankScreenPlan>(Files.readString(Path.of(link.rolloutControl.directory).resolve("plan.json")))
+        val control = loadRetainedTerminalResearchScreen(link.rolloutControl, controlPlan)
+        val controlRoots = selectPositionScreenRoots(controlPlan, bank.roots.filter { it.partition.name == controlPlan.partition.name }.sortedBy { it.rootId })
+        requireProductionRolloutControl(control, controlPlan, controlRoots.map { it.rootId })
+        require(controlPlan.expectedBankIdentity == bank.bankIdentity && control.selectedRootIds == terminal.selectedRootIds)
+        require(controlPlan.policies.single().search.rootKernelRolloutFit == null && controlPlan.policies.single().search.rootCloningFit == null)
+        val model = CompiledRootActionKernel(link.model.loadFrozenModel().model)
+        val rows = compareTerminalTargetChoices(bank, terminal, targets, model) { root, _ -> requireNotNull(control.rows.single { it.rootId == root.rootId }.chosen).signature }
+        val comparison = terminalTargetComparison(rows)
+        val gamePath = Path.of(link.gameplay.directory)
+        val gameplay = loadCompletedSequentialCalibration(gamePath, link.gameplay.researchRunIdentity)
+        require(gameplay.sourceProvenance.argentum.revision == terminal.sourceProvenance.argentum.revision) { "Target and gameplay engine differ" }
+        requireKernelRolloutTransferPolicy(link, gameplay)
+        val pairs = completedSequentialBankPairs(gameplay)
+        val candidate = gameplay.plan.candidates.single()
+        requireTransferDecisionDiagnostics(pairs, candidate, gameplay.plan.control)
+        val costs = gameplay.comparisons.single().operationalByPolicy
+        val candidateCost = costs.single { it.search.policyId == candidate.id }
+        val controlCost = costs.single { it.search.policyId == gameplay.plan.control.id }
+        val decisionCostRatio = requireNotNull(candidateCost.search.latencyMeanMillis) / requireNotNull(controlCost.search.latencyMeanMillis)
+        require(decisionCostRatio.isFinite() && decisionCostRatio > 0)
+        val searchTimePerGameRatio = requireNotNull(candidateCost.searchedMillisPerGame) / requireNotNull(controlCost.searchedMillisPerGame)
+        val modelPath = Path.of(link.model.directory)
+        require(ResearchRunArtifacts.loadAndVerify(modelPath, link.model.researchRunIdentity).artifacts.any { it.relativePath == "development.json" })
+        val trainingGroups = evidenceJson.decodeFromString<List<RootActionKernelTrainingRoot>>(Files.readString(modelPath.resolve("development.json"))).map { it.seedGroupId }.toSet()
+        val gameplayGroups = pairs.map { realGamePositionSeedGroup(gameplay.deckHash, gameplay.cardPoolHash, it.seed) }.toSet()
+        val screenGroups = targets.map { it.seedGroupId }.toSet()
+        val manifests = sortedMapOf<String, String>()
+        listOf(link.model.directory, link.bank.directory, link.terminalTargets.directory, link.rolloutControl.directory, link.gameplay.directory).forEach { dir ->
+            manifests[dir] = researchSha256File(Path.of(dir).resolve(ResearchRunArtifacts.MANIFEST_FILE))
+        }
+        val result = requireNotNull(gameplay.sequentialResult)
+        val observation = ResearchTransferObservation(
+            link = link,
+            savedPositionComparison = comparison,
+            gameplaySource = gameplay.sourceProvenance,
+            population = requireNotNull(gameplay.sequentialPopulation),
+            disposition = result.disposition,
+            inspectedCandidatePointRate = requireNotNull(gameplay.comparisons.single().candidatePointRate),
+            candidateSimulations = candidate.simulations,
+            controlSimulations = gameplay.plan.control.simulations,
+            meanSearchedDecisionCostRatio = decisionCostRatio,
+            searchedTimePerGameRatio = searchTimePerGameRatio,
+            evidenceForStrengthIncrease = result.disposition == PairedSequentialDisposition.ABOVE_NULL,
+            costGatePassed = decisionCostRatio <= 1.0,
+            sharedTrainingAndGameplayGroups = (trainingGroups intersect gameplayGroups).sorted(),
+            sharedScreenAndGameplayGroups = (screenGroups intersect gameplayGroups).sorted(),
+        )
+        return AuditedTransferLink(observation, manifests)
+    }
+}
+
+private fun requireTransferDecisionDiagnostics(
+    pairs: List<SearchBudgetFrontierPair>,
+    candidate: SearchTeacherCalibrationPolicy,
+    control: SearchTeacherCalibrationPolicy,
+) {
+    for (game in pairs.flatMap { it.games }) {
+        for (seat in game.seatDiagnostics.values) {
+            for (decision in seat.searchDecisionsDetail) {
+                val diagnostics = decision.searchDiagnostics
+                val candidateSeat = seat.policyId == candidate.id
+                require(diagnostics.freshSimulations == if (candidateSeat) candidate.simulations else control.simulations)
+                require(diagnostics.reusedSimulations == 0 && diagnostics.rootSelectionGuidance == null)
+                require(diagnostics.rootRolloutPolicyId == if (candidateSeat) "cast-context-root-kernel-rollout-v1" else "root-argentum-production-rollout-v2")
+                require(diagnostics.opponentRolloutPolicyId == "opponent-argentum-production-rollout-v2")
+                requireValidScreenSearch(diagnostics)
+            }
+        }
     }
 }

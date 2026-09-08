@@ -163,7 +163,7 @@ internal class AttackKernelGameplayRunner(private val root: Path) {
             "Run `${report.identity}`; source `${source.outerCommit}`; Argentum `${source.checkedOutArgentumCommit}`.\n" +
             "Strength/cost gate=${report.strengthAndCostGatePassed}; search-time-per-game ratio=${report.searchedTimePerGameRatio}.\n" +
             renderGameplayLengths(lengthRows, result.inspectedPairs, calibration.pairOffset))
-        finalizeStudyArtifacts(directory, bindings.identity)
+        finalizeResearchWorkflowArtifacts(directory, bindings.identity)
         return report
     }
 }

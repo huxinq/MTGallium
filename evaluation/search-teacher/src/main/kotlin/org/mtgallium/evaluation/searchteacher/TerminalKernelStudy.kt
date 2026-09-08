@@ -54,25 +54,6 @@ internal data class TerminalKernelStudyPlan(
 }
 
 @Serializable
-internal data class TerminalStudyComparison(
-    val rows: List<SavedRootRegretRow>, val groups: List<SavedRootGroupRegret>,
-    val equalGroupMeanDifference: Double, val equalGroupMeanByTargetRepetition: List<Double>,
-    val positiveGroups: Int, val negativeGroups: Int, val tiedGroups: Int,
-)
-
-/** Repetitions and uneven root counts never give a seed group extra weight. */
-internal fun terminalStudyComparison(rows: List<SavedRootRegretRow>): TerminalStudyComparison {
-    require(rows.isNotEmpty() && rows.all { it.repetition == 0 } && rows.map { it.rootId }.distinct().size == rows.size)
-    val repetitions = rows.first().candidateMinusBaselineByReferenceRepetition.size
-    require(repetitions > 0 && rows.all { it.candidateMinusBaselineByReferenceRepetition.size == repetitions })
-    val groups = savedRootGroupRegrets(rows)
-    val byGroup = rows.groupBy { it.seedGroupId }.values
-    return TerminalStudyComparison(rows, groups, groups.map { it.candidateMinusBaseline }.average(),
-        (0 until repetitions).map { rep -> byGroup.map { group -> group.map { it.candidateMinusBaselineByReferenceRepetition[rep] }.average() }.average() },
-        groups.count { it.candidateMinusBaseline > 0 }, groups.count { it.candidateMinusBaseline < 0 }, groups.count { it.candidateMinusBaseline == 0.0 })
-}
-
-@Serializable
 internal data class TerminalStudyGateResult(val checks: Map<String, Boolean>, val passed: Boolean) {
     init { require(checks.isNotEmpty() && passed == checks.values.all { it }) }
 }
@@ -100,6 +81,27 @@ internal data class TerminalKernelStudyReport(
     val developmentAccounting: TerminalRootScreenAccounting, val validationAccounting: TerminalRootScreenAccounting,
     val costs: ResearchInvocationCosts,
     val interpretation: String = "One fixed terminal-kernel development expansion with a frozen model before validation-target access. Conditional production-continuation payoffs and exploratory group gates are not observed gameplay strength, optimal action values or statistical confirmation. Campaign records report known data use only. Historical reused targets and fits retain their original source identities and costs.",
+)
+
+private data class ReservedTerminalStudyInputs(
+    val developmentBank: RealGamePositionBankReport,
+    val validationBank: RealGamePositionBankReport,
+    val developmentRoots: List<RealGamePositionBankRoot>,
+    val validationRoots: List<RealGamePositionBankRoot>,
+    val baselinePlan: TerminalRootKernelFitPlan,
+    val newContinuations: Long,
+    val campaign: CampaignDataRegistry,
+)
+
+private data class TerminalStudyBanks(
+    val development: RealGamePositionBankReport,
+    val validation: RealGamePositionBankReport,
+)
+
+private data class TerminalStudyComparisons(
+    val baseline: TerminalStudyComparison,
+    val production: TerminalStudyComparison,
+    val baselineMetrics: RootActionKernelFitMetrics,
 )
 
 /** Public composition of the recurring study, not an arbitrary experiment graph. */
@@ -135,7 +137,7 @@ internal class TerminalKernelStudyRunner(private val repository: Path) {
         try {
             return execute(plan, destination, deckPath, source, bindings, costs).also { report ->
                 writeJsonAtomically(destination.resolve("report.json"), report)
-                finalizeStudyArtifacts(destination, bindings.identity)
+                finalizeResearchWorkflowArtifacts(destination, bindings.identity)
             }
         } catch (failure: Exception) {
             costs.persist()
@@ -145,86 +147,160 @@ internal class TerminalKernelStudyRunner(private val repository: Path) {
         }
     }
 
-    private fun execute(plan: TerminalKernelStudyPlan, output: Path, deckPath: Path, source: ResearchRunProvenance,
-        bindings: ResearchRunBindings, costs: ResearchCostRecorder): TerminalKernelStudyReport {
-        val bankPair = costs.measure("authenticate-inputs") {
+    /** Authenticate metadata and reserve exposure before any target or fitted-value decoding. */
+    private fun reserveStudyPopulations(
+        plan: TerminalKernelStudyPlan,
+        output: Path,
+        bindings: ResearchRunBindings,
+        costs: ResearchCostRecorder,
+    ): ReservedTerminalStudyInputs {
+        val banks = costs.measure("authenticate-inputs") {
             val bank = loadVerifiedRealGamePositionBank(Path.of(plan.development.plan.bankDirectory), plan.development.plan.expectedBankIdentity)
             val validation = if (plan.validation.plan.bankDirectory == plan.development.plan.bankDirectory && plan.validation.plan.expectedBankIdentity == bank.bankIdentity) bank
                 else loadVerifiedRealGamePositionBank(Path.of(plan.validation.plan.bankDirectory), plan.validation.plan.expectedBankIdentity)
-            bank to validation
+            TerminalStudyBanks(bank, validation)
         }
-        val (bank, validationBank) = bankPair
-        fun selected(p: PositionBankScreenPlan, b: RealGamePositionBankReport) = selectPositionScreenRoots(p,
-            b.roots.filter { it.partition.name == p.partition.name }.sortedBy { it.rootId }).also { roots ->
-            require(roots.map { it.rootId } == p.rootIds && roots.all { it.profileExpansionExhaustive && it.reconstructedCandidates.size >= 2 })
-            require(!plan.requireCastingContext || roots.all { root -> root.reconstructedCandidates.any { it.operationFamily == SemanticOperationFamily.CAST_SPELL } })
+        val bank = banks.development
+        val validationBank = banks.validation
+        fun selected(screen: PositionBankScreenPlan, bank: RealGamePositionBankReport): List<RealGamePositionBankRoot> {
+            val eligible = bank.roots.filter { it.partition.name == screen.partition.name }.sortedBy { it.rootId }
+            return selectPositionScreenRoots(screen, eligible).also { roots ->
+                require(roots.map { it.rootId } == screen.rootIds && roots.all {
+                    it.profileExpansionExhaustive && it.reconstructedCandidates.size >= 2
+                })
+                require(!plan.requireCastingContext || roots.all { root ->
+                    root.reconstructedCandidates.any { it.operationFamily == SemanticOperationFamily.CAST_SPELL }
+                })
+            }
         }
-        val devRoots = selected(plan.development.plan, bank); val valRoots = selected(plan.validation.plan, validationBank)
+        val developmentRoots = selected(plan.development.plan, bank)
+        val validationRoots = selected(plan.validation.plan, validationBank)
         val baselinePath = Path.of(plan.baseline.directory)
         require(ResearchRunArtifacts.loadAndVerify(baselinePath, plan.baseline.researchRunIdentity).artifacts.any { it.relativePath == "development.json" })
-        val oldPlan = evidenceJson.decodeFromString<TerminalRootKernelFitPlan>(Files.readString(baselinePath.resolve("plan.json")))
-        val oldPopulations = (listOf(TerminalRootKernelTrainingInput(oldPlan.bank, oldPlan.terminal)) + oldPlan.additional).map { input ->
+        val baselinePlan = evidenceJson.decodeFromString<TerminalRootKernelFitPlan>(Files.readString(baselinePath.resolve("plan.json")))
+        val baselinePopulations = (listOf(TerminalRootKernelTrainingInput(baselinePlan.bank, baselinePlan.terminal)) + baselinePlan.additional).map { input ->
             val b = loadVerifiedRealGamePositionBank(Path.of(input.bank.directory), input.bank.researchRunIdentity)
             val reference = CloningComparisonInput(input.terminal.directory, input.terminal.identity)
             CampaignPopulationInput(input.bank, campaignScreenRoots(reference, b).map { it.rootId }.sorted(), reference)
         }
-        val newWork = listOf(plan.development to devRoots, plan.validation to valRoots).sumOf { (data, roots) ->
+        val newWork = listOf(plan.development to developmentRoots, plan.validation to validationRoots).sumOf { (data, roots) ->
             val work = terminalRootWorkload(requireNotNull(data.plan.terminalContinuation), roots.map { it.reconstructedCandidates.size }, data.plan.repetitions, 1)
             if (data.retained == null) work.toLong() else 0L
         }
-        val pilotRoots = terminalStudyPilotRoots(devRoots)
-        val pilotWork = devRoots.filter { it.rootId in pilotRoots }.sumOf { it.reconstructedCandidates.size.toLong() * 2 }
+        val pilotRoots = terminalResearchPilotRoots(developmentRoots)
+        val pilotWork = developmentRoots.filter { it.rootId in pilotRoots }.sumOf { it.reconstructedCandidates.size.toLong() * 2 }
         require(newWork + pilotWork <= plan.maximumNewContinuations)
         val campaign = CampaignDataRegistry(repository, Path.of(plan.campaignDirectory), plan.campaignId)
         val before = campaign.snapshot()
         writeJsonAtomically(output.resolve("campaign-before.json"), before)
-        val priorValidation = before.groups.filter { it.seedGroupId in valRoots.map { r -> r.seedGroupId }.toSet() }
+        val priorValidation = before.groups.filter { it.seedGroupId in validationRoots.map { r -> r.seedGroupId }.toSet() }
         writeJsonAtomically(output.resolve("prior-validation-use.json"), priorValidation)
         costs.measure("register-population-use") {
-            fun use(role: CampaignDataRole, populations: List<CampaignPopulationInput>, purpose: String) = campaign.record(
-                CampaignDataUsePlan(campaignId = plan.campaignId, studyIdentity = bindings.identity, role = role,
-                    timing = CampaignDataTiming.PROSPECTIVE_RESERVATION, populations = populations, purpose = purpose))
-            use(CampaignDataRole.TRAINING, oldPopulations + CampaignPopulationInput(CloningComparisonInput(plan.development.plan.bankDirectory, bank.bankIdentity), devRoots.map { it.rootId }), "Fixed baseline training data and declared development expansion; includes pilot access")
-            use(CampaignDataRole.METHOD_SELECTION, listOf(CampaignPopulationInput(CloningComparisonInput(plan.validation.plan.bankDirectory, validationBank.bankIdentity), valRoots.map { it.rootId })), "Fixed exploratory gate after fit freeze; prior registered uses remain visible")
+            fun use(role: CampaignDataRole, populations: List<CampaignPopulationInput>, purpose: String) =
+                campaign.record(CampaignDataUsePlan(
+                    campaignId = plan.campaignId,
+                    studyIdentity = bindings.identity,
+                    role = role,
+                    timing = CampaignDataTiming.PROSPECTIVE_RESERVATION,
+                    populations = populations,
+                    purpose = purpose,
+                ))
+            use(
+                CampaignDataRole.TRAINING,
+                baselinePopulations + CampaignPopulationInput(
+                    CloningComparisonInput(plan.development.plan.bankDirectory, bank.bankIdentity),
+                    developmentRoots.map { it.rootId },
+                ),
+                "Fixed baseline training data and declared development expansion; includes pilot access",
+            )
+            use(
+                CampaignDataRole.METHOD_SELECTION,
+                listOf(CampaignPopulationInput(
+                    CloningComparisonInput(plan.validation.plan.bankDirectory, validationBank.bankIdentity),
+                    validationRoots.map { it.rootId },
+                )),
+                "Fixed exploratory gate after fit freeze; prior registered uses remain visible",
+            )
         }
-        // Reservation is durable before decoding any fitted values or terminal targets, even if admission later fails.
-        plan.baseline.loadFrozenModel()
-        val oldReport = evidenceJson.decodeFromString<TerminalRootKernelFitReport>(Files.readString(baselinePath.resolve("report.json")))
-        require(oldReport.plan == oldPlan)
-        val oldData = evidenceJson.decodeFromString<List<RootActionKernelTrainingRoot>>(Files.readString(baselinePath.resolve("development.json")))
-        require(oldData.size == oldReport.development.roots && oldData.map { it.rootId }.distinct().size == oldData.size)
-        val oldInput = loadVerifiedRealGamePositionBank(Path.of(oldReport.plan.bank.directory), oldReport.plan.bank.researchRunIdentity)
-        val originalTarget = loadTerminalRootScreen(oldReport.plan.terminal, oldInput)
-        requireSameTerminalTarget(originalTarget.plan, plan.development.plan)
-        require(originalTarget.sourceProvenance.argentum.revision == source.checkedOutEngineCommit)
-        require(devRoots.none { r -> oldData.any { it.rootId == r.rootId } })
-        val allTrainingGroups = (oldData.map { it.seedGroupId } + devRoots.map { it.seedGroupId }).toSet()
-        requireStudyGroupSeparation(allTrainingGroups, valRoots.map { it.seedGroupId }.toSet())
-        require(valRoots.map { it.seedGroupId }.distinct().size >= plan.gate.minimumPositiveGroups)
-        val registry = buildRegistry(); val deck = loadDeckManifest(deckPath)
-        val runner = PositionBankScreenRunner(repository, registry, deck)
+        return ReservedTerminalStudyInputs(
+            developmentBank = bank,
+            validationBank = validationBank,
+            developmentRoots = developmentRoots,
+            validationRoots = validationRoots,
+            baselinePlan = baselinePlan,
+            newContinuations = newWork,
+            campaign = campaign,
+        )
+    }
+
+    private fun runDevelopmentPilot(
+        plan: TerminalKernelStudyPlan,
+        inputs: ReservedTerminalStudyInputs,
+        output: Path,
+        source: ResearchRunProvenance,
+        bindings: ResearchRunBindings,
+        runner: PositionBankScreenRunner,
+        costs: ResearchCostRecorder,
+    ) {
         // This mandatory pilot never reads validation outcomes. Its parameters bind to the primary plan.
-        val pilot = costs.measure("preflight", describe = { terminalWork(it, bank) }, validate = { terminalRootTrainingData(bank, it, PositionBankScreenPartition.DEVELOPMENT) }) {
-            val ids = terminalStudyPilotRoots(devRoots)
-            val pilotPlan = plan.development.plan.copy(rootLimit = ids.size, rootIds = ids, repetitions = 1,
-                terminalContinuation = requireNotNull(plan.development.plan.terminalContinuation).copy(samplesPerAction = 2))
+        val pilot = costs.measure(
+            "preflight",
+            describe = { terminalMeasuredWork(it, inputs.developmentBank) },
+            validate = { terminalRootTrainingData(inputs.developmentBank, it, PositionBankScreenPartition.DEVELOPMENT) },
+        ) {
+            val ids = terminalResearchPilotRoots(inputs.developmentRoots)
+            val pilotPlan = terminalResearchPilotPlan(plan.development.plan, ids)
             runner.run(pilotPlan, output.resolve("preflight"), plan.workers)
         }
-        val pilotAccounting = terminalRootScreenAccounting(pilot, bank)
-        val projected = pilotAccounting.accumulatedSelectionMillis / pilotAccounting.completedTerminalSamples * newWork / plan.workers / 1000.0
+        val pilotAccounting = terminalRootScreenAccounting(pilot, inputs.developmentBank)
+        val projected = projectedTerminalCollectionSeconds(pilotAccounting, inputs.newContinuations, plan.workers)
         require(projected <= plan.maximumProjectedCollectionSeconds) { "Projected collection exceeds declared operational limit: $projected seconds" }
         val passBindings = ResearchRunBindings(protocol = "terminal-kernel-study-preflight-v1", material = mapOf(
             "study" to bindings.identity, "pilot" to pilot.researchRunIdentity,
             "pilot-manifest" to researchSha256File(output.resolve("preflight/${ResearchRunArtifacts.MANIFEST_FILE}"))))
         val pass = ResearchPreflightReport(bindings = passBindings, checks = listOf(ResearchPreflightCheck("development-terminal-pilot", true, "Complete samples, exact menus, source-bound primary plan and bounded projection")),
-            workload = mapOf("new-continuations" to newWork.toString(), "projected-collection-seconds" to projected.toString()), childRuns = emptyMap())
+            workload = mapOf("new-continuations" to inputs.newContinuations.toString(), "projected-collection-seconds" to projected.toString()), childRuns = emptyMap())
         // The pilot manifest and report are registered directly; no relative escape in child references.
         writeJsonAtomically(output.resolve("preflight-pass.json"), pass)
         verifyResearchBuild(plan.build, source)
         ResearchRunArtifacts.loadAndVerify(output.resolve("preflight"), pilot.researchRunIdentity)
-        val dev = terminalStage("development", plan.development, bank, output, runner, costs, plan.workers)
-        val fitPlan = oldReport.plan.copy(additional = oldReport.plan.additional + TerminalRootKernelTrainingInput(
-            CloningComparisonInput(plan.development.plan.bankDirectory, bank.bankIdentity), dev.first))
+    }
+
+    private fun execute(
+        plan: TerminalKernelStudyPlan,
+        output: Path,
+        deckPath: Path,
+        source: ResearchRunProvenance,
+        bindings: ResearchRunBindings,
+        costs: ResearchCostRecorder,
+    ): TerminalKernelStudyReport {
+        val inputs = reserveStudyPopulations(plan, output, bindings, costs)
+        val bank = inputs.developmentBank
+        val validationBank = inputs.validationBank
+        val developmentRoots = inputs.developmentRoots
+        val validationRoots = inputs.validationRoots
+        val baselinePath = Path.of(plan.baseline.directory)
+        // Reservation is durable before decoding any fitted values or terminal targets, even if admission later fails.
+        plan.baseline.loadFrozenModel()
+        val baselineReport = evidenceJson.decodeFromString<TerminalRootKernelFitReport>(Files.readString(baselinePath.resolve("report.json")))
+        require(baselineReport.plan == inputs.baselinePlan)
+        val baselineTrainingRoots = evidenceJson.decodeFromString<List<RootActionKernelTrainingRoot>>(Files.readString(baselinePath.resolve("development.json")))
+        require(baselineTrainingRoots.size == baselineReport.development.roots && baselineTrainingRoots.map { it.rootId }.distinct().size == baselineTrainingRoots.size)
+        val baselineBank = loadVerifiedRealGamePositionBank(Path.of(baselineReport.plan.bank.directory), baselineReport.plan.bank.researchRunIdentity)
+        val originalTarget = loadTerminalRootScreen(baselineReport.plan.terminal, baselineBank)
+        requireSameTerminalTarget(originalTarget.plan, plan.development.plan)
+        require(originalTarget.sourceProvenance.argentum.revision == source.checkedOutEngineCommit)
+        require(developmentRoots.none { r -> baselineTrainingRoots.any { it.rootId == r.rootId } })
+        val allTrainingGroups = (baselineTrainingRoots.map { it.seedGroupId } + developmentRoots.map { it.seedGroupId }).toSet()
+        requireStudyGroupSeparation(allTrainingGroups, validationRoots.map { it.seedGroupId }.toSet())
+        require(validationRoots.map { it.seedGroupId }.distinct().size >= plan.gate.minimumPositiveGroups)
+        val registry = buildRegistry()
+        val deck = loadDeckManifest(deckPath)
+        val runner = PositionBankScreenRunner(repository, registry, deck)
+        runDevelopmentPilot(plan, inputs, output, source, bindings, runner, costs)
+        val development = runTerminalTargetStage("development", plan.development, bank, output, runner, costs, plan.workers)
+        val fitPlan = baselineReport.plan.copy(additional = baselineReport.plan.additional + TerminalRootKernelTrainingInput(
+            CloningComparisonInput(plan.development.plan.bankDirectory, bank.bankIdentity), development.reference))
         val fit = costs.measure("fit", reused = plan.retainedFit != null, describe = { ResearchMeasuredWork(it.researchRunIdentity) }) {
             plan.retainedFit?.also { ref ->
                 ref.loadFrozenModel()
@@ -239,107 +315,59 @@ internal class TerminalKernelStudyRunner(private val repository: Path) {
         val candidate = CompiledRootActionKernel(fit.loadFrozenModel().model)
         writeJsonAtomically(output.resolve("frozen-fit.json"), fit)
         // Validation artifacts, including retained labels, are first loaded below this frozen fit.
-        val validation = terminalStage("validation", plan.validation, validationBank, output, runner, costs, plan.workers)
-        val targets = terminalRootTrainingData(validationBank, validation.second, PositionBankScreenPartition.VALIDATION)
+        val validation = runTerminalTargetStage("validation", plan.validation, validationBank, output, runner, costs, plan.workers)
+        val targets = terminalRootTrainingData(validationBank, validation.report, PositionBankScreenPartition.VALIDATION)
         val controlReport = costs.measure("production-control", reused = plan.retainedControl != null, describe = {
             if (plan.retainedControl != null) ResearchMeasuredWork(it.researchRunIdentity) else {
-                val a = positionScreenAccounting(it).values.single()
-                ResearchMeasuredWork(it.researchRunIdentity, mapOf("choices" to a.rows.toLong()), mapOf("reconstruction" to a.accumulatedReconstructionMillis, "selection" to a.accumulatedSelectionMillis))
+                val accounting = positionScreenAccounting(it).values.single()
+                ResearchMeasuredWork(
+                    evidenceIdentity = it.researchRunIdentity,
+                    counts = mapOf("choices" to accounting.rows.toLong()),
+                    accumulatedComponentMillis = mapOf(
+                        "reconstruction" to accounting.accumulatedReconstructionMillis,
+                        "selection" to accounting.accumulatedSelectionMillis,
+                    ),
+                )
             }
         }) {
-            plan.retainedControl?.let { loadStudyScreen(it, plan.control) } ?: runner.run(plan.control, output.resolve("control"), plan.workers)
+            plan.retainedControl?.let { loadRetainedTerminalResearchScreen(it, plan.control) } ?: runner.run(plan.control, output.resolve("control"), plan.workers)
         }
-        requireTerminalStudyControl(controlReport, plan.control)
+        requireProductionRolloutControl(controlReport, plan.control)
         val controlRef = plan.retainedControl ?: CloningComparisonInput(output.resolve("control").toString(), controlReport.researchRunIdentity)
         val comparisons = costs.measure("compare-and-audit") {
             val baseline = CompiledRootActionKernel(plan.baseline.loadFrozenModel().model)
-            val oldRows = compareTerminalStudyChoices(validationBank, validation.second, targets, candidate) { root, target ->
-                val scores = baseline.scores(target.features); root.reconstructedCandidates[scores.indices.maxBy { scores[it] }].signature
+            val oldRows = compareTerminalTargetChoices(validationBank, validation.report, targets, candidate) { root, target ->
+                val scores = baseline.scores(target.features)
+                terminalModelChoice(root.reconstructedCandidates.map { it.signature }, scores)
             }
-            val productionRows = compareTerminalStudyChoices(validationBank, validation.second, targets, candidate) { root, _ ->
+            val productionRows = compareTerminalTargetChoices(validationBank, validation.report, targets, candidate) { root, _ ->
                 requireNotNull(controlReport.rows.single { it.rootId == root.rootId }.chosen).signature
             }
-            Triple(terminalStudyComparison(oldRows), terminalStudyComparison(productionRows), rootKernelMetrics(baseline, targets))
+            TerminalStudyComparisons(terminalTargetComparison(oldRows), terminalTargetComparison(productionRows), rootKernelMetrics(baseline, targets))
         }
         val trained = evidenceJson.decodeFromString<List<RootActionKernelTrainingRoot>>(Files.readString(Path.of(fit.directory).resolve("development.json")))
-        require(trained == combineTerminalTrainingRoots(listOf(oldData, terminalRootTrainingData(bank, dev.second, PositionBankScreenPartition.DEVELOPMENT))))
-        writeJsonAtomically(output.resolve("campaign-after.json"), campaign.snapshot())
-        return TerminalKernelStudyReport(bindings.identity, source, plan, fit, dev.first, validation.first, controlRef,
-            trained.size, allTrainingGroups.size, targets.size, targets.map { it.seedGroupId }.distinct().size,
-            comparisons.first, comparisons.second, terminalStudyGate(plan.gate, comparisons.first, comparisons.second),
-            comparisons.third, rootKernelMetrics(candidate, targets), terminalRootScreenAccounting(dev.second, bank),
-            terminalRootScreenAccounting(validation.second, validationBank), costs.snapshot())
+        require(trained == combineTerminalTrainingRoots(listOf(baselineTrainingRoots, terminalRootTrainingData(bank, development.report, PositionBankScreenPartition.DEVELOPMENT))))
+        writeJsonAtomically(output.resolve("campaign-after.json"), inputs.campaign.snapshot())
+        return TerminalKernelStudyReport(
+            identity = bindings.identity,
+            source = source,
+            plan = plan,
+            fit = fit,
+            development = development.reference,
+            validation = validation.reference,
+            control = controlRef,
+            trainingRoots = trained.size,
+            trainingGroups = allTrainingGroups.size,
+            validationRoots = targets.size,
+            validationGroups = targets.map { it.seedGroupId }.distinct().size,
+            baselineComparison = comparisons.baseline,
+            productionComparison = comparisons.production,
+            gate = terminalStudyGate(plan.gate, comparisons.baseline, comparisons.production),
+            baselineMetrics = comparisons.baselineMetrics,
+            candidateMetrics = rootKernelMetrics(candidate, targets),
+            developmentAccounting = terminalRootScreenAccounting(development.report, bank),
+            validationAccounting = terminalRootScreenAccounting(validation.report, validationBank),
+            costs = costs.snapshot(),
+        )
     }
-
-    private fun terminalStage(name: String, data: TerminalStudyData, bank: RealGamePositionBankReport, output: Path,
-        runner: PositionBankScreenRunner, costs: ResearchCostRecorder, workers: Int): Pair<SavedRootPolicyInput, PositionBankScreenReport> {
-        val report = costs.measure("$name-targets", reused = data.retained != null, describe = {
-            if (data.retained != null) ResearchMeasuredWork(it.researchRunIdentity) else terminalWork(it, bank)
-        }, validate = { terminalRootTrainingData(bank, it, data.plan.partition) }) {
-            data.retained?.let { loadTerminalRootScreen(it, bank).also { r -> require(r.plan == data.plan) { "Retained target plan changed" } } }
-                ?: runner.run(data.plan, output.resolve("$name-terminal"), workers)
-        }
-        return (data.retained ?: SavedRootPolicyInput(output.resolve("$name-terminal").toString(), report.researchRunIdentity, data.plan.policies.single().search.id)) to report
-    }
-}
-
-internal fun terminalStudyPilotRoots(roots: List<RealGamePositionBankRoot>): List<String> {
-    require(roots.map { it.seedGroupId }.distinct().size >= 2)
-    val largest = roots.sortedWith(compareByDescending<RealGamePositionBankRoot> { it.reconstructedCandidates.size }.thenBy { it.rootId }).first()
-    val other = roots.filter { it.seedGroupId != largest.seedGroupId }.minBy { it.rootId }
-    return listOf(largest.rootId, other.rootId).sorted()
-}
-
-internal fun terminalWork(report: PositionBankScreenReport, bank: RealGamePositionBankReport): ResearchMeasuredWork {
-    val a = terminalRootScreenAccounting(report, bank)
-    return ResearchMeasuredWork(report.researchRunIdentity, mapOf("requested-continuations" to a.requestedContinuations.toLong(),
-        "terminal-samples" to a.completedTerminalSamples.toLong(), "failed-attempts" to a.nonGameFailedAttempts.toLong(),
-        "unexecuted-continuations" to a.unexecutedContinuations.toLong(), "policy-decisions" to a.continuationPolicyDecisions.toLong()),
-        mapOf("reconstruction" to report.rows.sumOf { it.reconstructionMillis ?: 0.0 }, "selection" to a.accumulatedSelectionMillis))
-}
-
-internal fun loadStudyScreen(reference: CloningComparisonInput, expected: PositionBankScreenPlan): PositionBankScreenReport {
-    val path = Path.of(reference.directory); val manifest = ResearchRunArtifacts.loadAndVerify(path, reference.researchRunIdentity)
-    require(manifest.artifacts.map { it.relativePath }.containsAll(listOf("report.json", "plan.json")))
-    return evidenceJson.decodeFromString<PositionBankScreenReport>(Files.readString(path.resolve("report.json"))).also {
-        require(it.researchRunIdentity == reference.researchRunIdentity && it.plan == expected)
-        require(it.plan == evidenceJson.decodeFromString<PositionBankScreenPlan>(Files.readString(path.resolve("plan.json"))))
-    }
-}
-
-internal fun requireTerminalStudyControl(report: PositionBankScreenReport, plan: PositionBankScreenPlan, expectedRootIds: List<String> = plan.rootIds) {
-    require(plan.mode == PositionBankScreenMode.ROOT_ROLLOUT_SELECTION && plan.repetitions == 1 && plan.policies.size == 1)
-    require(expectedRootIds.isNotEmpty() && expectedRootIds == expectedRootIds.distinct().sorted())
-    require(report.plan == plan && report.valid && report.selectedRootIds == expectedRootIds && report.rows.size == expectedRootIds.size)
-    require(report.rows.map { it.rootId }.toSet() == expectedRootIds.toSet())
-    report.rows.forEach { row ->
-        require(row.disposition == PositionBankScreenDisposition.ROLLOUT_SELECTED && row.chosen != null)
-        require(row.searchDiagnostics == null && row.searchRootValue == null && row.candidateStatistics.isEmpty() && row.rootActionEstimates.isEmpty())
-        require(row.rolloutPolicyDecision?.declaredPolicyId == "root-argentum-production-rollout-v2" && row.rolloutPolicyDecision.replacement == null)
-    }
-}
-
-internal fun compareTerminalStudyChoices(bank: RealGamePositionBankReport, terminal: PositionBankScreenReport,
-    targets: List<RootActionKernelTrainingRoot>, candidate: CompiledRootActionKernel,
-    baseline: (RealGamePositionBankRoot, RootActionKernelTrainingRoot) -> String): List<SavedRootRegretRow> {
-    val roots = bank.roots.associateBy { it.rootId }
-    return targets.map { target ->
-        val root = roots.getValue(target.rootId); val scores = candidate.scores(target.features)
-        val chosen = root.reconstructedCandidates[scores.indices.maxBy { scores[it] }].signature
-        val old = baseline(root, target)
-        val repetitions = (0 until terminal.plan.repetitions).map { rep ->
-            terminal.rows.single { it.rootId == root.rootId && it.repetition == rep }.terminalRootActions
-                .associate { it.action.signature to requireNotNull(it.meanTerminalPayoff) }
-        }
-        val (oldRegret, newRegret, delta) = savedRootReferenceComparison(repetitions, old, chosen)
-        SavedRootRegretRow(root.rootId, root.seedGroupId, 0, old, chosen, oldRegret, newRegret, delta.average(), delta)
-    }
-}
-
-internal fun finalizeStudyArtifacts(directory: Path, identity: String) {
-    ResearchRunArtifacts(directory, identity).also { artifacts ->
-        Files.walk(directory).use { paths -> paths.filter { Files.isRegularFile(it) }.sorted().forEach { artifacts.register(directory.relativize(it).toString()) } }
-        artifacts.finalize()
-    }
-    ResearchRunArtifacts.loadAndVerify(directory, identity)
 }

@@ -133,7 +133,7 @@ internal class AttackKernelLearningRunner(private val repository: Path) {
         }
         fun finish(report: AttackKernelLearningReport): AttackKernelLearningReport {
             writeJsonAtomically(directory.resolve("report.json"), report)
-            finalizeStudyArtifacts(directory, bindings.identity)
+            finalizeResearchWorkflowArtifacts(directory, bindings.identity)
             return report
         }
         val dev = screen(PositionBankScreenPartition.DEVELOPMENT)
