@@ -857,7 +857,7 @@ internal class ArgentumSemanticReplayWorldFactory(
         )
 }
 
-private class ArgentumSemanticReplayWorld(
+internal class ArgentumSemanticReplayWorld(
     private val world: ArgentumSearchWorld,
 ) : SemanticReplayWorld {
     override fun actorToAct(): String? = world.actorToAct()
@@ -1260,12 +1260,20 @@ private data class LegacyTimeLordTypeLineLifecycle(
  * exact corresponding last-known component. Each remains scoped to that component's lifetime and
  * then becomes a game-lifetime tombstone, so an uncorrelated recurrence cannot reuse it.
  */
-internal class RecordedReplayStateEquivalence(
-    historicalAuthority: OutcomeStateProjectionAuthority,
+internal class RecordedReplayStateEquivalence private constructor(
+    private val allowHistoricalTypeLineNormalization: Boolean,
 ) {
-    init {
+    constructor(historicalAuthority: OutcomeStateProjectionAuthority) : this(true) {
         require(historicalAuthority == historicalProjectionAuthority()) {
             "Replay compatibility is restricted to the fixed historical projection authority"
+        }
+    }
+
+    companion object {
+        /** Current-engine factual replays retain scoped routing repairs, never historical TypeLine repair. */
+        fun currentEngine(engineRevision: String): RecordedReplayStateEquivalence {
+            require(engineRevision == FACTUAL_INCUMBENT_ARGENTUM_REVISION)
+            return RecordedReplayStateEquivalence(false)
         }
     }
 
@@ -1303,6 +1311,9 @@ internal class RecordedReplayStateEquivalence(
             emptyList(),
     ): RecordedReplayStateDifference? {
         require(!finalValidated) { "Replay state equivalence was already finalized" }
+        require(allowHistoricalTypeLineNormalization || legacyTimeLordTypeLineNormalizations.isEmpty()) {
+            "Current-engine replay refuses historical Time Lord TypeLine normalization"
+        }
         require(rawOrdinal == nextRawOrdinal) {
             "Replay raw ordinal is not contiguous: expected=$nextRawOrdinal, actual=$rawOrdinal"
         }
@@ -1522,10 +1533,13 @@ internal class RecordedReplayStateEquivalence(
 
     fun safeInspectionBundleDifference(
         bundle: PolicyInspectionBundle,
-    ): RecordedReplayStateDifference? {
+    ): RecordedReplayStateDifference? = safeDerivedArtifactDifference(
+        PolicyJson.format.encodeToJsonElement(PolicyInspectionBundle.serializer(), bundle)
+    )
+
+    internal fun safeDerivedArtifactDifference(artifact: JsonElement): RecordedReplayStateDifference? {
         require(finalValidated) { "Safe inspection bundle checked before final state validation" }
         require(!safeInspectionBundleValidated) { "Safe inspection bundle was already validated" }
-        val artifact = PolicyJson.format.encodeToJsonElement(PolicyInspectionBundle.serializer(), bundle)
         for (mapping in admittedMappings.values.map { it.mapping }) {
             for (id in listOf(mapping.expectedId, mapping.actualId)) {
                 val path = stringOccurrencePaths(artifact, id).firstOrNull() ?: continue
