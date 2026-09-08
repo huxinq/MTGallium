@@ -254,31 +254,6 @@ class TournamentOperationsTest {
         tracker.finish(TournamentRunProgressState.FAILED)
     }
 
-    @Test
-    fun `tree reuse validation states the probability limit and production restriction`() {
-        val report = passingReviewReport("2026-08-25T00:00:00Z")
-
-        val markdown = renderTreeReuseValidation(report)
-
-        assertTrue("does not make the number of retained paths proportional" in markdown)
-        assertTrue("production reuse remains disabled" in markdown)
-    }
-
-    @Test
-    fun `cleanup discard is a policy warning rather than an operational failure`() {
-        val game = validGame("cleanup", "alpha", "beta").copy(
-            replayPath = "replays/cleanup.jsonl.gz",
-            replaySha256 = "abc123",
-            replayVerified = true,
-            cleanupDiscardEvents = 1,
-        )
-
-        assertTrue(operationallyValidGame(game))
-        val warnings = cleanupPolicyQualityWarnings(listOf(game))
-        assertEquals(1, warnings.size)
-        assertTrue("1/1 games" in warnings.single())
-    }
-
     private fun descriptor(gameId: String, leg: String, p0: String, p1: String) = TournamentGameDescriptor(
         gameId = gameId,
         firstPolicyId = "alpha",
@@ -307,53 +282,4 @@ class TournamentOperationsTest {
         p1PolicyId = p1,
     )
 
-    private fun passingReviewReport(generated: String) = TreeReuseValidationReport(
-        generatedAtUtc = generated,
-        outerCommit = "outer",
-        argentumCommit = "argentum",
-        outerDirty = false,
-        argentumDirty = false,
-        baseSeed = 17L,
-        simulationsPerDecision = 64,
-        maxPolicyDecisions = 8,
-        singleton = PolicySingletonValidation(
-            rulesCandidateFamilies = emptyList(),
-            profileCandidateFamilies = emptyList(),
-            rulesExhaustive = true,
-            profileExhaustive = false,
-            omissionReasons = emptySet(),
-            exactForced = false,
-            selectionKind = null,
-            simulationsAvoided = 64,
-            semanticChoicePreserved = true,
-            passed = true,
-        ),
-        strategicLandHold = StrategicLandHoldValidation(
-            candidateFamilies = listOf(
-                org.mtgallium.agent.infoset.core.SemanticOperationFamily.PASS_PRIORITY,
-                org.mtgallium.agent.infoset.core.SemanticOperationFamily.PLAY_LAND,
-            ),
-            automaticSelectionKind = null,
-            firstLandNetValueAfterLeavingHand = 0.65,
-            sixthLandNetValueAfterLeavingHand = -0.20,
-            passRemainsSearchable = true,
-            diminishingResourceValue = true,
-            passed = true,
-        ),
-        factorial = emptyList(),
-        gates = TreeReuseValidationGates(
-            singletonSemanticEquivalence = true,
-            deterministicReplay = true,
-            factorialSemanticEquivalence = true,
-            reuseWorkRatio = 0.5,
-            reuseWorkPassed = true,
-            latencyRatioUpper95 = 0.9,
-            latencyPassed = true,
-            maximumRegret = 0.0,
-            regretPassed = true,
-            memoryPassed = true,
-        ),
-        passed = true,
-        limitations = emptyList(),
-    )
 }

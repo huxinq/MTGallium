@@ -46,10 +46,6 @@ internal val arenaCommands = listOf(
         SearchTeacherCommandContext::runTacticalHorizonAuthoring,
     ),
     SearchTeacherCommand(
-        "calibrate", CommandPreparation.LEGACY_ARENA,
-        SearchTeacherCommandContext::runCalibrate,
-    ),
-    SearchTeacherCommand(
         "latency-preflight", CommandPreparation.LEGACY_ARENA,
         SearchTeacherCommandContext::runLatencyPreflight,
     ),
@@ -234,22 +230,6 @@ private fun SearchTeacherCommandContext.runTacticalHorizonAuthoring() {
     val (packet, path) = TacticalAuthoringPacketGenerator(root, registry, manifest)
         .generateHorizonSuite(limit)
     println("Tactical horizon authoring packet ${packet.scenarios.size} scenarios: $path")
-}
-
-private fun SearchTeacherCommandContext.runCalibrate() {
-    val calibration = SearchCalibration(manifest, registry, root, options.caseLimit)
-    val report = calibration.run(resume = options.resume)
-    val path = diagnosticOutput("calibration/report.json")
-    writeJsonAtomically(path, report)
-    val profiles = if (report.passed) calibration.writeProfiles(report) else emptyList()
-    println(
-        "Calibration recorded ${report.points.size} grid points; " +
-            "fast=${report.selectedFast?.let { "${it.particles}x${it.simulations}/${it.leaf}" }}, " +
-            "deep=${report.selectedDeep?.let { "${it.particles}x${it.simulations}/${it.leaf}" }}: " +
-        "every declared grid, tactical-agreement, and compute-trend condition satisfied=${report.passed}. " +
-            "This does not establish optimal settings outside the supplied grid and cases. " +
-            "Report: $path; recorded profiles=$profiles"
-    )
 }
 
 private fun SearchTeacherCommandContext.runLatencyPreflight() {

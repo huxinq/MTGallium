@@ -39,7 +39,7 @@ private fun loadProfile(root: Path, options: SearchTeacherCli): FrozenSearchProf
     val path = options.profilePath ?: EvidenceStore(root).frozen("fast-profile-v1.json")
     if (Files.exists(path)) return evidenceJson.decodeFromString(Files.readString(path))
     require(options.suite in setOf(
-        "smoke", "calibrate", "latency-preflight", "tactical-authoring", "tactical-horizon-authoring", "inspection"
+        "smoke", "latency-preflight", "tactical-authoring", "tactical-horizon-authoring", "inspection"
     )) {
         "A calibrated frozen profile is required for ${options.suite}: $path"
     }

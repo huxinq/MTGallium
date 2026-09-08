@@ -122,51 +122,6 @@ data class CalibrationPoint(
 )
 
 @Serializable
-data class ComputeImprovementInterval(
-    val particles: Int,
-    val leaf: LeafEvaluationConfig,
-    val actionSpaceProfile: SearchActionSpaceProfile = SearchActionSpaceProfile.RULES_EXACT_V1,
-    val fromSimulations: Int,
-    val toSimulations: Int,
-    val fromTacticalScore: Double,
-    val toTacticalScore: Double,
-    val scoreImprovement: Double,
-    val improved: Boolean,
-)
-
-@Serializable
-data class CalibrationCheckpoint(
-    val schemaVersion: Int = 1,
-    val outerCommit: String,
-    val argentumCommit: String,
-    val host: String,
-    val deckHash: String,
-    val caseIds: List<String>,
-    val gridSchemaVersion: Int,
-    val point: CalibrationPoint,
-)
-
-@Serializable
-data class CalibrationReport(
-    val schemaVersion: Int = 1,
-    val generatedAtUtc: String,
-    val outerCommit: String,
-    val argentumCommit: String,
-    val host: String,
-    val deckHash: String,
-    val caseIds: List<String>,
-    val expectedPointCount: Int,
-    val resumedPointCount: Int,
-    val points: List<CalibrationPoint>,
-    val selectedFast: FrozenSearchProfile?,
-    val selectedDeep: FrozenSearchProfile?,
-    val computeImprovementIntervals: List<ComputeImprovementInterval>,
-    val computeTrendPassed: Boolean,
-    val passed: Boolean,
-    val failureReasons: List<String>,
-)
-
-@Serializable
 enum class TacticalCategory {
     FORCED_LETHAL,
     FORCED_SURVIVAL,

@@ -101,18 +101,9 @@ class SearchTeacherInterfaceContractTest {
             "outcome-state-corpus",
             "learned-outcome-value-gate",
             "evaluator-comparison",
-            "tournament",
-            "tournament-v3-calibrated",
-            "tree-reuse-validation",
             "inspection",
-            "neural-stability-boundary-diagnostic",
-            "neural-final-boundary-diagnostic",
-            "neural-cohort-continuation-preflight",
-            "neural-cohort-continuation-diagnostic",
-            "neural-anchor-crossing-preflight",
-            "neural-anchor-crossing-diagnostic",
-            "neural-held-out-generalization-preflight",
-            "neural-held-out-generalization-diagnostic",
+            "neural-behavioral-cloning",
+            "search-teacher-calibration",
         ).forEach { suite -> assertEquals(suite, SearchTeacherSuites.require(suite).id) }
 
         listOf(

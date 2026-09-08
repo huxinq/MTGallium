@@ -38,7 +38,7 @@ internal object SearchTeacherSuites {
         researchWorkflowCommands,
         decisionLocalCommands,
         outcomeLearningCommands,
-        neuralDiagnosticCommands,
+        behavioralCloningCommands,
         replayDiagnosticCommands,
         tacticalCommands,
         tournamentCommands,

@@ -14,7 +14,7 @@ class SearchTeacherCommandDispatchTest {
     @TempDir lateinit var directory: Path
 
     @Test
-    fun `every established suite remains registered exactly once`() {
+    fun `every supported suite is registered exactly once`() {
         val expected = """
             smoke research-preflight research-preflight-verify
             search-profile-summary gameplay-summary terminal-prediction-diagnostic
@@ -24,8 +24,7 @@ class SearchTeacherCommandDispatchTest {
             arena-shard arena-merge tactical
             tactical-authoring tactical-horizon-authoring tactical-horizon-check
             evaluator-comparison tactical-proof tactical-proof-benchmark
-            replay-review-decisions replay-review-case-intake pilot-calibrate
-            legacy-tactical-benchmark tournament tournament-v3-calibrated
+            replay-review-decisions replay-review-case-intake legacy-tactical-benchmark
             outcome-qualification-preflight outcome-qualification-pilot search-teacher-calibration
             search-teacher-sequential search-teacher-continuation search-teacher-continuation-preflight
             real-game-position-bank position-bank-screen position-bank-terminal-continuations
@@ -37,21 +36,11 @@ class SearchTeacherCommandDispatchTest {
             decision-local-learnability-pilot decision-local-root-coverage-preflight decision-local-root-coverage
             decision-local-performance-check decision-local-precision-followup decision-local-root-freeze
             decision-local-throughput-preflight decision-local-sibling-outcome decision-local-sibling-signal
-            baseline-factorial-tournament baseline-factorial-smoke tree-reuse-validation
-            calibrate corpus ablations
-            belief opponent-models population
-            review replay throughput
-            latency-preflight tournament-performance tournament-remediation
-            tournament-remediation-check tournament-remediation-probe tournament-fallback-diagnostic
-            response-window-inventory player-choice-inventory tournament-amendment
-            inspection play baseline-hardening
-            issue-0013-stage-a issue-0013-stage-b-panel issue-0013-stage-b
-            issue-0013-stage-b-reviewed-secondary issue-0013-blinded-review standalone-mana-timing-experiment
-            root-search-evidence-repeatability neural-behavioral-cloning neural-capacity-diagnostic
-            neural-memorization-diagnostic neural-saturation-trajectory-diagnostic neural-candidate-update-scale-diagnostic
-            neural-population-scaling-diagnostic neural-stability-boundary-diagnostic neural-final-boundary-diagnostic
-            neural-cohort-continuation-preflight neural-cohort-continuation-diagnostic neural-anchor-crossing-preflight
-            neural-anchor-crossing-diagnostic neural-held-out-generalization-preflight neural-held-out-generalization-diagnostic
+            corpus ablations belief
+            opponent-models population review
+            replay throughput latency-preflight
+            response-window-inventory player-choice-inventory inspection
+            play baseline-hardening neural-behavioral-cloning
         """.trimIndent().split(Regex("\\s+"))
         val actual = SearchTeacherSuites.all().map { it.id }
         assertEquals(expected.sorted(), actual)
@@ -77,7 +66,7 @@ class SearchTeacherCommandDispatchTest {
     @Test
     fun `source-bound commands still capture provenance before their handler runs`() {
         val failure = assertFailsWith<IllegalArgumentException> {
-            runSearchTeacher(directory, arrayOf("--suite", "neural-capacity-diagnostic"))
+            runSearchTeacher(directory, arrayOf("--suite", "neural-behavioral-cloning"))
         }
         assertTrue(failure.message.orEmpty().startsWith("Git rev-parse HEAD failed in "))
     }
@@ -89,4 +78,27 @@ class SearchTeacherCommandDispatchTest {
         }
         assertEquals("Unknown suite unregistered-command", failure.message)
     }
+    @Test
+    fun `retired experiment commands are refused before accessing source or evidence`() {
+        val retired = """
+            tournament-amendment tournament-v3-calibrated baseline-factorial-tournament
+            baseline-factorial-smoke tournament-fallback-diagnostic tree-reuse-validation
+            tournament-performance tournament-remediation tournament-remediation-check
+            tournament-remediation-probe tournament calibrate
+            pilot-calibrate root-search-evidence-repeatability standalone-mana-timing-experiment
+            issue-0013-stage-a issue-0013-stage-b-panel issue-0013-stage-b
+            issue-0013-stage-b-reviewed-secondary issue-0013-blinded-review neural-capacity-diagnostic
+            neural-memorization-diagnostic neural-saturation-trajectory-diagnostic neural-candidate-update-scale-diagnostic
+            neural-population-scaling-diagnostic neural-stability-boundary-diagnostic neural-final-boundary-diagnostic
+            neural-cohort-continuation-preflight neural-cohort-continuation-diagnostic neural-anchor-crossing-preflight
+            neural-anchor-crossing-diagnostic neural-held-out-generalization-preflight neural-held-out-generalization-diagnostic
+        """.trimIndent().split(Regex("\\s+"))
+        retired.forEach { suite ->
+            val failure = assertFailsWith<IllegalArgumentException> {
+                runSearchTeacher(directory, arrayOf("--suite", suite))
+            }
+            assertEquals("Unknown suite $suite", failure.message)
+        }
+    }
+
 }

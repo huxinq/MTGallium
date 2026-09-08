@@ -47,8 +47,6 @@ internal data class SearchTeacherCli(
     val replayReviewCanonicalReplay: Path? = null,
     val replayReviewCase: Path? = null,
     val outputPath: Path? = null,
-    val rootLimit: Int = 32,
-    val repetitions: Int = 16,
 ) {
     companion object {
         fun parse(args: Array<String>): SearchTeacherCli {
@@ -104,8 +102,6 @@ internal data class SearchTeacherCli(
                     "--canonical-replay" -> parsed.copy(replayReviewCanonicalReplay = args.path(++index, option))
                     "--replay-review-case" -> parsed.copy(replayReviewCase = args.path(++index, option))
                     "--output" -> parsed.copy(outputPath = args.path(++index, option))
-                    "--root-limit" -> parsed.copy(rootLimit = args.value(++index, option).toInt())
-                    "--repetitions" -> parsed.copy(repetitions = args.value(++index, option).toInt())
                     else -> error("Unknown option $option")
                 }
                 index++
@@ -141,8 +137,6 @@ internal data class SearchTeacherCli(
             require(particles > 0)
             require(simulations > 0)
             require(maxPolicyDecisions > 0)
-            require(rootLimit in 1..32)
-            require(repetitions > 0)
             require(suite != "learned-leaf-pilot" || learnedSmoke != null) {
                 "The learned-leaf pilot requires a completed matching smoke directory via --learned-smoke"
             }

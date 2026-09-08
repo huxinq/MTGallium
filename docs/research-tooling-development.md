@@ -88,3 +88,7 @@ Run `just research-tools-check` for Python changes and the affected
 changes, followed by `just check`. The [workflow contract](research-workflow.md)
 defines the scientific meanings, and the [workbench guide](research-workbench.md)
 describes the user interface.
+
+Historical experiment launchers are removed once their shared contracts have an
+independent owner. See the [retired command inventory](retired-experiment-commands.md)
+for the removed families and historical-source recovery policy.
