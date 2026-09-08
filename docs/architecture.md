@@ -228,6 +228,17 @@ stop is admissible data provenance, not a strength result or a full schedule.
 
 ### Composed terminal research and campaign data use
 
+The CLI research workbench keeps editable design intent, frozen operational
+attempts and native scientific evidence separate. Its native adapter decodes
+existing plan types and performs bound preflight verification and primary
+dispatch in one JVM, or invokes explicit workflows with their existing embedded
+pilots/input admission. Python retains exact request/source/build/input bindings,
+bounded durable execution and derived inspection records. Generic artifact
+verification does not establish a scientific pass; packets must match a recorded
+execution's evidence identity and manifest hash. Field retrieval preserves
+recorded values and failures, while semantic feature generation continues through
+the existing FEATURES screen. See [the CLI guide](research-workbench.md).
+
 The terminal-kernel study composes authenticated bank/target/fit APIs in a fixed
 order, requires a verified local build and development-only preflight, freezes
 the fit before validation-target access, and preserves historical identities on

@@ -53,12 +53,8 @@ Start with `python3 tools/mtgallium-research --help` or
 Durable launches use a Linux user systemd manager to keep bounded work running
 outside the interactive session. Generated work stays outside the source checkout.
 
-**Availability:** implemented on the separate `codex/research-workbench` branch;
-the CLI is not yet included in this checkout. The verified source is
-`docs/research-workbench.md` and `tools/mtgallium-research` at commit
-`4764c826c77f0505fc68848e18cbe7232d5ca1e5`. Read the guide from that revision with
-`git show 4764c826c77f0505fc68848e18cbe7232d5ca1e5:docs/research-workbench.md`.
-Use a normal relative guide link here once that source is integrated.
+See [the workbench guide](research-workbench.md) and
+[the CLI entry point](../tools/mtgallium-research), both included in this checkout.
 
 ### Native research commands
 

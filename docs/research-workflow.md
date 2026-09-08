@@ -1,5 +1,10 @@
 # Reusable terminal-kernel research workflow
 
+The [research CLI workbench](research-workbench.md) provides human-facing drafts,
+typed-plan inspection, frozen launch requests, status, retrieval and review
+packets around these source-owned workflows. The contracts below remain their
+scientific authority.
+
 These public commands compose retained position banks, conditional terminal
 samples, one frozen fit and saved-position validation. They do not declare
 playing strength or select a winning model automatically. Generated data, plans,
