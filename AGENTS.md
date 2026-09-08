@@ -104,14 +104,21 @@ its editable draft or `fork`/`diff`; keep frozen attempts and historical evidenc
 intact. Ordinary source navigation, development and tests can use their normal
 tools without an experiment wrapper.
 
-When the workbench lacks a required capability, use the documented specialized
-native route or the smallest source-owned adapter that preserves its existing
-checks. State the concrete gap and record the fallback command, source/input
-identities and output location in authorized private handoff updates; for read-only
-work, report the fallback without writing records. A refusal is not a reason
-to bypass a gate. Recurring gaps should improve the workbench within the
-authorized task rather than create a parallel research interface. Do not rerun
-or migrate historical work just to make it fit a new wrapper.
+When the workbench lacks a required capability, the default is to extend or
+improve the workbench within the authorized task so future humans and agents can
+reuse it. Integrate the capability into its commands, records and documentation,
+reuse the existing scientific authorities, and verify the relevant behavior.
+Preserve explicit configuration, evidence identity, bounded execution and honest
+failure reporting. A standalone script or source-owned adapter is not the default
+substitute for a missing workbench capability.
+
+Use a direct native route only for a bounded exception where workbench extension
+is outside the authorized scope or unsuitable for the specific operation, such as
+read-only historical compatibility work. State why the exception is needed and
+record its command, source/input identities and output location in authorized
+private handoff updates; for read-only work, report it without writing records.
+Do not turn exceptions into a parallel research interface, bypass a refusal, or
+rerun or migrate historical work just to make it fit a new wrapper.
 
 This interface preference adds no approval gate and grants no new experiment
 authorization. Read-only tasks stay read-only: commands that create drafts,

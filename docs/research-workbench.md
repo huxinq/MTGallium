@@ -22,8 +22,11 @@ manifest** authenticates the producer's retained artifacts.
 
 The workbench is the primary experiment interface for agents as well as human
 researchers. Follow the [agent interface policy](../AGENTS.md#primary-experiment-interface):
-use supported commands and structured `--json` output, reuse retained work, and
-record a concrete capability gap when a documented specialized route is needed.
+use supported commands and structured `--json` output and reuse retained work.
+When a capability is missing, normally improve the shared workbench so future
+users can reuse it, preserving its scientific checks and evidence contracts.
+Standalone adapters and direct native execution are bounded exceptions under
+that policy, not the default response to a capability gap.
 The command sequences below apply to both users. Source development and tests
 keep their normal tools; using the workbench does not authorize new experiments
 or turn a read-only task into permission to create records.
