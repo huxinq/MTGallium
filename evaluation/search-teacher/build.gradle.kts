@@ -1,4 +1,5 @@
 import java.io.File
+import java.time.Duration
 import org.gradle.api.tasks.testing.Test
 
 plugins {
@@ -58,6 +59,28 @@ tasks.register<Test>("publicSourceTest") {
         includeTags(publicSourceTag)
         excludeTags(scenarioExecutionTag)
     }
+}
+
+// An explicit public engineering load: actual factual projection and safe serialization,
+// with independent growing histories. This is not private replay or a research-study launch.
+tasks.register<Test>("factualTrajectoryMemoryCheck") {
+    group = "verification"
+    description = "Measures overlapping public factual-trajectory projection and output under an explicit heap cap."
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    filter { includeTestsMatching("org.mtgallium.evaluation.searchteacher.FactualTrajectoryMemoryTest") }
+    maxHeapSize = providers.gradleProperty("factualMemoryHeap").getOrElse("8g")
+    providers.gradleProperty("factualMemoryJavaVersion").orNull?.let { version ->
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(version.toInt()) }
+    }
+    timeout = Duration.ofMinutes(10)
+    jvmArgs("-XX:ActiveProcessorCount=8")
+    mapOf("decisions" to "512", "objects" to "8", "workers" to "2", "batches" to "2",
+        "minimumBytes" to "500000000", "maximumHeapFraction" to "0.85").forEach { (name, default) ->
+        systemProperty("mtgallium.factual.memory.$name",
+            providers.gradleProperty("factualMemory." + name).getOrElse(default))
+    }
+    testLogging.showStandardStreams = true
 }
 
 tasks.register<Test>("scenarioTest") {

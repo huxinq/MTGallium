@@ -1564,19 +1564,28 @@ internal class RecordedReplayStateEquivalence private constructor(
         PolicyJson.format.encodeToJsonElement(PolicyInspectionBundle.serializer(), bundle)
     )
 
-    internal fun safeDerivedArtifactDifference(artifact: JsonElement): RecordedReplayStateDifference? {
+    internal fun safeDerivedArtifactDifference(artifact: JsonElement): RecordedReplayStateDifference? =
+        safeDerivedArtifactDifference(sequenceOf("" to artifact))
+
+    /** Visit all fragments before completing the existing one-shot safe-artifact audit. */
+    internal fun safeDerivedArtifactDifference(
+        artifacts: Sequence<Pair<String, JsonElement>>,
+    ): RecordedReplayStateDifference? {
         require(finalValidated) { "Safe inspection bundle checked before final state validation" }
         require(!safeInspectionBundleValidated) { "Safe inspection bundle was already validated" }
-        for (mapping in admittedMappings.values.map { it.mapping }) {
-            for (id in listOf(mapping.expectedId, mapping.actualId)) {
-                val path = stringOccurrencePaths(artifact, id).firstOrNull() ?: continue
-                return RecordedReplayStateDifference(
-                    boundary = "safe-inspection-bundle",
-                    path = path,
-                    expected = jsonString(mapping.expectedId),
-                    actual = jsonString(mapping.actualId),
-                    reason = "privileged synthetic ability id appears in the derived safe inspection bundle",
-                )
+        for ((prefix, artifact) in artifacts) {
+            for (lifecycle in admittedMappings.values) {
+                val mapping = lifecycle.mapping
+                for (id in listOf(mapping.expectedId, mapping.actualId)) {
+                    val path = stringOccurrencePaths(artifact, id).firstOrNull() ?: continue
+                    return RecordedReplayStateDifference(
+                        boundary = "safe-inspection-bundle",
+                        path = prefix + path,
+                        expected = jsonString(mapping.expectedId),
+                        actual = jsonString(mapping.actualId),
+                        reason = "privileged synthetic ability id appears in the derived safe inspection bundle",
+                    )
+                }
             }
         }
         safeInspectionBundleValidated = true

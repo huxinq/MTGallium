@@ -16,9 +16,13 @@ object PublicArtifactPrivacy {
         "replaydiagnostic",
     )
 
-    fun requireSafeJson(encoded: String, artifactName: String) {
+    fun requireSafeJson(encoded: String, artifactName: String) =
+        requireSafeJson(PolicyJson.format.parseToJsonElement(encoded), artifactName)
+
+    /** Validate an already serialized fragment without parsing another JSON tree. */
+    fun requireSafeJson(element: JsonElement, artifactName: String, rootPath: String = "$") {
         val violations = mutableListOf<String>()
-        inspect(PolicyJson.format.parseToJsonElement(encoded), "$", violations)
+        inspect(element, rootPath, violations)
         require(violations.isEmpty()) {
             "$artifactName contains private/referee data: ${violations.distinct().sorted().joinToString()}"
         }

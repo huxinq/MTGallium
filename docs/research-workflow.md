@@ -354,6 +354,18 @@ is held out from the coefficient fit only. The allocation and one hashed searche
 root per screen leg are sealed before fitting. No replacement or filtered fit is
 permitted after refusal.
 
+The optional `admissionWorkers` plan field limits simultaneous trajectory
+admissions and full-trajectory loading for root preparation separately from
+`workers`, which continues to bound the search readout. It must be between one and `workers`. Omission preserves the original
+admission concurrency and serialized plan; an explicit limit is part of the new
+study identity. The same overall deadline includes admission, fitting and readout.
+Lower admission concurrency therefore does not extend the deadline or admit a
+partial corpus. Trajectory output streams to its atomic destination, and safe
+artifact validation visits every row after final replay validation without
+materializing another complete trajectory JSON tree. Root preparation authenticates
+the complete trajectory, then retains only the selected information digest and
+required replay metadata through search; unrelated trajectory rows are released.
+
 The sole fit uses at most 32 equally spaced predecision frames per training leg,
 including endpoints, with equal seed-group, leg and selected-frame weight. Its
 target is the same viewer's actual terminal payoff minus visible V2. Fixed ridge

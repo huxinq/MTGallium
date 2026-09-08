@@ -2,6 +2,7 @@ package org.mtgallium.evaluation.searchteacher
 
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import org.mtgallium.agent.infoset.core.SemanticChoice
@@ -49,9 +50,15 @@ internal data class FactualResidualStudyPlan(
     val minimumChangedGroups: Int = 8,
     val maximumSelectionCostRatio: Double = 1.10,
     val searchSeedDomain: String = "factual-residual-fresh-search-v1",
+    // Omission preserves the original plan bytes and admission concurrency.
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val admissionWorkers: Int? = null,
 ) {
+    val effectiveAdmissionWorkers: Int get() = admissionWorkers ?: workers
+
     init {
         require(schemaVersion == 1 && workers in 1..8 && maximumSeconds == 1800)
+        require(effectiveAdmissionWorkers in 1..workers) { "Admission workers must be within the total worker limit" }
         require(trainingGroups == 16 && screeningGroups == 16 && maximumFittingFramesPerLeg == 32)
         require(searchRepetitions == 2 && minimumChangedGroups == 8 && maximumSelectionCostRatio == 1.10)
         require(searchSeedDomain == "factual-residual-fresh-search-v1")

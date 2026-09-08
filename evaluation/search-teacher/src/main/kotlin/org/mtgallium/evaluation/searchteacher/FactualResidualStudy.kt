@@ -132,7 +132,7 @@ internal class FactualResidualStudy(private val repository: Path, private val re
             require(readEvidenceJson(allocationPath.resolve("report.json"), FactualResidualAllocation.serializer()) == allocation)
             // Allocation is immutable before any new trajectory labels are produced or fitting begins.
             val corpusPath = destination.resolve("corpus")
-            val entries = parallelMapOrdered(allocation.games.size, plan.workers) { index ->
+            val entries = parallelMapOrdered(allocation.games.size, plan.effectiveAdmissionWorkers) { index ->
                 val game = allocation.games[index]
                 try {
                     deadline.requireRemaining()

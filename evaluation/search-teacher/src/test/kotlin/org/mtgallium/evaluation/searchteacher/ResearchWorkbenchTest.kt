@@ -48,6 +48,30 @@ class ResearchWorkbenchTest {
         assertEquals(Path.of("output").toAbsolutePath().normalize(), options.outputPath)
     }
 
+    @Test fun `factual admission limit is explicit while historical plans retain their bytes and search workers`() {
+        val policy = SearchTeacherCalibrationPolicy("factual", 8, 56, 16, 1.4, true, 1.0,
+            evaluator = MonoRedVisibleEvaluatorConfig(), fastRootKernelRolloutFit = fit, fastOpponentKernelRolloutFit = fit)
+        val plan = FactualResidualStudyPlan(inventory = FactualResidualInput("/synthetic/inventory",
+            "research-run-v1-sha256:" + "d".repeat(64), "e".repeat(64)), incumbent = policy, build = build)
+        val original = evidenceJson.encodeToJsonElement(plan).jsonObject
+        assertFalse("admissionWorkers" in original)
+        assertFalse("effectiveAdmissionWorkers" in original)
+        assertEquals(8, plan.effectiveAdmissionWorkers)
+        assertEquals(original, workbenchPlan("factual-residual-study", original.toString()).jsonObject.getValue("effectivePlan"))
+        val bounded = plan.copy(admissionWorkers = 2)
+        val changed = evidenceJson.encodeToJsonElement(bounded).jsonObject
+        assertEquals(original, JsonObject(changed - "admissionWorkers"))
+        assertEquals(2, changed.getValue("admissionWorkers").jsonPrimitive.int)
+        assertEquals(8, bounded.workers)
+        assertEquals(2, bounded.effectiveAdmissionWorkers)
+        assertEquals(changed, workbenchPlan("factual-residual-study", changed.toString()).jsonObject.getValue("effectivePlan"))
+        for (invalid in listOf(0, 9)) {
+            assertFails { workbenchPlan("factual-residual-study", JsonObject(original +
+                ("admissionWorkers" to JsonPrimitive(invalid))).toString()) }
+        }
+        assertFails { bounded.copy(workers = 1) }
+    }
+
     @Test fun `typed plans use native constructors and serialization without reading synthetic evidence`() {
         val targets = screen.copy(mode = PositionBankScreenMode.TERMINAL_CONTINUATIONS, repetitions = 2,
             rootIds = listOf("d"), terminalContinuation = TerminalRootContinuationConfig(8, maximumTotalContinuations = 1000))

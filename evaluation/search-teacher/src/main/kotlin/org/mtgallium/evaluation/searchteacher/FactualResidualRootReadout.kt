@@ -2,6 +2,7 @@ package org.mtgallium.evaluation.searchteacher
 
 import com.wingedsheep.engine.registry.CardRegistry
 import java.nio.file.Path
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.Serializable
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
@@ -126,12 +127,51 @@ internal fun factualResidualReadoutGate(allocation: FactualResidualAllocation,
         controlCost, learnedCost, ratio, checks, checks.values.all { it })
 }
 
+/** The full factual trajectory is preparation-only and must not remain live across root searches. */
+internal data class PreparedFactualResidualRoot(
+    val gameSeed: Long,
+    val expectedRootInformationDigest: String,
+    val replay: VerifiedCanonicalSemanticReplay,
+    val policy: ArenaPolicySpec,
+)
+
+internal fun compactFactualResidualRoot(trajectory: FactualIncumbentTrajectoryReport,
+    game: FactualResidualGameAllocation, replay: VerifiedCanonicalSemanticReplay,
+    policy: ArenaPolicySpec): PreparedFactualResidualRoot {
+    require(trajectory.disposition == FactualIncumbentTrajectoryDisposition.ADMITTED)
+    require(trajectory.request.gameId == game.gameId && trajectory.request.viewer == game.viewer &&
+        trajectory.request.sourceRunIdentity == game.sourceRunIdentity && trajectory.request.seedGroupId == game.seedGroupId)
+    val source = requireNotNull(trajectory.source)
+    require(source.leg == game.leg && source.semanticDecisions == game.semanticDecisions)
+    val decisionIndex = requireNotNull(game.root).assignment.decisionIndex
+    val row = requireNotNull(trajectory.rows.getOrNull(decisionIndex)) { "Allocated root is outside the verified factual trajectory" }
+    require(row.decisionIndex == decisionIndex && row.viewer == game.viewer && row.information.actingPlayerId == game.viewer)
+    return PreparedFactualResidualRoot(source.gameSeed, row.information.informationStateDigest, replay, policy)
+}
+
+/** Return from this frame before search begins, so no trajectory or row is captured by its caller. */
+private fun prepareFactualResidualRoot(input: FactualResidualInput, game: FactualResidualGameAllocation,
+    parent: SearchTeacherCalibrationReport, incumbent: SearchTeacherCalibrationPolicy): PreparedFactualResidualRoot {
+    verifyFactualResidualInput(input)
+    val trajectory = loadVerifiedFactualIncumbentTrajectory(Path.of(input.directory), input.identity)
+    require(trajectory.disposition == FactualIncumbentTrajectoryDisposition.ADMITTED)
+    require(trajectory.request.gameId == game.gameId && trajectory.request.viewer == game.viewer &&
+        trajectory.request.sourceRunIdentity == game.sourceRunIdentity && trajectory.request.seedGroupId == game.seedGroupId)
+    val replayPath = ResearchRunFiles.resolveBelow(Path.of(trajectory.request.sourceDirectory), requireNotNull(trajectory.source).replayReference)
+    require(researchSha256File(replayPath) == trajectory.source.replaySha256)
+    val replay = readVerifiedCanonicalSemanticReplay(replayPath)
+    requireFactualIncumbentReplay(trajectory.request, parent,
+        parent.comparisons.flatMap { it.pairs }.flatMap { it.games }.single { it.gameId == game.gameId }, replay)
+    return compactFactualResidualRoot(trajectory, game, replay, incumbent.policy(parent.plan.baseSeed))
+}
+
 internal fun readoutFactualResidualRoots(plan: FactualResidualStudyPlan, allocation: FactualResidualAllocation,
     inputs: LoadedFactualResidualInputs, trajectories: Map<Pair<String, String>, FactualResidualInput>,
     registry: CardRegistry, deck: DeckManifest, evaluator: FactualOutcomeResidualEvaluator, output: Path,
     deadline: FactualResidualDeadline): List<FactualResidualSearchRow> {
     val games = allocation.games.filter { it.role == FactualResidualDataRole.SCREEN }
     val completed = AtomicInteger()
+    val preparationPermits = Semaphore(plan.effectiveAdmissionWorkers)
     val progress = System.getenv("MTGALLIUM_PROGRESS_FILE")?.let(Path::of)
     return parallelMapOrdered(games.size, plan.workers) { rootIndex ->
         val game = games[rootIndex]
@@ -140,18 +180,14 @@ internal fun readoutFactualResidualRoots(plan: FactualResidualStudyPlan, allocat
         // Reading the whole factual trajectory stays outside decision cost, inside the stage deadline.
         val prepared = runCatching {
             deadline.requireRemaining()
-            val input = trajectories.getValue(game.sourceRunIdentity to game.gameId)
-            verifyFactualResidualInput(input)
-            val trajectory = loadVerifiedFactualIncumbentTrajectory(Path.of(input.directory), input.identity)
-            require(trajectory.disposition == FactualIncumbentTrajectoryDisposition.ADMITTED)
-            require(trajectory.request.gameId == game.gameId && trajectory.request.viewer == game.viewer &&
-                trajectory.request.sourceRunIdentity == game.sourceRunIdentity && trajectory.request.seedGroupId == game.seedGroupId)
-            val replayPath = ResearchRunFiles.resolveBelow(Path.of(trajectory.request.sourceDirectory), requireNotNull(trajectory.source).replayReference)
-            require(researchSha256File(replayPath) == trajectory.source.replaySha256)
-            val replay = readVerifiedCanonicalSemanticReplay(replayPath)
-            requireFactualIncumbentReplay(trajectory.request, parent,
-                parent.comparisons.flatMap { it.pairs }.flatMap { it.games }.single { it.gameId == game.gameId }, replay)
-            Triple(trajectory, replay, plan.incumbent.policy(parent.plan.baseSeed))
+            preparationPermits.acquire()
+            try {
+                deadline.requireRemaining()
+                prepareFactualResidualRoot(trajectories.getValue(game.sourceRunIdentity to game.gameId),
+                    game, parent, plan.incumbent).also { deadline.requireRemaining() }
+            } finally {
+                preparationPermits.release()
+            }
         }
         (0..1).flatMap { repetition ->
             // Counterbalance interleaved host load; each coordinate still gets its own reconstructed world/session.
@@ -165,7 +201,9 @@ internal fun readoutFactualResidualRoots(plan: FactualResidualStudyPlan, allocat
                 var exposure = 0
                 val row = runCatching {
                     deadline.requireRemaining()
-                    val (trajectory, replay, policy) = prepared.getOrThrow()
+                    val preparedRoot = prepared.getOrThrow()
+                    val replay = preparedRoot.replay
+                    val policy = preparedRoot.policy
                     val parameters = plan.incumbent.parameters(parent.plan.baseSeed).let { baseline ->
                         if (arm == FactualResidualArm.INCUMBENT) baseline else baseline.copy(leaf = baseline.leaf.copy(
                             evaluator = LeafEvaluator.MTGALLIUM_FACTUAL_OUTCOME_RESIDUAL_V1))
@@ -174,7 +212,7 @@ internal fun readoutFactualResidualRoots(plan: FactualResidualStudyPlan, allocat
                     val informationEvaluator = if (arm == FactualResidualArm.INCUMBENT) plan.incumbent.informationEvaluator()
                         else evaluator.observedEvaluationBy { _, _, _ -> exposure++ }
                     val reconstructionStarted = System.nanoTime()
-                    val actual = createSemanticReplayWorld(registry, deck, game.gameId, trajectory.source!!.gameSeed,
+                    val actual = createSemanticReplayWorld(registry, deck, game.gameId, preparedRoot.gameSeed,
                         parent.plan.baseSeed, 0, parameters.actionSpaceProfile)
                     val session = SearchTeacherPolicySession(actual, game.viewer,
                         mapOf("p0" to deck.mainDeck, "p1" to deck.mainDeck), parameters, defaultMonoRedOpponentPolicy(), game.gameId,
@@ -188,7 +226,7 @@ internal fun readoutFactualResidualRoots(plan: FactualResidualStudyPlan, allocat
                     selectionStarted = System.nanoTime()
                     require(actual.actorToAct() == game.viewer)
                     val information = actual.informationState(game.viewer)
-                    require(information.informationStateDigest == trajectory.rows[root.assignment.decisionIndex].information.informationStateDigest)
+                    require(information.informationStateDigest == preparedRoot.expectedRootInformationDigest)
                     val menu = actual.expandChoices().candidates
                     require(menu.sortedBy { it.signature } == root.candidates.sortedBy { it.signature })
                     attempted = true

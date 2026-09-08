@@ -3,6 +3,8 @@ package org.mtgallium.evaluation.searchteacher
 import com.wingedsheep.engine.core.PassPriority
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.sdk.model.EntityId
+import java.lang.ref.Reference
+import java.lang.ref.WeakReference
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.GZIPOutputStream
@@ -54,6 +56,15 @@ class FactualIncumbentTrajectoryTest {
         assertFails { projectFactualIncumbentTrajectory(replay.copy(header = replay.header.copy(engineVersion = "wrong")), "p0", FixtureWorld(f)) }
         val changed = replay.copy(states = replay.states.mapIndexed { index, state -> if (index == 1) state.copy(turnNumber = 8) else state })
         assertFails { projectFactualIncumbentTrajectory(changed, "p0", FixtureWorld(f)) }
+    }
+
+    @Test
+    fun `late row privacy refusal preserves the array path`() = withFixture { f ->
+        val failure = assertFailsWith<IllegalArgumentException> {
+            projectFactualIncumbentTrajectory(readVerifiedCanonicalSemanticReplay(f.replay), "p0",
+                FixtureWorld(f, privacyLeakAt = 1))
+        }
+        assertTrue(requireNotNull(failure.message).contains("$[1].information.observation.phase"))
     }
 
     @Test
@@ -110,24 +121,14 @@ class FactualIncumbentTrajectoryTest {
 
     @Test
     fun `artifact round trip retains complete labels and a refusal cannot retain partial rows`() = withFixture { f ->
-        val request = f.request()
-        val producer = ResearchRunProvenance(f.source.outer.revision, FACTUAL_INCUMBENT_ARGENTUM_REVISION,
-            FACTUAL_INCUMBENT_ARGENTUM_REVISION, false, false, f.source)
-        val replay = readVerifiedCanonicalSemanticReplay(f.replay)
-        val (rows, audit) = projectFactualIncumbentTrajectory(replay, request.viewer, FixtureWorld(f))
-        val checkpoint = f.directory.resolve("checkpoints/${f.game.gameId}.json")
-        val report = FactualIncumbentTrajectoryReport(bindings = factualIncumbentTrajectoryBindings(request, producer, emptyMap()),
-            request = request, producer = producer, runtime = emptyMap(), disposition = FactualIncumbentTrajectoryDisposition.ADMITTED,
-            source = FactualIncumbentTrajectorySource(sha256File(f.directory.resolve("report.json")),
-                "checkpoints/${f.game.gameId}.json", sha256File(checkpoint), ResearchRunCheckpoints.load(checkpoint).payloadSha256,
-                "replays/${f.game.gameId}.privileged.replay.jsonl.gz", sha256File(f.replay), replay.terminal.recordDigest,
-                0, 0, f.game.seed, f.policies[0], f.policies[1], DECK, POOL, 2, 2), replayAudit = audit, rows = rows)
+        val report = factualReport(f)
         assertFails { report.copy(disposition = FactualIncumbentTrajectoryDisposition.REPLAY_REFUSED, refusal = "late failure") }
         val refused = report.copy(disposition = FactualIncumbentTrajectoryDisposition.REPLAY_REFUSED,
             refusal = "late failure", source = null, replayAudit = null, rows = emptyList())
         assertTrue(refused.rows.isEmpty())
         val output = f.directory.resolve("derived"); Files.createDirectories(output)
-        writeJsonAtomically(output.resolve("report.json"), report)
+        writeEvidenceJsonStream(output.resolve("report.json"), report, FactualIncumbentTrajectoryReport.serializer())
+        assertEquals(evidenceJson.encodeToString(report) + "\n", Files.readString(output.resolve("report.json")))
         ResearchRunArtifacts(output, report.bindings.identity).also { it.register("report.json"); it.finalize() }
         assertEquals(report, loadVerifiedFactualIncumbentTrajectory(output, report.bindings.identity))
         assertFails { loadVerifiedFactualIncumbentTrajectory(output, "wrong-identity") }
@@ -155,13 +156,96 @@ class FactualIncumbentTrajectoryTest {
             listOf(RecordedReplayLegacyTypeLineNormalization(0, EntityId("card")))))
     }
 
+    @Test
+    fun `compact root preparation preserves verified coordinates and refuses another source or frame`() = withFixture { f ->
+        val report = factualReport(f)
+        val game = rootAllocation(f)
+        val replay = readVerifiedCanonicalSemanticReplay(f.replay)
+        val policy = f.control.policy(f.plan.baseSeed)
+        val prepared = compactFactualResidualRoot(report, game, replay, policy)
+        assertEquals(f.game.seed, prepared.gameSeed)
+        assertEquals(report.rows[0].information.informationStateDigest, prepared.expectedRootInformationDigest)
+        assertSame(replay, prepared.replay)
+        assertSame(policy, prepared.policy)
+        val root = requireNotNull(game.root)
+        val alternatives = listOf(
+            game.copy(sourceRunIdentity = "other", root = root.copy(assignment = root.assignment.copy(sourceRunIdentity = "other"))),
+            game.copy(gameId = "other", root = root.copy(assignment = root.assignment.copy(sourceGameId = "other"))),
+            game.copy(seedGroupId = "other", root = root.copy(assignment = root.assignment.copy(seedGroupId = "other"))),
+            game.copy(viewer = "p1", root = root.copy(assignment = root.assignment.copy(actor = "p1"))),
+            game.copy(leg = 1),
+            game.copy(root = root.copy(assignment = root.assignment.copy(decisionIndex = 1))),
+            game.copy(semanticDecisions = 3, root = root.copy(assignment = root.assignment.copy(decisionIndex = 2))),
+        )
+        alternatives.forEach { alternative -> assertFailsWith<IllegalArgumentException> {
+            compactFactualResidualRoot(report, alternative, replay, policy)
+        } }
+        val shrinkingRows = report.rows.toMutableList()
+        val shrinkingReport = report.copy(rows = shrinkingRows)
+        shrinkingRows.clear()
+        assertFailsWith<IllegalArgumentException> { compactFactualResidualRoot(shrinkingReport, game, replay, policy) }
+        val refused = report.copy(disposition = FactualIncumbentTrajectoryDisposition.REPLAY_REFUSED,
+            refusal = "synthetic late refusal", source = null, replayAudit = null, rows = emptyList())
+        assertFailsWith<IllegalArgumentException> { compactFactualResidualRoot(refused, game, replay, policy) }
+    }
+
+    @Test
+    fun `compact root preparation releases the trajectory and its unselected history before search`() = withFixture { f ->
+        val (prepared, references) = compactRetentionWitness(f)
+        // Keep the actual prepared object live while observing collection of the former large inputs.
+        // A closure or report/row reference in preparation would keep at least one witness reachable.
+        repeat(20) {
+            if (references.any { it.get() != null }) {
+                System.gc()
+                Thread.sleep(10)
+            }
+        }
+        assertTrue(references.all { it.get() == null }, "Prepared root retains factual trajectory data")
+        assertEquals(f.information("p0", 0).informationStateDigest, prepared.expectedRootInformationDigest)
+        assertEquals(f.game.gameId, prepared.replay.header.gameId)
+        Reference.reachabilityFence(prepared)
+    }
+
+    private fun compactRetentionWitness(f: Fixture): Pair<PreparedFactualResidualRoot, List<WeakReference<Any>>> {
+        val report = factualReport(f)
+        val references = listOf(report, report.rows, report.rows[1], report.rows[1].information.history)
+            .map { WeakReference<Any>(it) }
+        return compactFactualResidualRoot(report, rootAllocation(f), readVerifiedCanonicalSemanticReplay(f.replay),
+            f.control.policy(f.plan.baseSeed)) to references
+    }
+
+    private fun rootAllocation(f: Fixture): FactualResidualGameAllocation {
+        val request = f.request()
+        return FactualResidualGameAllocation(request.sourceRunIdentity, request.gameId, request.seedGroupId,
+            RealGamePositionPartition.DEVELOPMENT, FactualResidualDataRole.SCREEN, 0, request.viewer, 2, emptyList(),
+            FactualResidualRootMetadata(RealGamePositionBankAssignment("synthetic-root", request.sourceRunIdentity,
+                request.gameId, "control", request.viewer, 0, 0, request.seedGroupId, RealGamePositionPartition.DEVELOPMENT,
+                RealGamePositionDecisionFamily.PRIORITY, RealGamePositionAssignmentStatus.EXCLUDED), f.choices))
+    }
+
+    private fun factualReport(f: Fixture): FactualIncumbentTrajectoryReport {
+        val request = f.request()
+        val producer = ResearchRunProvenance(f.source.outer.revision, FACTUAL_INCUMBENT_ARGENTUM_REVISION,
+            FACTUAL_INCUMBENT_ARGENTUM_REVISION, false, false, f.source)
+        val replay = readVerifiedCanonicalSemanticReplay(f.replay)
+        val (rows, audit) = projectFactualIncumbentTrajectory(replay, request.viewer, FixtureWorld(f))
+        val checkpoint = f.directory.resolve("checkpoints/${f.game.gameId}.json")
+        return FactualIncumbentTrajectoryReport(bindings = factualIncumbentTrajectoryBindings(request, producer, emptyMap()),
+            request = request, producer = producer, runtime = emptyMap(), disposition = FactualIncumbentTrajectoryDisposition.ADMITTED,
+            source = FactualIncumbentTrajectorySource(sha256File(f.directory.resolve("report.json")),
+                "checkpoints/${f.game.gameId}.json", sha256File(checkpoint), ResearchRunCheckpoints.load(checkpoint).payloadSha256,
+                "replays/${f.game.gameId}.privileged.replay.jsonl.gz", sha256File(f.replay), replay.terminal.recordDigest,
+                0, 0, f.game.seed, f.policies[0], f.policies[1], DECK, POOL, 2, 2), replayAudit = audit, rows = rows)
+    }
+
     private class FixtureWorld(val f: Fixture, val wrongViewer: Boolean = false, val unsupportedAt: Int? = null,
-        val terminal: Boolean = true, val wrongPayoff: Boolean = false) : SemanticReplayWorld {
+        val terminal: Boolean = true, val wrongPayoff: Boolean = false, val privacyLeakAt: Int? = null) : SemanticReplayWorld {
         private var index = 0
         override fun actorToAct(): String? = listOf("p0", "p1").getOrNull(index)
         override fun informationState(viewer: String): PolicyInformationState {
             val info = f.information(if (wrongViewer) "p1" else viewer, index)
             return when {
+                index == privacyLeakAt -> info.copy(observation = info.observation.copy(phase = "late.privileged.phase"))
                 index == unsupportedAt -> info.copy(knowledge = info.knowledge.copy(epistemicallyComplete = false, unsupportedReasons = listOf("unknown")))
                 index == 2 && !terminal -> info.copy(terminated = false)
                 else -> info

@@ -199,7 +199,7 @@ internal class FactualIncumbentTrajectoryAdmission(
                 disposition = stage, refusal = "${failure.javaClass.simpleName}: ${failure.message}")
         }
         Files.createDirectories(destination)
-        writeJsonAtomically(destination.resolve("report.json"), result)
+        writeEvidenceJsonStream(destination.resolve("report.json"), result, FactualIncumbentTrajectoryReport.serializer())
         ResearchRunArtifacts(destination, bindings.identity).also { it.register("report.json"); it.finalize() }
         return result
     }
@@ -276,10 +276,19 @@ internal fun projectFactualIncumbentTrajectory(replay: VerifiedCanonicalSemantic
     require(payoff == when (replay.terminal.winnerId) { viewer -> 1.0; null -> 0.0; else -> -1.0 })
     val rows = information.mapIndexed { index, state -> FactualIncumbentTrajectoryRow(index, viewer, state,
         MonoRedInformationEvaluator.evaluate(state, viewer), payoff) }
-    val encoded = evidenceJson.encodeToString(rows)
-    PublicArtifactPrivacy.requireSafeJson(encoded, "factual incumbent trajectory information")
-    require(equivalence.safeDerivedArtifactDifference(evidenceJson.encodeToJsonElement(rows)) == null)
+    validateFactualIncumbentTrajectoryRows(rows, equivalence)
     return rows to equivalence.completedAudit()
+}
+
+/** All rows are checked lazily within one final-replay audit; no report-sized JSON tree is built. */
+internal fun validateFactualIncumbentTrajectoryRows(rows: List<FactualIncumbentTrajectoryRow>,
+    equivalence: RecordedReplayStateEquivalence) {
+    val fragments = rows.asSequence().mapIndexed { index, row ->
+        val element = evidenceJson.encodeToJsonElement(FactualIncumbentTrajectoryRow.serializer(), row)
+        PublicArtifactPrivacy.requireSafeJson(element, "factual incumbent trajectory information", "$[$index]")
+        "/$index" to element
+    }
+    require(equivalence.safeDerivedArtifactDifference(fragments) == null)
 }
 
 internal fun loadVerifiedFactualIncumbentTrajectory(directory: Path, expectedIdentity: String): FactualIncumbentTrajectoryReport {

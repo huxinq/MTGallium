@@ -71,6 +71,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.mtgallium.agent.infoset.core.PolicyAudience
 import org.mtgallium.agent.infoset.core.PolicyAudienceScope
 import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
@@ -1575,6 +1576,58 @@ class OutcomeStateCorpusTest {
         assertEquals("/policyVersion", difference.path)
         assertTrue(difference.reason.contains("derived safe inspection bundle"))
         assertFailsWith<IllegalArgumentException> { equivalence.completedAudit() }
+    }
+
+    @Test
+    fun `fragmented safe audit checks the final routing leak and preserves its array path`() {
+        val creation = syntheticDelayedAbilityTransition()
+        val equivalence = RecordedReplayStateEquivalence(historicalProjectionAuthority())
+        assertEquals(null, creation.difference(equivalence, rawOrdinal = 0))
+        val expectedFinal = creation.expectedAfter.withoutSyntheticStackAbility()
+        val actualFinal = creation.actualAfter.withoutSyntheticStackAbility()
+        assertEquals(null, equivalence.transitionDifference(creation.action, creation.action, emptyList(), emptyList(),
+            creation.expectedAfter, creation.actualAfter, expectedFinal, actualFinal, true, true, 1))
+        assertEquals(null, equivalence.finalDifference(expectedFinal, actualFinal, 2))
+        var visited = 0
+        val fragments = (0 until 128).asSequence().map { index ->
+            visited++
+            "/$index" to buildJsonObject {
+                put("policyVersion", if (index == 127) SYNTHETIC_EXPECTED_ABILITY_ID else "safe")
+            }
+        }
+        val difference = requireNotNull(equivalence.safeDerivedArtifactDifference(fragments))
+        assertEquals(128, visited)
+        assertEquals("/127/policyVersion", difference.path)
+        assertFailsWith<IllegalArgumentException> { equivalence.completedAudit() }
+    }
+
+    @Test
+    fun `fragmented safe audit requires final replay and complete visitation before one-shot completion`() {
+        fun current() = RecordedReplayStateEquivalence.currentEngine(FACTUAL_INCUMBENT_ARGENTUM_REVISION)
+        val state = GameState()
+        val equivalence = current()
+        var visited = 0
+        val fragments = (0 until 128).asSequence().map { index ->
+            assertFailsWith<IllegalArgumentException> { equivalence.completedAudit() }
+            visited++
+            "/$index" to buildJsonObject { put("safe", index) }
+        }
+        assertFailsWith<IllegalArgumentException> { equivalence.safeDerivedArtifactDifference(fragments) }
+        assertEquals(0, visited)
+        assertEquals(null, equivalence.finalDifference(state, state, 0))
+        assertEquals(null, equivalence.safeDerivedArtifactDifference(fragments))
+        assertEquals(128, visited)
+        equivalence.completedAudit()
+        assertFailsWith<IllegalArgumentException> { equivalence.safeDerivedArtifactDifference(fragments) }
+        assertEquals(128, visited)
+        val interrupted = current()
+        assertEquals(null, interrupted.finalDifference(state, state, 0))
+        val failingFragments = sequence {
+            yield("/0" to buildJsonObject { put("safe", true) })
+            throw IllegalStateException("late fragment failed")
+        }
+        assertFailsWith<IllegalStateException> { interrupted.safeDerivedArtifactDifference(failingFragments) }
+        assertFailsWith<IllegalArgumentException> { interrupted.completedAudit() }
     }
 
     @Test
