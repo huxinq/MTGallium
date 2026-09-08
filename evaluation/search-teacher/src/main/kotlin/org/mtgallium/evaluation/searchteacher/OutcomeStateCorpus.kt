@@ -433,6 +433,28 @@ internal data class OutcomeStateLegacyTypeLineNormalizationAudit(
     }
 }
 
+/** Same typed leave/LKI proof, attributed to the retained 3757 codec rather than historical repair. */
+@Serializable
+internal data class CurrentEngineTimeLordCodecAudit(
+    val engineRevision: String = FACTUAL_INCUMBENT_ARGENTUM_REVISION,
+    val algorithm: String = "argentum-3757-event-correlated-time-lord-codec-equivalence-v1",
+    val normalizations: List<OutcomeStateLegacyTypeLineNormalizationAudit>,
+    val normalizationCount: Int = normalizations.size,
+    val activeMappingsAtFinal: Int = normalizations.count { it.presentAtFinal },
+) {
+    init {
+        require(engineRevision == FACTUAL_INCUMBENT_ARGENTUM_REVISION)
+        require(algorithm == "argentum-3757-event-correlated-time-lord-codec-equivalence-v1")
+        require(normalizationCount == normalizations.size)
+        require(activeMappingsAtFinal == normalizations.count { it.presentAtFinal })
+        require(normalizations == normalizations.sortedWith(
+            compareBy<OutcomeStateLegacyTypeLineNormalizationAudit> { it.rawOrdinal }
+                .thenBy { it.eventIndex }.thenBy { it.entityId }))
+        require(normalizations.map { it.entityId }.distinct().size == normalizations.size)
+        require(normalizations.map { it.rawOrdinal to it.eventIndex }.distinct().size == normalizations.size)
+    }
+}
+
 @Serializable
 internal data class OutcomeStateReplayCompatibilityAudit(
     val schemaVersion: Int = 2,
@@ -456,6 +478,8 @@ internal data class OutcomeStateReplayCompatibilityAudit(
     // Existing field for synthetic routing identities: those must retire before final validation.
     val activeMappingsAtFinal: Int = 0,
     val forbiddenOccurrenceCount: Int = 0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val currentEngineTimeLordCodec: CurrentEngineTimeLordCodecAudit? = null,
 ) {
     init {
         require(schemaVersion == 2)
@@ -515,6 +539,7 @@ internal data class OutcomeStateReplayCompatibilityAudit(
             activeLegacyTimeLordTypeLineMappingsAtFinal ==
                 legacyTimeLordTypeLineNormalizations.count { it.presentAtFinal }
         )
+        require(currentEngineTimeLordCodec == null || legacyTimeLordTypeLineNormalizations.isEmpty())
         require(activeMappingsAtFinal == 0)
         require(forbiddenOccurrenceCount == 0)
     }
@@ -527,8 +552,10 @@ internal data class OutcomeStateReplayCompatibilityAudit(
         require((activatedResolutionKeyMappings + activatedResolutionScopes.flatMap { it.members }).all {
             it.creationRawOrdinal < rawTransitionCount && it.retirementRawOrdinal < rawTransitionCount
         })
-        require(legacyTimeLordTypeLineNormalizations.all { it.rawOrdinal < rawTransitionCount })
-        require(legacyTimeLordTypeLineNormalizations.all {
+        val typeLineEpisodes = legacyTimeLordTypeLineNormalizations +
+            currentEngineTimeLordCodec?.normalizations.orEmpty()
+        require(typeLineEpisodes.all { it.rawOrdinal < rawTransitionCount })
+        require(typeLineEpisodes.all {
             it.retirementRawOrdinal == null || it.retirementRawOrdinal < rawTransitionCount
         })
     }
@@ -1270,7 +1297,7 @@ internal class RecordedReplayStateEquivalence private constructor(
     }
 
     companion object {
-        /** Current-engine factual replays retain scoped routing repairs, never historical TypeLine repair. */
+        /** Current-engine factual replays retain distinct codec provenance for the same scoped proof. */
         fun currentEngine(engineRevision: String): RecordedReplayStateEquivalence {
             require(engineRevision == FACTUAL_INCUMBENT_ARGENTUM_REVISION)
             return RecordedReplayStateEquivalence(false)
@@ -1311,9 +1338,6 @@ internal class RecordedReplayStateEquivalence private constructor(
             emptyList(),
     ): RecordedReplayStateDifference? {
         require(!finalValidated) { "Replay state equivalence was already finalized" }
-        require(allowHistoricalTypeLineNormalization || legacyTimeLordTypeLineNormalizations.isEmpty()) {
-            "Current-engine replay refuses historical Time Lord TypeLine normalization"
-        }
         require(rawOrdinal == nextRawOrdinal) {
             "Replay raw ordinal is not contiguous: expected=$nextRawOrdinal, actual=$rawOrdinal"
         }
@@ -1487,6 +1511,19 @@ internal class RecordedReplayStateEquivalence private constructor(
         require(safeInspectionBundleValidated) {
             "Replay state equivalence audit requested before safe inspection-bundle validation"
         }
+        val typeLineAudit = admittedLegacyTypeLines.values
+            .map { lifecycle ->
+                OutcomeStateLegacyTypeLineNormalizationAudit(
+                    rawOrdinal = lifecycle.creationRawOrdinal,
+                    eventIndex = lifecycle.eventIndex,
+                    entityId = lifecycle.entityId.value,
+                    retirementRawOrdinal = lifecycle.retirementRawOrdinal,
+                )
+            }.sortedWith(
+                compareBy<OutcomeStateLegacyTypeLineNormalizationAudit> { it.rawOrdinal }
+                    .thenBy { it.eventIndex }
+                    .thenBy { it.entityId }
+            )
         return OutcomeStateReplayCompatibilityAudit(
             activatedResolutionScopes = admittedMappings.values
                 .filter { it.mapping.activatedResolutionKey }.map { lifecycle ->
@@ -1515,19 +1552,9 @@ internal class RecordedReplayStateEquivalence private constructor(
                 compareBy<OutcomeStateSyntheticAbilityMappingAudit> { it.creationRawOrdinal }
                     .thenBy { it.stackEntityId }
             ),
-            legacyTimeLordTypeLineNormalizations = admittedLegacyTypeLines.values
-                .map { lifecycle ->
-                    OutcomeStateLegacyTypeLineNormalizationAudit(
-                        rawOrdinal = lifecycle.creationRawOrdinal,
-                        eventIndex = lifecycle.eventIndex,
-                        entityId = lifecycle.entityId.value,
-                        retirementRawOrdinal = lifecycle.retirementRawOrdinal,
-                    )
-                }.sortedWith(
-                    compareBy<OutcomeStateLegacyTypeLineNormalizationAudit> { it.rawOrdinal }
-                        .thenBy { it.eventIndex }
-                        .thenBy { it.entityId }
-                ),
+            legacyTimeLordTypeLineNormalizations = if (allowHistoricalTypeLineNormalization) typeLineAudit else emptyList(),
+            currentEngineTimeLordCodec = if (allowHistoricalTypeLineNormalization) null else
+                CurrentEngineTimeLordCodecAudit(normalizations = typeLineAudit),
         )
     }
 
@@ -1537,19 +1564,28 @@ internal class RecordedReplayStateEquivalence private constructor(
         PolicyJson.format.encodeToJsonElement(PolicyInspectionBundle.serializer(), bundle)
     )
 
-    internal fun safeDerivedArtifactDifference(artifact: JsonElement): RecordedReplayStateDifference? {
+    internal fun safeDerivedArtifactDifference(artifact: JsonElement): RecordedReplayStateDifference? =
+        safeDerivedArtifactDifference(sequenceOf("" to artifact))
+
+    /** Visit all fragments before completing the existing one-shot safe-artifact audit. */
+    internal fun safeDerivedArtifactDifference(
+        artifacts: Sequence<Pair<String, JsonElement>>,
+    ): RecordedReplayStateDifference? {
         require(finalValidated) { "Safe inspection bundle checked before final state validation" }
         require(!safeInspectionBundleValidated) { "Safe inspection bundle was already validated" }
-        for (mapping in admittedMappings.values.map { it.mapping }) {
-            for (id in listOf(mapping.expectedId, mapping.actualId)) {
-                val path = stringOccurrencePaths(artifact, id).firstOrNull() ?: continue
-                return RecordedReplayStateDifference(
-                    boundary = "safe-inspection-bundle",
-                    path = path,
-                    expected = jsonString(mapping.expectedId),
-                    actual = jsonString(mapping.actualId),
-                    reason = "privileged synthetic ability id appears in the derived safe inspection bundle",
-                )
+        for ((prefix, artifact) in artifacts) {
+            for (lifecycle in admittedMappings.values) {
+                val mapping = lifecycle.mapping
+                for (id in listOf(mapping.expectedId, mapping.actualId)) {
+                    val path = stringOccurrencePaths(artifact, id).firstOrNull() ?: continue
+                    return RecordedReplayStateDifference(
+                        boundary = "safe-inspection-bundle",
+                        path = prefix + path,
+                        expected = jsonString(mapping.expectedId),
+                        actual = jsonString(mapping.actualId),
+                        reason = "privileged synthetic ability id appears in the derived safe inspection bundle",
+                    )
+                }
             }
         }
         safeInspectionBundleValidated = true
@@ -1910,6 +1946,17 @@ internal class RecordedReplayStateEquivalence private constructor(
                     allowedTypeLinePaths += lifecycle.statePath
                 }
             }
+        if (!allowHistoricalTypeLineNormalization) {
+            // No codec repair is needed for an identical typed state or identical entity container.
+            // The latter remains path-bound so unrelated serialized-equal subtype differences cannot
+            // borrow equality from another entity. Unknown non-entity paths still fail closed.
+            val exactEntityPrefixes = expected.entities.keys.filter { id ->
+                expected.entities[id] == actual.entities[id]
+            }.map { "/entities/${jsonPointerSegment(it.value)}/" }
+            allowedTypeLinePaths += (expectedTypeLinePaths intersect actualTypeLinePaths.toSet())
+                .filter { path -> path !in allowedTypeLinePaths &&
+                    (expected == actual || exactEntityPrefixes.any { path.startsWith(it) }) }
+        }
         allowedTypeLinePaths.sort()
         if (expectedTypeLinePaths != allowedTypeLinePaths ||
             actualTypeLinePaths != allowedTypeLinePaths

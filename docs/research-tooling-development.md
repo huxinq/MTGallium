@@ -89,6 +89,30 @@ changes, followed by `just check`. The [workflow contract](research-workflow.md)
 defines the scientific meanings, and the [workbench guide](research-workbench.md)
 describes the user interface.
 
+The public factual-trajectory memory check exercises complete synthetic replay
+projection, all-row privacy and routing validation, and streaming trajectory
+output. Each history snapshot allocates its own nested events. A barrier holds
+all workers' completed trajectories together before writing, and two batches
+expose repeated allocation. It reports sampled heap use, GC time, elapsed time,
+output sizes and JVM identity. Run it separately from the small public regressions:
+
+```bash
+bash tools/mtgallium-gradle :evaluation:search-teacher:factualTrajectoryMemoryCheck
+```
+
+Defaults are an 8 GiB heap, two workers, two batches, 512 decisions and eight public
+objects per history event, requiring at least 500 MB of serialized output per
+trajectory and sampled heap use below 85% of the cap. The task has a ten-minute
+limit. Use `-PfactualMemoryJavaVersion=26` to select an installed matching
+execution JVM; omission uses the project test toolchain. Explicit engineering
+variations use `-PfactualMemoryHeap=...` and `-PfactualMemory.decisions=...`,
+`.objects`, `.workers`, `.batches`, `.minimumBytes` or
+`.maximumHeapFraction`. Record every variation when interpreting the result.
+The fixture uses a synthetic replay world and a rows/audit output wrapper; it
+does not measure Argentum restoration, source admission, fitting or search.
+Its byte size and sampled peak are engineering witnesses, not guarantees for a
+complete private study or measurements of its all-selection cost.
+
 Historical experiment launchers are removed once their shared contracts have an
 independent owner. See the [retired command inventory](retired-experiment-commands.md)
 for the removed families and historical-source recovery policy.

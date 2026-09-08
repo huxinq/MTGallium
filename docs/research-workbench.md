@@ -173,6 +173,7 @@ infer completion from a stored RUNNING flag.
 | `position-bank` | Authenticated source games | Bank derivation/reconstruction |
 | `terminal-kernel-study` | Embedded development pilot | Targets, frozen fit, then validation |
 | `terminal-target-sensitivity` | Embedded variant pilots | Changed conditional targets with fixed models |
+| `factual-residual-study` | Authenticated factual corpus, allocation, and build; optional admission parent checked at preflight | Frozen V2 residual fit and declared diagnostics |
 | `direct-attack-kernel-screen` | Native model/bank/scope/population checks | Declared choices and conditional targets |
 | `terminal-prediction-diagnostic` | Authenticated development evidence | Reused-target diagnosis without fitting/collection |
 | `research-transfer-audit` | Authenticated model/role/gameplay links | Retained-evidence comparison |

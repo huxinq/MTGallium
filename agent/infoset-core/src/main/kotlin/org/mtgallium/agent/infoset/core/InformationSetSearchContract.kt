@@ -28,6 +28,7 @@ enum class LeafEvaluator(val evaluatorId: String) {
     MTGALLIUM_TACTICAL_V3("mono-red-tactical-value-v3"),
     MTGALLIUM_LEARNED_OUTCOME_V1("mono-red-learned-outcome-value-v1"),
     ARGENTUM_BOARD_V1("argentum-board-v1"),
+    MTGALLIUM_FACTUAL_OUTCOME_RESIDUAL_V1("mono-red-factual-outcome-residual-v1"),
     ;
 }
 

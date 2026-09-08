@@ -54,6 +54,9 @@ CAPABILITIES: Mapping[str, Capability] = MappingProxyType({
         gate='authenticated-inputs', purpose='Diagnose frozen development predictions',
         suite='terminal-prediction-diagnostic',
         requires_deck=False),
+    'factual-residual-study': Capability(
+        gate='authenticated-inputs', purpose='Fit and diagnose a V2 residual from admitted factual trajectories',
+        suite='factual-residual-study'),
     'direct-attack-kernel-screen': Capability(
         gate='authenticated-inputs', purpose='Compare direct decisions on declared development roots',
         suite='direct-attack-kernel-screen'),

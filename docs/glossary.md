@@ -279,6 +279,14 @@ direct action selection. In experiment operations, “continuation” can also m
 extending a stopped gameplay trial; qualify that use as **gameplay continuation**.
 See [policy roles][architecture] and [gameplay continuation][workflow-continuation].
 
+### Factual admission continuation
+
+A new factual residual study attempt that reuses authenticated complete admitted
+trajectories from an unfitted parent failure and admits only missing coordinates.
+Original child identities and the complete allocation remain intact; the combined
+execution stays within the original budget. This is distinct from a policy rollout
+or extending a gameplay trial. See [factual residual study](research-workflow.md#factual-incumbent-residual-study).
+
 ### Visits, backups, and tree reuse
 
 A visit counts search work on a tree node or action. A backup carries a

@@ -27,6 +27,10 @@ internal val researchWorkflowCommands = listOf(
         SearchTeacherCommandContext::runAttackKernelLearning,
     ),
     SearchTeacherCommand(
+        "factual-residual-study", CommandPreparation.HANDLER,
+        SearchTeacherCommandContext::runFactualResidualStudy,
+    ),
+    SearchTeacherCommand(
         "direct-attack-kernel-screen", CommandPreparation.HANDLER,
         SearchTeacherCommandContext::runDirectAttackKernelScreen,
     ),
@@ -103,6 +107,13 @@ private fun SearchTeacherCommandContext.runAttackKernelLearning() {
     val plan = readPlan<AttackKernelLearningPlan>()
     val report = AttackKernelLearningRunner(root).run(plan, diagnosticOutput(requireNotNull(options.outputPath)), requireNotNull(options.deckManifest))
     println("Attack kernel learning ${report.researchRunIdentity}: ${report.disposition}")
+}
+
+private fun SearchTeacherCommandContext.runFactualResidualStudy() {
+    val plan = readPlan<FactualResidualStudyPlan>()
+    val output = diagnosticOutput(requireNotNull(options.outputPath))
+    val report = FactualResidualStudy(root, registry, manifest).run(plan, output)
+    println("Factual residual study ${report.bindings.identity}; report=${output.resolve("report.json")}")
 }
 
 private fun SearchTeacherCommandContext.runDirectAttackKernelScreen() {

@@ -342,3 +342,60 @@ and cannot establish that stronger policies cause shorter games. Both policies s
 one game length and game time. Cross-run ratios keep populations separate and expose
 configuration, source, deck and worker differences; they are not isolated speedups or
 tournament throughput. Existing retained reports are not modified.
+
+## Factual incumbent residual study
+
+`factual-residual-study` admits complete actual incumbent self-play trajectories
+through the current-engine factual replay authority. All 64 allocated games must
+be admitted before fitting. It preserves the original 25 development and seven
+validation seed-group labels: the first 16 lexical development groups train, and
+the other 16 groups screen. Every group is already campaign-observed; this screen
+is held out from the coefficient fit only. The allocation and one hashed searched
+root per screen leg are sealed before fitting. No replacement or filtered fit is
+permitted after refusal.
+
+The optional `admissionWorkers` plan field limits simultaneous trajectory
+admissions and full-trajectory loading for root preparation separately from
+`workers`, which continues to bound the search readout. It must be between one and `workers`. Omission preserves the original
+admission concurrency and serialized plan; an explicit limit is part of the new
+study identity. The same overall deadline includes admission, fitting and readout.
+Lower admission concurrency therefore does not extend the deadline or admit a
+partial corpus. Trajectory output streams to its atomic destination, and safe
+artifact validation visits every row after final replay validation without
+materializing another complete trajectory JSON tree. Root preparation authenticates
+the complete trajectory, then retains only the selected information digest and
+required replay metadata through search; unrelated trajectory rows are released.
+
+An explicitly configured `admissionParent` can link one new attempt to a finalized,
+unfitted admission failure. The source verifies the parent study, build, original
+inputs, exact allocation and every registered admitted trajectory. Reused entries
+retain their original references and record `reusedFromStudyIdentity`; only missing
+coordinates are admitted under the new producer. Refused or partial trajectories,
+post-corpus results, changed scientific plans and chained continuations are rejected.
+All 64 coordinates remain required. The continuation's `maximumSeconds` plus the
+rounded-up parent elapsed time must fit the parent's original cap. This capability
+does not authorize retries: use requires owner authorization covering continuation.
+Workbench `preflight` authenticates the parent without replay or fitting, and launch
+rechecks it within the continuation deadline. Frozen parent artifacts remain intact.
+
+The sole fit uses at most 32 equally spaced predecision frames per training leg,
+including endpoints, with equal seed-group, leg and selected-frame weight. Its
+target is the same viewer's actual terminal payoff minus visible V2. Fixed ridge
+0.001 penalizes both the intercept and coefficients. The existing safe outcome
+features provide the training vocabulary; unseen features have zero coefficient.
+The separate checkpoint deploys `clip(V2 + residual, -1, 1)` only at bounded16
+search cutoffs. A zero residual exactly preserves V2, and terminal payoff keeps
+its own settlement meaning.
+
+The checkpoint is finalized and reloaded before screen prediction or new search.
+Prediction error and clipping over all screen frames are descriptive. The root
+readout runs 128 fresh searches: 32 roots, two matched seeds and two arms, each
+with an independently reconstructed actual world and sequential viewer belief.
+Both arms retain 56 simulations, eight particles and the incumbent's fast16
+rollout policies. Complete matched menus, information and belief weights, learned
+cutoff exposure, changes in at least eight seed groups, and total selection cost
+no greater than 1.10 times control permit only a separate factual terminal-target
+gate. Selection cost includes actual information/menu construction through
+selection for every attempted coordinate. Refused and unexecuted work remains
+explicit. The 30-minute, eight-worker stage establishes neither a terminal-target
+improvement nor deployed-policy strength or recursive learnability.

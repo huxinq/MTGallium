@@ -28,6 +28,7 @@ class InformationSetSearch(
             "Configured leaf ${config.leaf.evaluator.evaluatorId} does not match strategy " +
                 leafEvaluationStrategy.configuredEvaluatorId
         }
+        leafEvaluationStrategy.validateSearchConfig(config)
         require(
             config.leaf.stateSource != LeafStateSource.CURRENT_INFORMATION_STATE ||
                 leafEvaluationStrategy.source is LeafValueSource.Information

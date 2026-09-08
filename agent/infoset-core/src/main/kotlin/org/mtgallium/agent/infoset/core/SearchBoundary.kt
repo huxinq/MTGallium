@@ -344,6 +344,8 @@ data class LeafEvaluationStrategy(
     val supportsTraceReuse: Boolean = true,
     val settleAtRolloutHorizon: Boolean = false,
     val unresolvedLeafHandling: UnresolvedLeafHandling = UnresolvedLeafHandling.EVALUATE,
+    /** Capability-owned deployment restrictions, checked before search can execute. */
+    val validateSearchConfig: (InformationSetSearchConfig) -> Unit = {},
 ) {
     init {
         require(configuredEvaluatorId.isNotBlank())
