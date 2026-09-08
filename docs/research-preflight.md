@@ -1,5 +1,9 @@
 # Research-run preflight
 
+For routine use, the [research CLI workbench](research-workbench.md) freezes the
+profile/inputs and verifies the pass before dispatching its exact workload in one
+JVM. The low-level commands below remain available for specialized callers.
+
 `research-preflight` runs a small technical rehearsal before a substantial research
 run. `research-preflight-verify` rechecks a retained pass immediately before launch.
 Both require an explicit JSON profile and a separate private output directory:
@@ -29,8 +33,9 @@ checkout and keep the execution classpath fixed.
 
 The launcher must invoke verification with the same profile, runtime, and source
 immediately before starting the declared primary workload, and honor its nonzero
-exit on refusal. The existing full-run commands do not automatically enforce
-this gate. This capability does not run arbitrary shell commands or own durable
+exit on refusal. The low-level full-run commands do not automatically enforce
+this gate. The workbench bound launcher enforces it for supported gameplay/search
+screens. Preflight itself does not run arbitrary shell commands or own durable
 execution. A tiny rehearsal cannot certify full-run memory, duration, every action
 path, or research validity.
 

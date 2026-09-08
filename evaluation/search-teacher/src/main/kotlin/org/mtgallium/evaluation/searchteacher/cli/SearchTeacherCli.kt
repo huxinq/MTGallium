@@ -119,6 +119,8 @@ internal object SearchTeacherSuites {
 
     fun require(id: String): SearchTeacherSuite =
         requireNotNull(definitions[id]) { "Unknown suite $id" }
+
+    fun all(): List<SearchTeacherSuite> = definitions.values.toList()
 }
 
 internal data class SearchTeacherCli(

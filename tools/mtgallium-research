@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""MTGallium's human research workbench. See `--help` and docs/research-workbench.md."""
+from research_workspace.cli import main
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,5 +1,8 @@
 # Technical documentation
 
+- [Research CLI workbench](research-workbench.md) — design, freeze, preflight,
+  launch, retrieve, diagnose and review an experiment from one human interface.
+
 - [`../AGENTS.md`](../AGENTS.md) — coding-agent guidance and semantic invariants.
 - [`architecture.md`](architecture.md) — stable public architecture and limits.
 - [`real-game-screening.md`](real-game-screening.md) — paired gameplay with early stopping and a copy-ready plan, private position banks and matched search diagnostics.
