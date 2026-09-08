@@ -5,6 +5,8 @@ engine, an engine-backed Search Teacher, and evaluation code for a frozen
 Mono-Red scope. It is not a claim that these contracts suffice for general
 Magic or optimal play.
 
+The [glossary](glossary.md) explains the terminology used here in plain language.
+
 ## Information and action boundaries
 
 The trusted Argentum adapter may inspect full engine state. It projects an

@@ -1,6 +1,7 @@
 # Technical documentation
 
 - [`../AGENTS.md`](../AGENTS.md) — coding-agent guidance and semantic invariants.
+- [`glossary.md`](glossary.md) — plain-language definitions, tools and subsystems, aliases, and source references.
 - [`architecture.md`](architecture.md) — stable public architecture and limits.
 - [`real-game-screening.md`](real-game-screening.md) — paired gameplay with early stopping and a copy-ready plan, private position banks and matched search diagnostics.
 - [`calibration-cloning-admission.md`](calibration-cloning-admission.md) — authenticated teacher-action examples from retained paired gameplay.

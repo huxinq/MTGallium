@@ -27,6 +27,9 @@ represented player knowledge, semantic action identity, hidden-world search,
 and evidence tooling. `agent/infoset-argentum` is the trusted boundary allowed
 to inspect full Argentum state; policy-facing code receives only safe projections.
 
+See the [glossary](docs/glossary.md) for plain-language explanations of project
+terminology and links to the detailed contracts.
+
 ## Build and test
 
 Install Git with submodules, JDK 21, and `just`, then run:

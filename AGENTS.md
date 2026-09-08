@@ -6,6 +6,29 @@ remains historical provenance. Read [`docs/architecture.md`](docs/architecture.m
 before changing a semantic boundary. Read other source and documentation as
 the task requires; reuse relevant context already established in this task.
 
+## Shared terminology
+
+Use [`docs/glossary.md`](docs/glossary.md) as the shared terminology reference
+for documentation and discussions. Before explaining or editing an area, consult
+its relevant entries; reuse definitions already checked in this task. Explain
+unfamiliar terms briefly at first use and link to the entry when useful. Prefer
+plain words when a technical term adds no precision.
+
+During authorized editing work, autonomously add or improve entries when a task
+introduces important recurring jargon, exposes an unclear definition, or establishes
+a useful alias. Follow the glossary's entry format, verify the meaning against
+owning public documentation or source, and update the entry in the same change
+when an established meaning changes. Keep one definition per concept, with aliases
+and links instead of competing definitions scattered across documents. Brief
+explanations in context are still useful.
+
+The glossary explains established meanings; it does not override source contracts
+or owner decisions. Preserve research-critical distinctions and apply the existing
+semantic authority rule to consequential ambiguity. Routine verified additions
+need no separate approval. Keep private evidence and unsupported result claims
+out of entries. During read-only or audit-only work, suggest additions without
+editing the glossary.
+
 ## Semantic authority
 
 Research meaning outranks generic cleanup. Stop for owner review when an
