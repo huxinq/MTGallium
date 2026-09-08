@@ -232,6 +232,34 @@ class WorkflowTest(unittest.TestCase):
         with self.assertRaisesRegex(c.Refusal, 'Symbolic-link'):
             c.private_path(link / 'output')
 
+    def test_diff_includes_changed_deck_from_frozen_parent(self):
+        draft = self.draft()
+        attempt = w.freeze(draft)
+        fork = Path(w.fork_experiment(attempt, 'deck-fork', 'Change declared deck')['directory'])
+        (fork / 'deck.json').write_text('{"deck":"changed population"}')
+        changes = w.diff_experiments(attempt, fork)['changes']
+        self.assertTrue(any(row['pointer'] == '/deck/content/deck' and row['after'] == 'changed population' for row in changes))
+        self.assertTrue(any(row['pointer'] == '/deck/sha256' for row in changes))
+        self.assertEqual('synthetic', c.read_json(attempt / 'deck.json')['deck'])
+
+    def test_doctor_checks_deck_and_actual_build_authority(self):
+        draft = self.draft()
+        self.assertTrue(w.doctor(draft)['readyToFreeze'])
+        self.assertTrue(any(call[0] == 'build-verify' for call in self.calls))
+        (draft / 'deck.json').unlink()
+        self.assertFalse(w.doctor(draft)['readyToFreeze'])
+        (draft / 'deck.json').write_text('{}')
+        def incompatible(command, *args, **kwargs):
+            if command[0] == 'build-verify':
+                raise c.Refusal('Build source differs from the clean execution source')
+            return self.fake_native(command, *args, **kwargs)
+        with patch.object(w, 'native', side_effect=incompatible):
+            result = w.doctor(draft)
+        self.assertFalse(result['readyToFreeze'])
+        self.assertTrue(any('Build source differs' in problem for problem in result['problems']))
+        self.assertFalse((draft / 'attempts').exists())
+        self.assertFalse(list(c.private_work().glob('.doctor-build-*')))
+
     def test_json_duplicate_setting_and_runtime_application_override_refuse(self):
         self.plan.write_text('{"threads":2,"threads":8}')
         with self.assertRaisesRegex(c.Refusal, 'Duplicate'):

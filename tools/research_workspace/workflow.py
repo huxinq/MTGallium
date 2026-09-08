@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 from .common import (REPO, Refusal, atomic_json, build_reference, clean_source, digest,
@@ -86,6 +87,26 @@ def plan_input(path, spec):
         verify_request(path.parent)
         return path.parent / 'plan.json'
     return input_path(path, spec['inputs']['plan'])
+
+
+def deck_input(path, spec):
+    if not spec['inputs']['deck']:
+        return None
+    if (path.parent / 'request.json').is_file():
+        verify_request(path.parent)
+        return path.parent / 'deck.json'
+    return input_path(path, spec['inputs']['deck'])
+
+
+def inspect_build(spec):
+    require(spec['inputs']['build'], 'inputs.build must name a frozen build directory.')
+    reference = build_reference(spec['inputs']['build'])
+    # The native API consumes an exact reference file. Keep this transient check
+    # private and remove it on return; doctor creates no retained attempt.
+    with tempfile.TemporaryDirectory(prefix='.doctor-build-', dir=private_work()) as temporary:
+        path = Path(temporary) / 'build-reference.json'
+        write_new(path, reference)
+        return native(['build-verify', path], reference['directory'], spec['execution'])
 
 
 def new_experiment(name, kind, plan, deck, build=None, question='', destination=None, lineage=None):
@@ -185,7 +206,9 @@ def doctor(path):
         ('private destination', lambda: str(private_path(path.parent))),
         ('committed treatment', clean_source),
         ('plan input', lambda: str(input_path(path, spec['inputs']['plan']))),
+        ('deck input', lambda: read_json(deck_input(path, spec)) if spec['inputs']['deck'] else 'No deck required by this kind'),
         ('effective typed plan', lambda: plan_draft(path)['native']),
+        ('frozen build attestation', lambda: inspect_build(spec)),
     ):
         try:
             checks.append(dict(check=label, passed=True, detail=check()))
@@ -459,7 +482,10 @@ def status(path):
 def diff_experiments(left, right):
     def content(path):
         path, spec = load_draft(path)
-        return dict(experiment=spec, plan=read_json(plan_input(path, spec)))
+        plan = plan_input(path, spec)
+        deck = deck_input(path, spec)
+        return dict(experiment=spec, plan=read_json(plan), planSha256=digest(plan),
+                    deck=None if deck is None else dict(content=read_json(deck), sha256=digest(deck)))
     changes = []
     def walk(a, b, pointer=''):
         if type(a) is dict and type(b) is dict:

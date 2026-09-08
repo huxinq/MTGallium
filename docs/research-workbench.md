@@ -80,6 +80,7 @@ effect margin, gate or objective is invented by the workbench.
 
 ```bash
 research schema sequential
+research schema sequential --type SearchTeacherCalibrationPlan
 research plan /absolute/private/evidence/search-teacher/work/rollout-comparison
 research doctor /absolute/private/evidence/search-teacher/work/rollout-comparison
 ```
@@ -89,7 +90,9 @@ nullability, with references for recursive/generic structures. It is a type guid
 not a complete JSON Schema or proof that constructor constraints pass. `plan`
 uses the actual Kotlin decoder and displays effective defaults beside the design.
 Only that typed plan controls scientific settings. `doctor` lists missing design,
-input, source and configuration prerequisites without collecting samples.
+input, source and configuration prerequisites without collecting samples. It
+checks deck readability and the actual native build attestation, using a transient
+private reference file that is removed after the check.
 
 `execution.timeoutSeconds` is required and bounds the launched workload **and
 final verification together**. A separate rehearsal invocation has that same cap;
@@ -264,8 +267,8 @@ prediction diagnostics, sensitivity studies and transfer audits provide the
 specialized readouts.
 
 A fork of an attempt copies its frozen inputs; later old-draft edits cannot change
-that ancestry. `diff` compares actual plan/design fields, preserving missing versus
-null. Differences do not prove causal isolation or semantic equivalence. Reuse a
+that ancestry. `diff` compares actual plan/design fields and deck contents/hashes,
+preserving missing versus null. Differences do not prove causal isolation or semantic equivalence. Reuse a
 completed study stage only through explicit native retained references in the new
 plan; forking neither continues a statistical test nor resets its boundaries.
 
