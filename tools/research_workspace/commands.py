@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from . import capabilities, drafts, evidence, execution, inspection, monitoring, preparation
+from . import capabilities, completion, drafts, evidence, execution, inspection, monitoring, preparation
 from .native import build_reference, native, runtime
 from .source import source_state
 from .storage import REPO, Refusal, digest, private_path, private_work, require
@@ -47,6 +47,11 @@ def execute(args):
         return monitoring.read_log(args.attempt, args.preflight, args.lines)
     if command == 'find':
         return evidence.find_runs(args.root or private_work(), args.query, args.limit)
+    if command == 'audit':
+        run, build = inspection.run_and_build(args.run, args.build)
+        deck = args.deck or (args.run / 'deck.json' if (args.run / 'request.json').is_file() else None)
+        return completion.audit(run, build, expected=args.identity, deck=deck,
+                                timeout=args.timeout, heap_mib=args.heap_mib)
     if command in ('verify', 'inspect', 'describe', 'extract'):
         run, build = inspection.run_and_build(args.run, args.build)
         check = inspection.verifier(build, args.identity)

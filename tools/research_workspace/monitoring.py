@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from .requests import verify_request
 from .storage import no_links, now, read_json, require
+from .completion import recorded_research
 
 
 def status(path):
@@ -26,7 +27,8 @@ def status(path):
     output = path / 'output'
     result['outputDirectory'] = str(output)
     result['manifestPresent'] = (output / 'research-run-manifest.json').is_file()
-    result['next'] = 'verify/inspect the output; a finalized manifest does not establish a scientific pass'
+    result['recordedResearch'] = recorded_research(output)
+    result['next'] = 'audit the output for native completion and population checks; verify/inspect authenticates bytes and inventory'
     return result
 
 
@@ -58,6 +60,6 @@ def diagnose(path):
         if (path / ('preflight.log' if preflight else 'run.log')).is_file():
             tails.append(read_log(path, preflight))
     result.update(findings=findings, logs=tails,
-                  next='Repair the named prerequisite and create a fresh attempt. Reuse completed scientific stages only through the native plan\'s explicit retained references.',
+                  next='Inspect recordedResearch and audit retained outputs before planning replacement work. Reuse only through an explicit native continuation or retained-reference contract.',
                   limitation='Logs and wrapper states are operational observations, not a scientific failure diagnosis or outcome.')
     return result

@@ -80,6 +80,15 @@ was retained; the scientific interpretation still needs the experiment's rules.
 See [the artifact implementation][research-run-source] and
 [provenance](#provenance-manifest-and-frozen-source).
 
+### Completion audit
+
+A read-only workbench inspection that authenticates retained identities and
+checks supported scientific populations and stage references through a frozen
+runtime. It distinguishes process exit, byte verification, recorded completion,
+and research interpretation. Recovery candidates still need an explicit plan and
+native preflight; discovering retained work does not authorize execution.
+See [workbench completion audits](research-workbench.md#audit-retained-completion-and-recoverable-work).
+
 ### Research build and preflight tools
 
 `tools/mtgallium-research-build` builds and retains a runtime from clean committed

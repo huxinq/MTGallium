@@ -73,6 +73,13 @@ def catalog():
                                   plan=True, launch=True, verify='artifact-bytes',
                                   inspection='registered-artifact-inventory')
                              for kind, capability in CAPABILITIES.items()],
+            'inspectionCommands': [
+                dict(command='status', authority='recorded-unverified',
+                     purpose='Current process state, recorded scientific stages and potential retained admission recovery'),
+                dict(command='audit', authority='versioned-native-completion',
+                     purpose='Authenticated gameplay populations or factual residual allocation, admissions, checkpoint and recorded readout gate',
+                     runtime='Compatible frozen build; Java source launcher uses only its scientific APIs',
+                     execution='Read-only, bounded; no replay, fit or new search')],
             'nativeRoutes': [
                 dict(suite='campaign-data-use', purpose='Append explicit prospective or retrospective population use',
                      route='--suite campaign-data-use --profile USE.json --output REGISTRY',

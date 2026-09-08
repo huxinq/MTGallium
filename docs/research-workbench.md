@@ -307,3 +307,43 @@ private. Avoid adding arbitrary shell launch hooks or result-dependent defaults.
 `just check` includes those and the native public-source adapter regressions.
 Independent semantic review applies to interpretation-bearing changes. Technical
 checks establish implementation behavior, not a scientific result.
+
+## Audit retained completion and recoverable work
+
+```bash
+research status /absolute/private/evidence/study/attempts/0001 --json
+research audit /absolute/private/evidence/study/attempts/0001 --json
+research audit /absolute/private/evidence/historical/output \
+  --build /absolute/private/evidence/compatible-frozen-build \
+  --deck /absolute/private/evidence/retained-deck.json --json
+```
+
+`status` adds bounded, explicitly unverified observations of recorded scientific
+stages. A process exit or sealed manifest does not imply a completed fit or game.
+For factual admission failures, status discovers child report/manifest pairs;
+these are candidates for authentication, not a certified reusable population.
+Malformed or oversized metadata leaves scientific completion unestablished.
+
+`audit` verifies bytes and uses the selected frozen runtime's scientific readers
+to authenticate supported populations and bindings. Gameplay reports separate
+executed games, the inspected stopping prefix, overshoot, and ineligible games;
+only eligible inspected games contribute to the displayed outcome counts.
+Factual residual studies report allocated/admitted/refused/missing games,
+complete groups, rows by role, original trajectory references, and recorded
+training/search stages. An absent checkpoint leaves fit execution unknown.
+Retained prediction metrics are checked structurally, not recomputed.
+
+The factual adapter supports the `factual-residual-study-v1` continuation API.
+Older producer builds may need a compatible newer frozen `--build` solely for
+inspection. Its identity and the current adapter hash are reported separately
+from every original producer identity. Unknown protocols or missing APIs refuse;
+the command never falls back to jars from the inspection checkout. See the
+[adapter compatibility contract](../tools/research_workspace/audits/README.md).
+The audit is read-only and bounded by `--timeout` (default 180 seconds, maximum
+1800) and `--heap-mib` (default 4096, maximum 8192).
+
+Recovery discovery does not launch work or approve continuation. Use an explicit
+new plan and the native continuation preflight to establish eligibility. A sealed
+corpus is beyond the supported admission-continuation boundary. Preserve the
+original attempt and reuse authenticated references through the owning contract;
+do not automatically replay completed work after a later stage fails.

@@ -42,7 +42,19 @@ def render(command, value):
             print(entry['attempt'])
             print('  Process: ' + recorded.get('processState', 'UNKNOWN'))
             print('  Artifact verification: ' + recorded.get('artifactVerification', 'NOT_RUN') + ' (recorded; use verify to recheck)')
-            print('  Research disposition: ' + recorded.get('researchDisposition', 'NOT_INTERPRETED'))
+            research = entry.get('recordedResearch', {})
+            print('  Recorded research disposition: ' + research.get('disposition', 'NOT_RECORDED') +
+                  ' (' + research.get('verification', 'NOT_RECHECKED') + ')')
+            if research.get('stages'):
+                print('  Recorded stages: ' + ', '.join(f'{key}={state}' for key, state in research['stages'].items()))
+            if research.get('failure'):
+                print('  Recorded refusal: ' + research['failure'])
+            recovery = research.get('recovery', {})
+            if 'candidateCoordinates' in recovery:
+                print(f'  Recovery candidates: {len(recovery["candidateCoordinates"])} retained report/manifest pairs; '
+                      f'{len(recovery["missingCoordinates"])} missing coordinates (not yet verified)')
+            if recovery.get('next'):
+                print('  Recovery: ' + recovery['next'])
             if 'serviceObservation' in entry:
                 print('  Current service: ' + json.dumps(entry['serviceObservation']))
             if 'elapsedSeconds' in recorded:
@@ -52,6 +64,25 @@ def render(command, value):
             if 'warning' in entry:
                 print('  ' + entry['warning'])
             print('  Output: ' + entry['outputDirectory'])
+    elif command == 'audit':
+        print('Completion audit: ' + value['status'])
+        print('Evidence identity: ' + value['researchRunIdentity'])
+        if value['status'] == 'UNSUPPORTED':
+            print(value['reason'])
+        else:
+            result = value['completion']
+            print('Recorded disposition: ' + result['disposition'])
+            print('Stages: ' + ', '.join(f'{key}={state}' for key, state in result['stages'].items()))
+            if 'population' in result:
+                print('Population: ' + json.dumps(result['population']))
+            for comparison in result.get('comparisons', []):
+                print('Comparison: ' + json.dumps({key: comparison[key] for key in (
+                    'executedPairs', 'inspectedPairs', 'overshootPairs', 'eligibleInspectedGames', 'ineligibleInspectedGames')}))
+            if result.get('failure'):
+                print('Recorded refusal: ' + result['failure'])
+            print('Recovery: ' + json.dumps(result['recovery']))
+            print('Inspector adapter: ' + value['inspector']['adapter'] + ' ' + value['inspector']['adapterSha256'])
+            print('No new research was executed. --json includes the full checked populations and original producer references.')
     elif command in ('verify', 'inspect'):
         manifest = value.get('manifest', value.get('declared', {}))
         artifacts = value.get('artifacts', manifest.get('artifacts', []))

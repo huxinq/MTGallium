@@ -184,6 +184,16 @@ CI pass. Passing tests are technical evidence, not a research conclusion.
 - Reuse successful verification when its source, configuration, and inputs still
   apply. Report unrelated failures and continue unaffected work without modifying
   others' changes or claiming that a blocked check passed.
+- Before splitting a memory or concurrency repair, trace where the relevant
+  data is created, copied, retained and released across its consumers. Establish
+  one valid representative fixture before expanding its boundary cases.
+- Collect completed tool results before reporting their state or starting a
+  dependent action. Reuse known source locations and command requirements; check
+  the first failure before consuming expected outputs.
+- Prefer explicit patches for ordinary source and prose edits. Short Python
+  commands are useful for structured inspection and calculations; repeated
+  experiment operations belong in the workbench. Scripted replacements should
+  check their expected matches before writing.
 
 - Commit treatment source before substantial compute so evidence has an
   unambiguous source identity.
@@ -197,6 +207,8 @@ CI pass. Passing tests are technical evidence, not a research conclusion.
   decisions, source revision and relevant uncommitted work, last useful
   validation, and next action or unresolved decision. Recheck facts affected
   by intervening changes; a handoff record is context, not evidence authority.
+  Consolidate record updates at these milestones instead of rewriting the same
+  operational state after each command or progress message.
 
 Write commit messages for future readers. The subject should describe the
 resulting source state or established result, not implementation activity:

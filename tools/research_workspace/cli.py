@@ -17,7 +17,8 @@ def main(argv=None):
             print(json_bytes(result).decode(), end='')
         else:
             render(args.command, result)
-        return 2 if args.command == 'doctor' and not result['readyToFreeze'] else 0
+        return 2 if ((args.command == 'doctor' and not result['readyToFreeze']) or
+                     (args.command == 'audit' and result.get('status') == 'UNSUPPORTED')) else 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         if getattr(args, 'json', False):
             print(json_bytes(dict(status='REFUSED', error=str(exc))).decode(), end='')
