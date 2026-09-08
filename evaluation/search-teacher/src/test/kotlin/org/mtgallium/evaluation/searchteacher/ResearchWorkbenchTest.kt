@@ -34,7 +34,18 @@ class ResearchWorkbenchTest {
         val capabilities = catalog.getValue("capabilities").jsonArray.associate { it.jsonObject.getValue("kind").jsonPrimitive.content to it.jsonObject }
         assertEquals("bound-preflight", capabilities.getValue("position-screen").getValue("launchGate").jsonPrimitive.content)
         assertEquals("embedded-pilot", capabilities.getValue("terminal-kernel-study").getValue("launchGate").jsonPrimitive.content)
+        assertEquals("authenticated-inputs", capabilities.getValue("factual-residual-study").getValue("launchGate").jsonPrimitive.content)
         assertEquals("native-cli-only", capabilities.getValue("campaign-data-use").getValue("launchGate").jsonPrimitive.content)
+    }
+
+    @Test fun `factual residual native route requires plan output and deck`() {
+        assertFails { SearchTeacherCli.parse(arrayOf("--suite", "factual-residual-study")) }
+        assertFails { SearchTeacherCli.parse(arrayOf("--suite", "factual-residual-study", "--profile", "plan.json", "--output", "output")) }
+        val options = SearchTeacherCli.parse(arrayOf("--suite", "factual-residual-study", "--profile", "plan.json", "--output", "output", "--deck-manifest", "deck.json"))
+        assertEquals("factual-residual-study", options.suite)
+        assertEquals(Path.of("plan.json").toAbsolutePath().normalize(), options.profilePath)
+        assertEquals(Path.of("deck.json").toAbsolutePath().normalize(), options.deckManifest)
+        assertEquals(Path.of("output").toAbsolutePath().normalize(), options.outputPath)
     }
 
     @Test fun `typed plans use native constructors and serialization without reading synthetic evidence`() {

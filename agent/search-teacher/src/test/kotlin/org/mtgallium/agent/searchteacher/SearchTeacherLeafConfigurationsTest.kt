@@ -47,6 +47,7 @@ class SearchTeacherLeafConfigurationsTest {
                 "\"MTGALLIUM_TACTICAL_V3\"",
                 "\"MTGALLIUM_LEARNED_OUTCOME_V1\"",
                 "\"ARGENTUM_BOARD_V1\"",
+                "\"MTGALLIUM_FACTUAL_OUTCOME_RESIDUAL_V1\"",
             ),
             LeafEvaluator.entries.map { PolicyJson.format.encodeToString(it) },
         )

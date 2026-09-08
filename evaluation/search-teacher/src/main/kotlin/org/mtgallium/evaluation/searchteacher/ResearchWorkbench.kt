@@ -40,6 +40,7 @@ private val workbenchCapabilities = listOf(
     WorkbenchCapability("position-bank", "real-game-position-bank", "authenticated-inputs", RealGamePositionBankPlan.serializer()),
     WorkbenchCapability("terminal-kernel-study", "terminal-kernel-study", "embedded-pilot", TerminalKernelStudyPlan.serializer()),
     WorkbenchCapability("terminal-target-sensitivity", "terminal-target-sensitivity", "embedded-pilot", TerminalTargetSensitivityPlan.serializer()),
+    WorkbenchCapability("factual-residual-study", "factual-residual-study", "authenticated-inputs", FactualResidualStudyPlan.serializer()),
     WorkbenchCapability("direct-attack-kernel-screen", "direct-attack-kernel-screen", "authenticated-inputs", DirectAttackKernelScreenPlan.serializer()),
     WorkbenchCapability("terminal-prediction-diagnostic", "terminal-prediction-diagnostic", "authenticated-inputs", TerminalPredictionDiagnosticPlan.serializer()),
     WorkbenchCapability("research-transfer-audit", "research-transfer-audit", "authenticated-inputs", ResearchTransferAuditPlan.serializer()),

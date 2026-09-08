@@ -16,7 +16,7 @@ import org.mtgallium.agent.infoset.core.UnresolvedLeafHandling
 class SearchTeacherCompositionTest {
     @Test
     fun `persisted evaluator identities resolve through the production registry`() {
-        LeafEvaluator.entries.filterNot { it == LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 }.forEach { evaluator ->
+        LeafEvaluator.entries.filterNot { it in setOf(LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1, LeafEvaluator.MTGALLIUM_FACTUAL_OUTCOME_RESIDUAL_V1) }.forEach { evaluator ->
             val source = if (evaluator == LeafEvaluator.ARGENTUM_BOARD_V1) {
                 LeafStateSource.CURRENT_SAMPLED_WORLD
             } else {

@@ -95,6 +95,16 @@ class WorkflowTest(unittest.TestCase):
         self.assertFalse((attempt / 'output').exists())
         self.assertEqual('source-a', request['source']['sourceRevision'])
 
+    def test_factual_residual_freeze_uses_authenticated_native_route(self):
+        attempt = preparation.freeze(self.draft('factual-residual-study'))
+        request = requests.verify_request(attempt, current_source=True)
+        self.assertEqual('authenticated-inputs', request['gate'])
+        self.assertEqual('factual-residual-study', request['nativeArguments'][1])
+        self.assertEqual('execute', request['nativeArguments'][0])
+        self.assertEqual(str(attempt / 'deck.json'), request['nativeArguments'][4])
+        self.assertEqual(['plan', 'build-verify'], [call[0] for call in self.calls])
+        self.assertFalse((attempt / 'output').exists())
+
     def test_changed_frozen_plan_refuses_and_changed_draft_does_not_relabel_attempt(self):
         draft = self.draft()
         attempt = preparation.freeze(draft)

@@ -56,6 +56,21 @@ object SearchTeacherEvaluatorRegistry {
                 supportsTraceReuse = false,
             )
         }
+        LeafEvaluator.MTGALLIUM_FACTUAL_OUTCOME_RESIDUAL_V1 -> {
+            require(leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT && leaf.rolloutHorizonSettlementOverride == null) {
+                "Factual residual evaluation requires bounded rollout without settlement overrides"
+            }
+            require(informationEvaluator is CheckpointBackedFactualOutcomeResidualEvaluator) {
+                "Factual residual evaluation requires its own checkpoint-backed evaluator"
+            }
+            informationStrategy(evaluator, informationEvaluator, supportsTraceReuse = false).copy(
+                validateSearchConfig = { config ->
+                    require(config.maxPolicyDecisions == 16 && config.rolloutTurnHorizon == null) {
+                        "Factual residual deployment requires the existing bounded16 cutoff"
+                    }
+                },
+            )
+        }
         LeafEvaluator.ARGENTUM_BOARD_V1 -> {
             require(leaf.rolloutHorizonSettlementOverride == null) {
                 "${evaluator.evaluatorId} does not support a rollout-horizon settlement override"

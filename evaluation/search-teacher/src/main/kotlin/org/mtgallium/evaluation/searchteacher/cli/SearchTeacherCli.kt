@@ -120,7 +120,7 @@ internal data class SearchTeacherCli(
             if (suite in setOf("research-preflight", "research-preflight-verify", "campaign-data-use", "campaign-data-snapshot", "research-transfer-audit")) {
                 require(profilePath != null && outputPath != null) { "$suite requires --profile and --output" }
             }
-            if (suite in setOf("search-teacher-calibration", "search-teacher-sequential", "search-teacher-continuation", "search-teacher-continuation-preflight", "real-game-position-bank", "position-bank-screen", "attack-kernel-learning", "direct-attack-kernel-screen", "attack-kernel-gameplay", "terminal-kernel-study", "terminal-target-sensitivity", "position-bank-terminal-continuations")) {
+            if (suite in setOf("search-teacher-calibration", "search-teacher-sequential", "search-teacher-continuation", "search-teacher-continuation-preflight", "real-game-position-bank", "position-bank-screen", "attack-kernel-learning", "factual-residual-study", "direct-attack-kernel-screen", "attack-kernel-gameplay", "terminal-kernel-study", "terminal-target-sensitivity", "position-bank-terminal-continuations")) {
                 require(profilePath != null && outputPath != null && deckManifest != null) {
                     "$suite requires an explicit JSON plan via --profile, --output, and --deck-manifest"
                 }

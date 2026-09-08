@@ -1692,6 +1692,7 @@ private fun testLeafEvaluationStrategy(
                 UnresolvedLeafHandling.EVALUATE
         },
     )
+    LeafEvaluator.MTGALLIUM_FACTUAL_OUTCOME_RESIDUAL_V1,
     LeafEvaluator.MTGALLIUM_LEARNED_OUTCOME_V1 ->
         error("Core search fixtures do not construct Search Teacher checkpoint evaluators")
     LeafEvaluator.ARGENTUM_BOARD_V1 -> LeafEvaluationStrategy(
