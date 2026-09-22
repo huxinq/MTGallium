@@ -51,7 +51,7 @@ class ArgentumBeliefLifecycleTest {
             assertTrue(step.accepted, "mulligan $mulliganIndex: ${step.diagnostic}")
             val expected = world.informationState("p0")
             assertNull(
-                world.knowledgeSupportFailure("p0", expected),
+                world.knowledgeConsistencyFailure("p0", expected),
                 "accepted mulligan $mulliganIndex left contradictory remembered facts",
             )
         }
@@ -120,7 +120,7 @@ class ArgentumBeliefLifecycleTest {
                 swapCardIdentities(state, revealed, alternative),
                 futureChanceStreamIdentity = 11_101L,
             )
-            assertNotNull(contradictory.knowledgeSupportFailure("p0", expected))
+            assertNotNull(contradictory.knowledgeConsistencyFailure("p0", expected))
         }
         verifyRebuildAndRefresh(world, fixture.registry, "p0", "hand reveal")
     }
@@ -188,7 +188,7 @@ class ArgentumBeliefLifecycleTest {
                     sampled.authoritativeState().getEntity(objectId)?.get<RevealedToComponent>(),
                 )
             }
-            assertNull(sampled.knowledgeSupportFailure("p0", expected))
+            assertNull(sampled.knowledgeConsistencyFailure("p0", expected))
         }
 
         val rejuvenated = assertIs<ArgentumSearchWorld>(
@@ -205,7 +205,7 @@ class ArgentumBeliefLifecycleTest {
                 rejuvenated.authoritativeState().getEntity(objectId)?.get<RevealedToComponent>(),
             )
         }
-        assertNull(rejuvenated.knowledgeSupportFailure("p0", expected))
+        assertNull(rejuvenated.knowledgeConsistencyFailure("p0", expected))
     }
 
     @Test
@@ -247,7 +247,7 @@ class ArgentumBeliefLifecycleTest {
                 contradictoryState,
                 futureChanceStreamIdentity = 11_102L,
             )
-            assertEquals("LIBRARY_ORDER_MISMATCH", contradictory.knowledgeSupportFailure("p0", expected))
+            assertEquals("LIBRARY_ORDER_MISMATCH", contradictory.knowledgeConsistencyFailure("p0", expected))
         }
         verifyRebuildAndRefresh(world, fixture.registry, "p0", "library-order reveal")
     }
@@ -319,7 +319,7 @@ class ArgentumBeliefLifecycleTest {
             afterState.copy(zones = contradictoryZones),
             futureChanceStreamIdentity = 11_103L,
         )
-        assertEquals("KNOWN_OBJECT_ZONE_MISMATCH", contradictory.knowledgeSupportFailure("p0", expected))
+        assertEquals("KNOWN_OBJECT_ZONE_MISMATCH", contradictory.knowledgeConsistencyFailure("p0", expected))
         verifyRebuildAndRefresh(world, fixture.registry, "p0", "revealed-object continuity")
     }
 
@@ -365,7 +365,7 @@ class ArgentumBeliefLifecycleTest {
         assertTrue(expected.knowledge.knownObjects.any {
             it.cardName == spellName && it.zone == "STACK"
         })
-        assertNull(world.knowledgeSupportFailure("p0", expected))
+        assertNull(world.knowledgeConsistencyFailure("p0", expected))
         verifyRebuildAndRefresh(world, fixture.registry, "p0", "known stack object")
     }
 
@@ -392,9 +392,9 @@ class ArgentumBeliefLifecycleTest {
 
         assertEquals(
             "SAFE_HISTORY_MISMATCH",
-            secondWorld.knowledgeSupportFailure("p0", firstWorld.informationState("p0")),
+            secondWorld.knowledgeConsistencyFailure("p0", firstWorld.informationState("p0")),
         )
-        assertNull(secondWorld.knowledgeSupportFailure("p1", firstWorld.informationState("p1")))
+        assertNull(secondWorld.knowledgeConsistencyFailure("p1", firstWorld.informationState("p1")))
         verifyRebuildAndRefresh(firstWorld, fixture.registry, "p0", "entitled private choice")
         verifyRebuildAndRefresh(firstWorld, fixture.registry, "p1", "redacted private choice")
     }

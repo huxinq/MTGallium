@@ -1,0 +1,230 @@
+{
+  "fixture_version": 1,
+  "authority": "phase-1-independent-oracle-not-production-evidence",
+  "method": "factual-action-correction/v1",
+  "frozen": {
+    "identity": "design-A",
+    "source_revision": "fixture-source",
+    "engine_revision": "fixture-engine",
+    "runtime_identity": "fixture-runtime",
+    "setup_contract": "public-safe-mono-red-fixture/v1",
+    "input_policies": {
+      "base": {"artifact": "p1-artifact", "model_file": "p1-file", "scorer": "p1-scorer", "composition": "p1-policy"},
+      "production": {"artifact": "p0-artifact", "model_file": null, "scorer": null, "composition": "p0-policy"},
+      "reference": {"artifact": "old-artifact", "model_file": "old-file", "scorer": "old-scorer", "composition": "p1-plus-old-correction"}
+    },
+    "candidate": {"base": "base", "correction": {"producer": "training.fit", "slot": "training.fit.model", "type": "model"}, "composition": "replace-correction", "switch": "strictly-positive-advantage"},
+    "nomination": {"rule": "first-eligible-designated-player", "maximum_roots_per_game": 1, "sealed_actions": ["actual-p1", "face"], "continuation": "same-source-role-bindings"},
+    "learning": {"opponent_mass": {"p0": "1/2", "p1": "1/2"}, "hierarchy": ["opponent", "eligible-group", "root", "action"], "features": "existing-burn-features", "objective": "existing-pair-centered-kernel", "ridge": "0.001", "fits": 1},
+    "inference": {"independent_unit": "setup-group", "condition_on": "realized-frozen-policies", "scope": "new-setup-performance-not-repeated-training", "intervals": ["approximate-student-95", "bounded-95"], "multiplicity": "per-comparison-not-simultaneous", "stopping": "fixed-horizon", "missing_score_range": ["0", "1"], "causal_limit": "no-p0-only-refit-control"},
+    "resources": {"workers": 6, "processors": 4, "shared_heap_gib": 4, "genuine_decision_cap": 4096, "study_seconds": 28800, "deadline_origin": "first-main-source-production", "deadline_scope": "through-publication-and-numerical-closure", "ambiguous_retry": false},
+    "expansions": [
+      {"rule": "nomination", "input": "authenticated-source-game", "output": "source-game.nomination", "dispositions": ["ELIGIBLE", "VERIFIED_NO_OPPORTUNITY", "UNRESOLVED"], "barrier": "seal-actions-before-targets"},
+      {"rule": "dataset", "input": "complete-required-source-and-target-evidence", "output": "training.dataset", "barrier": "known-eligibility-and-nonempty-partitions"},
+      {"rule": "fit", "input": "training.dataset", "output": "training.fit.model", "barrier": "same-design-dataset-objective-and-producer"},
+      {"rule": "qualification", "input": "training.fit.model", "output": "candidate.qualified-policy", "barrier": "model-scorer-and-complete-policy-before-evaluation-reservation"}
+    ]
+  },
+  "designs": [
+    {"id": "mixed", "allocation": {"p0": 2, "p1": 2}, "members": [["t0", "p0"], ["t1", "p0"], ["t2", "p1"], ["t3", "p1"]], "test_groups": 2, "expected_work": {"source_games": 8, "nomination_slots": 8, "maximum_roots": 8, "maximum_action_branches": 16, "maximum_baseline_replays": 8, "maximum_factual_attempts_without_retry": 24, "fits": 1, "test_games": 16}},
+    {"id": "unequal", "allocation": {"p0": 3, "p1": 1}, "members": [["t0", "p0"], ["t1", "p0"], ["t2", "p0"], ["t3", "p1"]], "test_groups": 2, "expected_work": {"source_games": 8, "nomination_slots": 8, "maximum_roots": 8, "maximum_action_branches": 16, "maximum_baseline_replays": 8, "maximum_factual_attempts_without_retry": 24, "fits": 1, "test_games": 16}},
+    {"id": "request-scale", "allocation": {"p0": 128, "p1": 128}, "test_groups": 1024, "factual_attempt_ceiling": 2048, "excluded_technical_attempt_ceiling": 32, "expected_work": {"source_games": 512, "nomination_slots": 512, "maximum_roots": 512, "maximum_action_branches": 1024, "maximum_baseline_replays": 512, "maximum_factual_attempts_without_retry": 1536, "fits": 1, "test_games": 8192}}
+  ],
+  "journey": [
+    {"stage": "freeze", "consumes": [], "produces": "design-A"},
+    {"stage": "compile-review", "consumes": ["design-A"], "produces": "compiled-A"},
+    {"stage": "collect", "consumes": ["compiled-A"], "produces": "source-evidence-A"},
+    {"stage": "nominate-and-seal", "consumes": ["compiled-A", "source-evidence-A"], "produces": "sealed-roots-A"},
+    {"stage": "factual-targets", "consumes": ["compiled-A", "sealed-roots-A"], "produces": "targets-A"},
+    {"stage": "admit-dataset", "consumes": ["source-evidence-A", "targets-A"], "produces": "dataset-A"},
+    {"stage": "fit", "consumes": ["dataset-A"], "produces": "fit-A"},
+    {"stage": "qualify", "consumes": ["compiled-A", "fit-A"], "produces": "qualified-A"},
+    {"stage": "paired-evaluation", "consumes": ["compiled-A", "qualified-A"], "produces": "games-A"},
+    {"stage": "native-reduction", "consumes": ["compiled-A", "games-A"], "produces": "reductions-A"},
+    {"stage": "report", "consumes": ["reductions-A", "dataset-A", "qualified-A"], "produces": "report-A"}
+  ],
+  "equal_policy_roles": [
+    {"game": "t3.s0", "designated_player": "player-0", "players": [{"player": "player-0", "policy": "p1-policy", "session": "t3.s0.player-0"}, {"player": "player-1", "policy": "p1-policy", "session": "t3.s0.player-1"}], "source_roles": {"root": "player-0", "opponent": "player-1"}, "continuation_roles": {"root": "player-0", "opponent": "player-1"}},
+    {"game": "t3.s1", "designated_player": "player-1", "players": [{"player": "player-0", "policy": "p1-policy", "session": "t3.s1.player-0"}, {"player": "player-1", "policy": "p1-policy", "session": "t3.s1.player-1"}], "source_roles": {"root": "player-1", "opponent": "player-0"}, "continuation_roles": {"root": "player-1", "opponent": "player-0"}}
+  ],
+  "training": [
+    {"design": "mixed", "groups": [
+      {"id": "t0", "opponent": "p0", "source_slots": ["r0", "VERIFIED_NO_OPPORTUNITY"]},
+      {"id": "t1", "opponent": "p0", "source_slots": ["r1", "VERIFIED_NO_OPPORTUNITY"]},
+      {"id": "t2", "opponent": "p1", "source_slots": ["r2", "VERIFIED_NO_OPPORTUNITY"]},
+      {"id": "t3", "opponent": "p1", "source_slots": ["r3", "VERIFIED_NO_OPPORTUNITY"]}
+    ], "expected": {"eligible_groups": {"p0": 2, "p1": 2}, "no_opportunity_games": 4, "roots": 4, "root_mass": {"r0": "1/4", "r1": "1/4", "r2": "1/4", "r3": "1/4"}, "per_action_mass": {"r0": "1/8", "r1": "1/8", "r2": "1/8", "r3": "1/8"}}},
+    {"design": "unequal", "groups": [
+      {"id": "t0", "opponent": "p0", "source_slots": ["r0", "VERIFIED_NO_OPPORTUNITY"]},
+      {"id": "t1", "opponent": "p0", "source_slots": ["r1", "r2"]},
+      {"id": "t2", "opponent": "p0", "source_slots": ["VERIFIED_NO_OPPORTUNITY", "VERIFIED_NO_OPPORTUNITY"]},
+      {"id": "t3", "opponent": "p1", "source_slots": ["r3", "r4"]}
+    ], "expected": {"eligible_groups": {"p0": 2, "p1": 1}, "no_opportunity_games": 3, "roots": 5, "root_mass": {"r0": "1/4", "r1": "1/8", "r2": "1/8", "r3": "1/4", "r4": "1/4"}, "per_action_mass": {"r0": "1/8", "r1": "1/16", "r2": "1/16", "r3": "1/8", "r4": "1/8"}}}
+  ],
+  "factual_targets": [
+    {"root": "r0", "actual": -1, "face": 1, "expected_advantage": 2, "expected_centered": ["-1", "1"]},
+    {"root": "r1", "actual": 1, "face": -1, "expected_advantage": -2, "expected_centered": ["1", "-1"]},
+    {"root": "r2", "actual": 0, "face": 0, "expected_advantage": 0, "expected_centered": ["0", "0"]},
+    {"root": "r3", "actual": 0, "face": 1, "expected_advantage": 1, "expected_centered": ["-1/2", "1/2"]},
+    {"root": "r4", "actual": 0, "face": -1, "expected_advantage": -1, "expected_centered": ["1/2", "-1/2"]}
+  ],
+  "training_refusals": [
+    {"case": "empty-partition", "mutation": "all-p1-slots-verified-no-opportunity", "expected": "REFUSE_EMPTY_PARTITION", "may_redistribute_mass": false},
+    {"case": "unknown-eligibility", "mutation": "t2.s0-unresolved-before-eligibility", "expected": "REFUSE_REQUIRED_SOURCE", "may_redistribute_mass": false},
+    {"case": "missing-target", "mutation": "r0-face-failed", "expected": "REFUSE_REQUIRED_TARGET", "may_redistribute_mass": false},
+    {"case": "all-zero-targets", "mutation": "all-actual-and-face-returns-zero", "expected": "ADMIT", "may_redistribute_mass": false}
+  ],
+  "numerical_fit": {
+    "scope": "synthetic-normalized-feature-boundary-not-an-engine-encoding-or-learned-result",
+    "training_design": "unequal",
+    "source_action_order": ["actual-p1", "face"],
+    "native_action_order": ["face", "actual-p1"],
+    "source_to_native_indices": [1, 0],
+    "feature_map": "candidate-plus-state-tensor-candidate",
+    "state": ["1"],
+    "normalized_candidates": {"face": ["1", "0"], "actual-p1": ["0", "1"]},
+    "expected_centered_candidates": {"face": ["1/2", "-1/2"], "actual-p1": ["-1/2", "1/2"]},
+    "expected_pair_gram": [["1", "-1"], ["-1", "1"]],
+    "expected_primal_coordinates": {"face": "1", "actual-p1": "-1"},
+    "ridge": "1/1000",
+    "expected_weighted_target_moment": "1/8",
+    "expected_theta": "125/1001",
+    "expected_training_scores": {"face": "125/1001", "actual-p1": "-125/1001"},
+    "expected_training_advantage": "250/1001",
+    "wrong_uniform_root_weights_theta": "0",
+    "wrong_unrescaled_advantage_loss_theta": "500/4001",
+    "prediction_cases": [
+      {"case": "positive", "normalized_candidates": {"face": ["1", "0"], "actual-p1": ["0", "1"]}, "expected_scores": {"face": "125/1001", "actual-p1": "-125/1001"}, "expected_advantage": "250/1001", "expected_action": "face"},
+      {"case": "negative", "normalized_candidates": {"face": ["0", "1"], "actual-p1": ["1", "0"]}, "expected_scores": {"face": "-125/1001", "actual-p1": "125/1001"}, "expected_advantage": "-250/1001", "expected_action": "actual-p1"},
+      {"case": "zero-feature-collision", "normalized_candidates": {"face": ["1", "0"], "actual-p1": ["1", "0"]}, "expected_scores": {"face": "0", "actual-p1": "0"}, "expected_advantage": "0", "expected_action": "actual-p1"}
+    ]
+  },
+  "bindings": {
+    "model": {"design": "design-A", "slot": "training.fit.model", "type": "model", "producer": "training.fit", "producer_run": "fit-A", "dataset": "dataset-A", "objective": "existing-pair-centered-kernel", "model_file": "new-file-A", "scorer": "new-scorer-A"},
+    "qualified": {"design": "design-A", "slot": "candidate.qualified-policy", "producer_run": "fit-A", "model_file": "new-file-A", "scorer": "new-scorer-A", "base": "p1-policy", "composition": "replace-correction", "qualification": "PASSED", "policy_identity": "new-policy-A"},
+    "expected_design_bytes_changed": false,
+    "expected_evaluation_reservations_before_qualification": 0,
+    "refusals": [
+      {"field": "design", "substitute": "design-B", "expected": "REFUSE_DESIGN"},
+      {"field": "slot", "substitute": "other.fit.model", "expected": "REFUSE_OUTPUT_SLOT"},
+      {"field": "producer_run", "substitute": "fit-B", "expected": "REFUSE_PRODUCER"},
+      {"field": "dataset", "substitute": "dataset-B", "expected": "REFUSE_DATASET"},
+      {"field": "objective", "substitute": "other-objective", "expected": "REFUSE_OBJECTIVE"},
+      {"field": "model_file", "substitute": "new-file-B", "expected": "REFUSE_MODEL_BYTES"},
+      {"field": "scorer", "substitute": "new-scorer-B", "expected": "REFUSE_SCORER"},
+      {"field": "base", "substitute": "p0-policy", "expected": "REFUSE_BASE_POLICY"},
+      {"field": "composition", "substitute": "stack-correction", "expected": "REFUSE_COMPOSITION"},
+      {"field": "qualification", "substitute": "INTEGRITY_ONLY", "expected": "REFUSE_UNQUALIFIED"},
+      {"field": "filled_slot", "substitute": "different-second-binding", "expected": "REFUSE_OVERWRITE"}
+    ],
+    "alias_change": {"alias": "base", "new_resolution": "p1-policy-B", "expected_frozen_resolution": "p1-policy"}
+  },
+  "evaluation": {
+    "assigned_groups": ["e0", "e1"],
+    "model": "new-policy-A",
+    "matchups": ["new-p0", "reference-p0", "new-p1", "reference-p1"],
+    "compiled_group": {
+      "game_slots": ["new-p0.s0", "new-p0.s1", "reference-p0.s0", "reference-p0.s1", "new-p1.s0", "new-p1.s1", "reference-p1.s0", "reference-p1.s1"],
+      "measurements": {
+        "new-p0": {"new-p0.s0": "1/2", "new-p0.s1": "1/2"},
+        "reference-p0": {"reference-p0.s0": "1/2", "reference-p0.s1": "1/2"},
+        "new-p1": {"new-p1.s0": "1/2", "new-p1.s1": "1/2"},
+        "reference-p1": {"reference-p1.s0": "1/2", "reference-p1.s1": "1/2"}
+      },
+      "contrasts": {
+        "direct-p1": {"terms": {"new-p1": "1"}, "offset": "-1/2", "lower_threshold": "0", "range": ["-1/2", "1/2"]},
+        "retention-p0": {"terms": {"new-p0": "1", "reference-p0": "-1"}, "offset": "0", "lower_threshold": "-1/100", "range": ["-1", "1"]},
+        "difference-p1": {"terms": {"new-p1": "1", "reference-p1": "-1"}, "offset": "0", "lower_threshold": "0", "range": ["-1", "1"]}
+      }
+    },
+    "execution_order": {
+      "e0": ["new-p0.s0", "new-p0.s1", "reference-p0.s0", "reference-p0.s1", "new-p1.s0", "new-p1.s1", "reference-p1.s0", "reference-p1.s1"],
+      "e1": ["reference-p1.s1", "reference-p1.s0", "new-p1.s1", "new-p1.s0", "reference-p0.s1", "reference-p0.s0", "new-p0.s1", "new-p0.s0"]
+    },
+    "setup_coordinates": {"e0": {"s0": "test-setup-A-seat-0", "s1": "test-setup-A-seat-1"}, "e1": {"s0": "test-setup-B-seat-0", "s1": "test-setup-B-seat-1"}},
+    "planning_coordinate_rule": "separate-domain-per-group-matchup-seat-player",
+    "expected_mean_execution_position": "7/2",
+    "scores": {
+      "e0": {"new-p0": ["1", "1"], "reference-p0": ["1", "0"], "new-p1": ["1", "1/2"], "reference-p1": ["1/2", "0"]},
+      "e1": {"new-p0": ["1/2", "1/2"], "reference-p0": ["1", "1/2"], "new-p1": ["0", "1/2"], "reference-p1": ["1/2", "1/2"]}
+    },
+    "expected": {
+      "assigned_games": 16, "complete_games": 16, "independent_groups": 2, "independent_training_realizations": 1,
+      "measurement_vectors": {"new-p0": ["1", "1/2"], "reference-p0": ["1/2", "3/4"], "new-p1": ["3/4", "1/4"], "reference-p1": ["1/4", "1/2"]},
+      "contrast_vectors": {"direct-p1": ["1/4", "-1/4"], "retention-p0": ["1/2", "-1/4"], "difference-p1": ["1/2", "-1/4"]},
+      "contrast_means": {"direct-p1": "0", "retention-p0": "1/8", "difference-p1": "1/8"},
+      "contrast_sample_variances": {"direct-p1": "1/8", "retention-p0": "9/32", "difference-p1": "9/32"},
+      "wins_draws_losses": {"new-p0": [2, 2, 0], "reference-p0": [2, 1, 1], "new-p1": [1, 2, 1], "reference-p1": [0, 3, 1]},
+      "overall_criteria": "UNRESOLVED_SMALL_FIXTURE_NOT_STRENGTH_EVIDENCE"
+    },
+    "missing": {"group": "e1", "matchup": "new-p0", "seat": 1, "expected_complete_games": 15, "expected_assigned_games": 16, "expected_assigned_groups": 2, "expected_group_contrast_bounds": ["-1/2", "0"], "expected_population_contrast_bounds": ["0", "1/4"], "expected_retention_primary": null, "expected_direct_p1_complete": true, "expected_completed_study_verdict": false},
+    "missing_reference": {"group": "e1", "matchup": "reference-p0", "seat": 1, "expected_group_contrast_bounds": ["-1/2", "0"], "expected_population_contrast_bounds": ["0", "1/4"]},
+    "bounded_interval_oracle": {"groups": 1024, "score_half_width": 0.04244067236689436, "difference_half_width": 0.08488134473378872},
+    "degenerate_interval_cases": [{"groups": 1, "sample_variance": null, "expected_student": null, "expected_zero_width_certainty": false}, {"groups": 2, "sample_variance": "0", "expected_student": null, "expected_zero_width_certainty": false}]
+  },
+  "intervals_and_criteria": {
+    "scope": "independent-group-arithmetic-and-decision-boundaries-not-gameplay-evidence",
+    "student_df3_quantile_975": 3.1824463052837095927,
+    "quantile_derivation": "F3(t)=1/2+(atan(u)+u/(1+u*u))/pi with u=t/sqrt(3)",
+    "cases": [
+      {"question": "direct-p1", "values": ["1/2", "1/2", "1/2", "3/4"], "range": ["0", "1"], "reporting_offset": "-1/2", "expected_groups": 4, "expected_raw_mean": "9/16", "expected_sample_variance": "1/64", "expected_reported_mean": "1/16", "expected_raw_student": [0.3635971059197681505, 0.7614028940802318495], "expected_reported_student": [-0.1364028940802318495, 0.2614028940802318495], "expected_reported_bounded": ["-1/2", "1/2"], "expected_criterion": "NOT_ESTABLISHED"},
+      {"question": "retention-p0", "values": ["1/4", "1/4", "1/4", "1/2"], "range": ["-1", "1"], "reporting_offset": "0", "expected_groups": 4, "expected_raw_mean": "5/16", "expected_sample_variance": "1/64", "expected_reported_mean": "5/16", "expected_raw_student": [0.1135971059197681505, 0.5114028940802318495], "expected_reported_student": [0.1135971059197681505, 0.5114028940802318495], "expected_reported_bounded": ["-1", "1"], "expected_criterion": "SUPPORTED"},
+      {"question": "difference-p1", "values": ["1/4", "1/4", "1/4", "1/2"], "range": ["-1", "1"], "reporting_offset": "0", "expected_groups": 4, "expected_raw_mean": "5/16", "expected_sample_variance": "1/64", "expected_reported_mean": "5/16", "expected_raw_student": [0.1135971059197681505, 0.5114028940802318495], "expected_reported_student": [0.1135971059197681505, 0.5114028940802318495], "expected_reported_bounded": ["-1", "1"], "expected_criterion": "SUPPORTED"}
+    ],
+    "boundary_cases": [
+      {"case": "direct-equality", "question": "direct-p1", "complete": true, "mean": "1/100", "student": ["0", "1/50"], "expected": "NOT_ESTABLISHED"},
+      {"case": "direct-above-no-extra-three-point-gate", "question": "direct-p1", "complete": true, "mean": "1/100", "student": ["1/1000000", "19999/1000000"], "expected": "SUPPORTED"},
+      {"case": "retention-equality", "question": "retention-p0", "complete": true, "mean": "0", "student": ["-1/100", "1/100"], "expected": "NOT_ESTABLISHED"},
+      {"case": "retention-above", "question": "retention-p0", "complete": true, "mean": "0", "student": ["-9999/1000000", "9999/1000000"], "expected": "SUPPORTED"},
+      {"case": "difference-equality", "question": "difference-p1", "complete": true, "mean": "1/100", "student": ["0", "1/50"], "expected": "NOT_ESTABLISHED"},
+      {"case": "difference-above", "question": "difference-p1", "complete": true, "mean": "1/100", "student": ["1/1000000", "19999/1000000"], "expected": "SUPPORTED"},
+      {"case": "missing-despite-positive-observed-interval", "question": "direct-p1", "complete": false, "mean": "1/100", "student": ["1/1000000", "19999/1000000"], "expected": "UNRESOLVED_MISSING"},
+      {"case": "no-student-interval", "question": "retention-p0", "complete": true, "mean": "0", "student": null, "expected": "UNRESOLVED_SPARSE_OR_ZERO_VARIANCE"}
+    ]
+  },
+  "cost_and_coverage": {
+    "new-p0": {"warm_ms": [10, 20, 30, 40], "decisions": [1, 2, 3, 4], "eligible": [0, 1, 2, 1], "switches": [0, 0, 1, 1], "expected_warm_per_game": "25", "expected_warm_per_decision": "10", "expected_eligible": 4, "expected_switches": 2, "expected_zero_switch_games": 2},
+    "reference-p0": {"warm_ms": [8, 16, 24, 32], "decisions": [1, 2, 3, 4], "eligible": [0, 1, 2, 1], "switches": [0, 0, 1, 1], "expected_warm_per_game": "20", "expected_warm_per_decision": "8", "expected_eligible": 4, "expected_switches": 2, "expected_zero_switch_games": 2},
+    "new-p1": {"warm_ms": [12, 24, 36, 48], "decisions": [1, 2, 3, 4], "eligible": [0, 1, 2, 1], "switches": [0, 0, 1, 1], "expected_warm_per_game": "30", "expected_warm_per_decision": "12", "expected_eligible": 4, "expected_switches": 2, "expected_zero_switch_games": 2},
+    "reference-p1": {"warm_ms": [10, 20, 30, 40], "decisions": [1, 2, 3, 4], "eligible": [0, 1, 2, 1], "switches": [0, 0, 1, 1], "expected_warm_per_game": "25", "expected_warm_per_decision": "10", "expected_eligible": 4, "expected_switches": 2, "expected_zero_switch_games": 2}
+  },
+  "expected_cost_ratios": {"p0": "5/4", "p1": "6/5"},
+  "provenance_cases": [
+    {"case": "renamed-observation", "original": "source-game-A", "new_local_id": "source-game-B", "same_original_observation": true, "expected": "REFUSE_FALSE_INDEPENDENCE"},
+    {"case": "renamed-setup-across-splits", "train_setup": "setup-A", "test_local_name": "setup-B", "same_original_setup": true, "expected": "REFUSE_SPLIT_OVERLAP"},
+    {"case": "shared-frozen-model", "setup_ids": ["setup-A", "setup-B"], "models": ["new-policy-A", "new-policy-A"], "expected_independent_groups": 2, "expected_training_realizations": 1},
+    {"case": "unregistered-history", "registered_overlap": false, "expected_untouched_claim": false}
+  ],
+  "recovery_defaults": {"deadline_origin": 100, "absolute_deadline": 28900, "now": 200, "owner": "exclusive", "old_workers": "exited", "active_generation": "generation-2", "policy_qualified": true, "attempt_limit": 1},
+  "recovery_cases": [
+    {"case": "unreserved", "fact": "NONE", "expected_action": "RESERVE_THEN_DISPATCH", "expected_retained_charge": 0, "expected_new_compute_calls": 1},
+    {"case": "qualified-containment", "fact": "NONE", "old_workers": "qualified-contained", "expected_action": "RESERVE_THEN_DISPATCH", "expected_retained_charge": 0, "expected_new_compute_calls": 1},
+    {"case": "ambiguous-dispatch", "fact": "RESERVED", "expected_action": "RETAIN_AMBIGUITY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "started-outcome-unknown", "fact": "STARTED", "expected_action": "RETAIN_AMBIGUITY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "fit-complete-publication-interrupted", "fact": "ACCEPTED_COMPLETE", "fit_calls_before": 1, "fit_calls_after": 1, "expected_action": "PUBLISH_ONLY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "lost-publication-response", "fact": "VERIFIED_PUBLISHED", "fit_calls_before": 1, "fit_calls_after": 1, "expected_action": "REUSE", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "concurrent-resume", "fact": "NONE", "owner": "other-controller", "expected_action": "BLOCK_OWNER", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "uncertain-ownership", "fact": "NONE", "owner": "uncertain", "expected_action": "BLOCK_OWNER", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "fenced-but-workers-uncontained", "fact": "NONE", "old_workers": "unknown", "expected_action": "BLOCK_RESOURCE_CONTAINMENT", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "superseded-worker-return", "fact": "STARTED", "return_generation": "generation-1", "expected_action": "DIAGNOSTIC_ONLY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "accepted-before-generation-change", "fact": "ACCEPTED_COMPLETE", "accepted_generation": "generation-1", "expected_action": "PUBLISH_ONLY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "bad-checkpoint-payload", "fact": "ACCEPTED_COMPLETE", "payload_valid": false, "expected_action": "REFUSE_INTEGRITY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "wrong-attempt-binding", "fact": "ACCEPTED_COMPLETE", "attempt_binding_valid": false, "expected_action": "REFUSE_BINDING", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "conflicting-completion", "fact": "ACCEPTED_COMPLETE", "conflicting_return": true, "expected_action": "REFUSE_OVERWRITE", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "expired-before-dispatch", "fact": "NONE", "now": 28901, "expected_action": "BLOCK_DEADLINE", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "expired-before-publication", "fact": "ACCEPTED_COMPLETE", "now": 28901, "expected_action": "BLOCK_DEADLINE_RETAIN_COMPLETION", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "unqualified-evaluation", "fact": "NONE", "policy_qualified": false, "expected_action": "BLOCK_QUALIFICATION", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "staging-is-not-completion", "fact": "WORKER_STAGED", "expected_action": "RETAIN_AMBIGUITY", "expected_retained_charge": 1, "expected_new_compute_calls": 0},
+    {"case": "unknown-fact-fails-closed", "fact": "UNKNOWN", "expected_action": "REFUSE_UNKNOWN_FACT", "expected_retained_charge": null, "expected_new_compute_calls": 0},
+    {"case": "attempt-budget-exhausted", "fact": "NONE", "attempt_limit": 0, "expected_action": "BLOCK_ATTEMPT_LIMIT", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "exact-deadline-boundary", "fact": "NONE", "now": 28900, "expected_action": "BLOCK_DEADLINE", "expected_retained_charge": 0, "expected_new_compute_calls": 0},
+    {"case": "published-read-after-expiry", "fact": "VERIFIED_PUBLISHED", "now": 28901, "expected_action": "REUSE", "expected_retained_charge": 1, "expected_new_compute_calls": 0}
+  ],
+  "expected_diff": {
+    "changed": {"allocation.p0": [2, 3], "allocation.p1": [2, 1], "source_games.p0": [4, 6], "source_games.p1": [4, 2], "membership.t2": ["p1", "p0"]},
+    "preserved": ["method", "opponent-mass-50-50", "ridge-0.001", "one-fit", "three-contrasts", "test-groups", "total-source-games"],
+    "realized_not_design_changes": {"eligible_groups.p1": [2, 1], "roots": [4, 5], "no_opportunity_games": [4, 3]}
+  },
+  "intervention_categories": ["scientific-choice", "routine-interface-action", "avoidable-engineering-repair"],
+  "unmeasured_usability": ["repair-count", "repair-time", "review-effort", "diagnosis-burden", "savings"]
+}

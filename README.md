@@ -1,39 +1,23 @@
 # MTGallium
 
-MTGallium is an experimental, independently developed research codebase for
-information-safe planning and learning in Magic: The Gathering. Current
-experiments use a deliberately narrow frozen Mono-Red scope. Source publication
-is intended for technical collaboration. Current results do not establish
-optimal play, general Magic competence, a public benchmark, or a novel research
-contribution.
+MTGallium is an independently developed research codebase for information-safe
+planning and learning in Magic: The Gathering. Current experiments use a narrow
+Mono-Red scope.
 
-The production policy is a hand-authored information-set Search Teacher over a
-pinned Argentum engine; learned-policy work is exploratory rather than the
-production policy.
+The native policy uses information-set search over a pinned Argentum engine.
 
-For routine research, start with the [CLI workbench](docs/research-workbench.md):
-`python3 tools/mtgallium-research catalog`. It connects experiment design, typed
-plans, preflight, durable launch, evidence retrieval, features and review packets.
+For research, use the [direct library and CLI](docs/research-workbench.md):
+normal `build`, `games`, `fit`, `predict`, `encode`, and `show` commands, or an
+ordinary Kotlin main or Python program. Dirty-source builds and caller-chosen
+resource settings are supported.
 
-For new head-to-head experiments, see the
-[paired gameplay quick start](docs/real-game-screening.md#sequential-gameplay)
-and its [example plan](examples/search-teacher-sequential.json). The reusable
-runner supports prospective early stopping, complete seat-swapped pairs and
-explicit accounting for invalid games and work completed after stopping. Research
-launches through the workbench enforce the [technical preflight](docs/research-preflight.md)
-for supported gameplay and search-screen workflows.
+The [neural learner](docs/neural-policy.md) runs directly with PyTorch and ordinary
+JSON, with optional production-format ONNX export.
 
-The [experimental learned outcome-value subsystem](docs/learned-outcome-value.md)
-includes checkpoint inference, training and admission, and research diagnostics.
-Its private inputs and historical engine compatibility remain explicit.
-
-The system separates engine-private refereeing from policy-visible information,
-represented player knowledge, semantic action identity, hidden-world search,
-and evidence tooling. `agent/infoset-argentum` is the trusted boundary allowed
-to inspect full Argentum state; policy-facing code receives only safe projections.
-
-See the [glossary](docs/glossary.md) for plain-language explanations of project
-terminology and links to the detailed contracts.
+Start with the [documentation task guide](docs/README.md) to understand the system,
+run or read an experiment, or implement a change. The [architecture](docs/architecture.md)
+introduces the modules and boundaries. Use the [white paper](docs/whitepapers/README.md)
+for the mathematical model and the [glossary](docs/glossary.md) for shared definitions.
 
 ## Build and test
 
@@ -44,18 +28,12 @@ git submodule update --init --recursive
 just check
 ```
 
-MTGallium pins a reviewed Argentum commit rather than following a moving
-branch implicitly. `.gitmodules` retains the
-[canonical upstream URL](https://github.com/wingedsheep/argentum-engine).
-The current pin includes all five performance contributions merged upstream;
-fresh clones can initialize it directly from the canonical remote.
-See [the integration record](docs/argentum-performance-integration.md)
-for the upstream revision and evidence boundary. `just architecture-check` and
-`just search-teacher-check` are focused validation entry points.
+The Argentum gitlink pins the engine revision. See its
+[integration record](docs/history/argentum-performance-integration.md).
+`just architecture-check` checks dependency boundaries; `just policy-check`
+runs policy and research tests.
 
-Canonical replays and private experiment evidence are intentionally not part of
-this source tree. Public artifacts must be separately derived, privacy-reviewed,
-and reproducible from permitted inputs.
+Keep private replays and research results outside the checkout.
 
 ## License, rights, and contributions
 

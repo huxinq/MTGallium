@@ -104,7 +104,7 @@ class RuntimeSemanticChoiceIdentityTest {
 
         val expansion = source.expandChoices()
         assertEquals(CANDIDATE_SCHEMA_V4, information.candidateSchemaVersion)
-        assertTrue(expansion.proposalVersion.startsWith("semantic-structured-actions-v4:"))
+        assertTrue(expansion.proposalVersion.startsWith("semantic-structured-actions-v6:"))
         assertTrue(expansion.isExhaustive)
         assertEquals(4, expansion.estimatedCandidateCount)
         assertEquals(4, expansion.candidates.size)

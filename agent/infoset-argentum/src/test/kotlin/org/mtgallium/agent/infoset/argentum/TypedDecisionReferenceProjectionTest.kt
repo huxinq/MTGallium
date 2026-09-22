@@ -34,6 +34,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -165,7 +166,8 @@ class TypedDecisionReferenceProjectionTest {
         ).contract
         assertNotNull(combat["edges"])
         val combatEdge = combat.getValue("edges").jsonArray.single().jsonObject
-        assertEquals("edges", combatEdge.getValue("id").jsonPrimitive.content)
+        assertTrue(combatEdge.getValue("id").jsonPrimitive.content.startsWith("combat-edge:v1:"))
+        assertNotEquals("edges", combatEdge.getValue("id").jsonPrimitive.content)
         assertNotEquals("hidden-choice-reference", combatEdge.getValue("sourceId").jsonPrimitive.content)
 
         val mana = assertIs<PolicyDecisionChoiceSpec.ManaSources>(
@@ -215,11 +217,10 @@ class TypedDecisionReferenceProjectionTest {
             combatPrepared,
         ).canonicalPayload.getValue("body").jsonObject
 
-        assertEquals(
-            "edges",
-            combatBody.getValue("edges").jsonArray.single().jsonObject
-                .getValue("edgeId").jsonPrimitive.content,
-        )
+        val combatEdgeId = combatBody.getValue("edges").jsonArray.single().jsonObject
+            .getValue("edgeId").jsonPrimitive.content
+        assertTrue(combatEdgeId.startsWith("combat-edge:v1:"))
+        assertNotEquals("edges", combatEdgeId)
         assertFalse("hidden-choice-reference" in combatBody.toString())
 
         val manaPrepared = prepared(

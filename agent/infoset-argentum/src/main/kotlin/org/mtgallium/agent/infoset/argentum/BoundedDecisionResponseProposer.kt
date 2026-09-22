@@ -59,10 +59,8 @@ data class StructuredResponseProposal(
  * Deterministically proposes responses for every engine decision type without touching
  * [GameState.rng].
  *
- * Argentum's exact expander is consulted before this class. This policy exists only for unsupported
- * or larger response spaces: it retains stable boundary/default choices and fills to [maxResponses]
- * from a deterministic traversal. Every proposal is checked by [DecisionValidators], and a
- * truncated source never claims completeness.
+ * Used after Argentum's exact expander for unsupported or larger response spaces. It retains
+ * boundary/default choices, fills to [maxResponses] deterministically, and validates every proposal.
  */
 class BoundedDecisionResponseProposer(
     private val maxResponses: Int = 64,
@@ -100,9 +98,7 @@ class BoundedDecisionResponseProposer(
 
         val complete = exhausted && source.completeWhenExhausted
         val validList = valid.toList()
-        // Candidate generators put legal boundaries/defaults first. Preserve the first two anchors,
-        // then use a canonical decision-payload seed to spread the remaining cap across the sampled
-        // response space without consuming game randomness.
+        // Preserve boundary/default anchors, then spread the cap with a canonical payload seed.
         val anchors = validList.take(2)
         val seed = canonicalPayloadHash(decision)
         val stratified = validList.drop(anchors.size).sortedBy { response ->

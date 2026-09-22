@@ -44,7 +44,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.infoset.core.PolicyObservation
+import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
 import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
 import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
 import org.mtgallium.agent.infoset.core.SemanticChoice
@@ -147,8 +147,8 @@ class SafeObservationProjectorTest {
 
         assertEquals(full, incremental)
         assertEquals(
-            PolicyJson.format.encodeToString(PolicyObservation.serializer(), full),
-            PolicyJson.format.encodeToString(PolicyObservation.serializer(), incremental),
+            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), full),
+            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), incremental),
         )
     }
 
@@ -234,7 +234,7 @@ class SafeObservationProjectorTest {
 
         val projected = SafeObservationProjector().project(observation).observation
         val safeTargets = projected.stack.single().targets
-        val serialized = PolicyJson.format.encodeToString(PolicyObservation.serializer(), projected)
+        val serialized = PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), projected)
 
         assertEquals(listOf("stack-target:0:0", "stack-target:0:0"), safeTargets)
         assertFalse(departedTarget.value in serialized)
@@ -643,8 +643,8 @@ class SafeObservationProjectorTest {
         val right = projector.project(permuted).observation
 
         assertEquals(
-            PolicyJson.format.encodeToString(PolicyObservation.serializer(), left),
-            PolicyJson.format.encodeToString(PolicyObservation.serializer(), right),
+            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), left),
+            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), right),
         )
     }
 

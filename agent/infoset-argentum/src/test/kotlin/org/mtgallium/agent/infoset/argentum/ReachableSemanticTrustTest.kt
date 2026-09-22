@@ -64,9 +64,9 @@ import org.mtgallium.agent.infoset.core.PolicyAudienceScope
 import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
 import org.mtgallium.agent.infoset.core.PolicyHistoryEvent
 import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
-import org.mtgallium.agent.infoset.core.PolicyInformationState
-import org.mtgallium.agent.infoset.core.PolicyInformationStateDigest
-import org.mtgallium.agent.infoset.core.PolicyObservation
+import org.mtgallium.agent.infoset.core.InformationStateRepresentation
+import org.mtgallium.agent.infoset.core.InformationStateRepresentationDigest
+import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
@@ -139,7 +139,7 @@ class ReachableSemanticTrustTest {
         )
         rebuilt.particles.forEach { weighted ->
             val sampled = weighted.value as ArgentumSearchWorld
-            assertNull(sampled.knowledgeSupportFailure("p0", permittedInformation))
+            assertNull(sampled.knowledgeConsistencyFailure("p0", permittedInformation))
             assertTrue(sampled.informationState("p0").observation
                 .card("p0", "EXILE", "Nova Hellkite").playableFromExile)
             assertTrue(hasCastFor(sampled, nova))
@@ -511,13 +511,13 @@ class ReachableSemanticTrustTest {
             val information = world.informationState(viewer)
             val remembered = information.knowledge.knownObjects.single()
             assertEquals(original.getValue(viewer).copy(cardName = "Ojer Axonil, Deepest Might"), remembered)
-            assertNull(world.knowledgeSupportFailure(viewer, information))
+            assertNull(world.knowledgeConsistencyFailure(viewer, information))
             val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
                 information, knownDecks, beliefSeed = 9022L, count = 2,
             )
             assertEquals(2, rebuilt.particles.size)
             rebuilt.particles.forEach { particle ->
-                assertNull((particle.value as ArgentumSearchWorld).knowledgeSupportFailure(viewer, information))
+                assertNull((particle.value as ArgentumSearchWorld).knowledgeConsistencyFailure(viewer, information))
             }
             assertEquals(original.getValue(viewer), fork.informationState(viewer).knowledge.knownObjects.single())
         }
@@ -645,7 +645,7 @@ class ReachableSemanticTrustTest {
             val sampled = weighted.value as ArgentumSearchWorld
             assertEquals(expectedNames, sampled.authoritativeState().getLibrary(env.playerIds[0])
                 .takeLast(2).map { cardName(sampled.authoritativeState(), it) })
-            assertNull(sampled.knowledgeSupportFailure("p0", information))
+            assertNull(sampled.knowledgeConsistencyFailure("p0", information))
         }
 
         val library = world.authoritativeState().getLibrary(env.playerIds[0])
@@ -655,7 +655,7 @@ class ReachableSemanticTrustTest {
                 (ZoneKey(env.playerIds[0], Zone.LIBRARY) to reversedBottom),
         )
         val contradictory = world.withSampledState(contradictoryState, futureChanceStreamIdentity = 9_023L)
-        assertEquals("LIBRARY_BOTTOM_ORDER_MISMATCH", contradictory.knowledgeSupportFailure("p0", information))
+        assertEquals("LIBRARY_BOTTOM_ORDER_MISMATCH", contradictory.knowledgeConsistencyFailure("p0", information))
     }
 
     private fun environment(deck: Map<String, Int>, skipMulligans: Boolean = true): GameEnvironment =
@@ -853,7 +853,7 @@ class ReachableSemanticTrustTest {
         secondWorld: ArgentumSearchWorld,
         firstCause: String,
         secondCause: String,
-    ): Pair<PolicyInformationState, PolicyInformationState> {
+    ): Pair<InformationStateRepresentation, InformationStateRepresentation> {
         val first = firstWorld.informationState("p0")
         val second = secondWorld.informationState("p0")
         val firstProposal = firstWorld.expandChoices().proposalVersion
@@ -864,10 +864,10 @@ class ReachableSemanticTrustTest {
     }
 
     private fun ageCausalPrefix(
-        information: PolicyInformationState,
+        information: InformationStateRepresentation,
         proposalVersion: String,
         cause: String,
-    ): PolicyInformationState {
+    ): InformationStateRepresentation {
         val causeEvent = PolicyHistoryEvent(
             eventId = 0,
             audience = PolicyAudience(PolicyAudienceScope.PUBLIC),
@@ -903,7 +903,7 @@ class ReachableSemanticTrustTest {
         return information.copy(
             historyCommitment = commitment,
             history = history,
-            informationStateDigest = PolicyInformationStateDigest.compute(
+            informationStateDigest = InformationStateRepresentationDigest.compute(
                 observationDigest = information.observation.observationDigest,
                 historyCommitment = commitment,
                 knowledgeDigest = information.knowledge.knowledgeDigest,
@@ -945,8 +945,8 @@ class ReachableSemanticTrustTest {
     }
 
     private fun assertTurnFactsAreOnlySafeDifference(
-        first: PolicyInformationState,
-        second: PolicyInformationState,
+        first: InformationStateRepresentation,
+        second: InformationStateRepresentation,
         runtimeSemanticIdentityDiffers: Boolean = false,
     ) {
         assertEquals(66, first.history.size)
@@ -986,14 +986,14 @@ class ReachableSemanticTrustTest {
     }
 
     /** Runtime state deliberately changes the observation-scoped reference derived from it. */
-    private fun routingBlind(observation: PolicyObservation): PolicyObservation = observation.copy(
+    private fun routingBlind(observation: PlayerObservationSnapshot): PlayerObservationSnapshot = observation.copy(
         zones = observation.zones.map { zone ->
             zone.copy(cards = zone.cards.map { card -> card.copy(objectRef = "<routing-ref>") })
         },
     )
 
     /** Approximation of the old V4 learnable snapshot: retain context, erase repaired turn facts. */
-    private fun turnBlind(observation: PolicyObservation): PolicyObservation = observation.copy(
+    private fun turnBlind(observation: PlayerObservationSnapshot): PlayerObservationSnapshot = observation.copy(
         players = observation.players.map { player ->
             player.copy(
                 noncreatureSpellsCastThisTurn = 0,
@@ -1024,9 +1024,9 @@ class ReachableSemanticTrustTest {
     private fun findCards(state: GameState, owner: EntityId, name: String): List<EntityId> =
         (state.getHand(owner) + state.getLibrary(owner)).filter { cardName(state, it) == name }
 
-    private fun PolicyObservation.player(playerId: String) = players.single { it.playerId == playerId }
+    private fun PlayerObservationSnapshot.player(playerId: String) = players.single { it.playerId == playerId }
 
-    private fun org.mtgallium.agent.infoset.core.PolicyObservation.card(
+    private fun org.mtgallium.agent.infoset.core.PlayerObservationSnapshot.card(
         ownerId: String,
         zone: String,
         name: String,

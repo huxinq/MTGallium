@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.mtgallium.agent.infoset.core.PolicyCardView
 import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.infoset.core.PolicyObservation
+import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
 import org.mtgallium.agent.infoset.core.PolicyZoneView
 
 /**
@@ -33,10 +33,10 @@ internal class ObservationCanonicalFragments private constructor(
 
     companion object {
         /** Full serializer oracle for the bounded diagnostic, not used by the optimized path. */
-        fun canonicalOracle(observation: PolicyObservation): String = PolicyJson.canonical(
-            PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(), observation.copy(observationDigest = "")))
+        fun canonicalOracle(observation: PlayerObservationSnapshot): String = PolicyJson.canonical(
+            PolicyJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(), observation.copy(observationDigest = "")))
 
-        fun build(observation: PolicyObservation, previous: ObservationCanonicalFragments? = null): ObservationCanonicalFragments {
+        fun build(observation: PlayerObservationSnapshot, previous: ObservationCanonicalFragments? = null): ObservationCanonicalFragments {
             var reusedCards = 0
             var encodedCards = 0
             var reusedZones = 0
@@ -60,7 +60,7 @@ internal class ObservationCanonicalFragments private constructor(
             }
             // The source serializer owns every field and default. Only the already encoded zones
             // are substituted; newly added non-zone fields automatically enter the digest.
-            val frame = PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(),
+            val frame = PolicyJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(),
                 observation.copy(zones = emptyList(), observationDigest = "")) as JsonObject
             return ObservationCanonicalFragments(objectFragment(frame,
                 mapOf("zones" to arrayFragment(zones.map { it.fragment }))), zones, reusedCards, encodedCards, reusedZones)

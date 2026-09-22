@@ -1,5 +1,6 @@
 package org.mtgallium.agent.infoset.argentum
 
+import com.wingedsheep.engine.core.CombatResolutionResponse
 import com.wingedsheep.engine.core.DecisionResponse
 import com.wingedsheep.engine.core.GameAction
 import com.wingedsheep.engine.core.TypedEntityReferences
@@ -29,19 +30,58 @@ internal fun SafeReferenceMap.semanticActionJson(
     },
 )
 
-/** Rewrites only serializer-typed entity references in a decision-response payload. */
+/** Rewrites serializer-typed entity references and contract-local combat edge references. */
 internal fun SafeReferenceMap.semanticDecisionResponseJson(
     response: DecisionResponse,
     encoded: JsonObject,
-): JsonObject = maskTypedReferences(
-    encoded,
-    when (val projection = TypedEntityReferences.response(response)) {
-        is TypedEntityReferences.Projection.Complete -> projection.occurrences
-        is TypedEntityReferences.Projection.Incomplete -> error(
-            "Incomplete typed response reference projection for ${projection.rootType}: ${projection.failure}"
-        )
-    },
-)
+): JsonObject {
+    val masked = maskTypedReferences(
+        encoded,
+        when (val projection = TypedEntityReferences.response(response)) {
+            is TypedEntityReferences.Projection.Complete -> projection.occurrences
+            is TypedEntityReferences.Projection.Incomplete -> error(
+                "Incomplete typed response reference projection for ${projection.rootType}: ${projection.failure}"
+            )
+        },
+    )
+    return when (response) {
+        is CombatResolutionResponse -> combatResolutionResponseEdges(response, masked)
+        else -> masked
+    }
+}
+
+/**
+ * Replaces each native damage-edge wire id with the contract-local reference established when the
+ * current chooser contract was projected, and orders the entries canonically. An id absent from
+ * that contract, a repeated id, or a payload shape that disagrees with the serialized response is
+ * refused explicitly rather than bound to an arbitrary native edge.
+ */
+private fun SafeReferenceMap.combatResolutionResponseEdges(
+    response: CombatResolutionResponse,
+    encoded: JsonObject,
+): JsonObject {
+    require(response.edges.map { it.edgeId }.toSet().size == response.edges.size) {
+        "Combat response repeats a native edge id"
+    }
+    val rawEdges = encoded["edges"] as? JsonArray
+        ?: error("Combat response payload has no edges array")
+    require(rawEdges.size == response.edges.size) {
+        "Combat response payload edge count disagrees with the serialized response"
+    }
+    val entries = response.edges.indices.map { index ->
+        val local = combatEdges.local(response.edges[index].edgeId)
+        val raw = rawEdges[index] as? JsonObject
+            ?: error("Combat response edge entry is not an object")
+        local to JsonObject(raw.toMutableMap().apply { put("edgeId", JsonPrimitive(local)) })
+    }
+    val ordered = entries.sortedBy { it.first }
+    require(ordered.map { it.first }.toSet().size == ordered.size) {
+        "Combat response maps two native edges to one contract-local reference"
+    }
+    return JsonObject(encoded.toMutableMap().apply {
+        put("edges", JsonArray(ordered.map { it.second }))
+    })
+}
 
 private fun SafeReferenceMap.maskTypedReferences(
     encoded: JsonObject,

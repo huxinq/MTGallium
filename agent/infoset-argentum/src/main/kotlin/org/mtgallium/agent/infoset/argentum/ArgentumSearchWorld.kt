@@ -1,5 +1,10 @@
 package org.mtgallium.agent.infoset.argentum
 
+import org.mtgallium.agent.infoset.core.DecisionAdmission
+import org.mtgallium.agent.infoset.core.DecisionView
+import org.mtgallium.agent.infoset.core.DecisionSiteRequest
+import org.mtgallium.agent.infoset.core.EpistemicState
+
 import com.wingedsheep.ai.engine.AIPlayer
 import com.wingedsheep.ai.engine.AiProfile
 import com.wingedsheep.engine.core.BottomCards
@@ -35,17 +40,15 @@ import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.PolicyExpansion
 import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
-import org.mtgallium.agent.infoset.core.PolicyInformationState
+import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
 import org.mtgallium.agent.infoset.core.PolicyAnnotatedSearchWorld
 import org.mtgallium.agent.infoset.core.ProgressiveSearchWorld
-import org.mtgallium.agent.infoset.core.ReusableSearchWorld
 import org.mtgallium.agent.infoset.core.DerivedCacheTransferSearchWorld
 import org.mtgallium.agent.infoset.core.SearchStepResult
 import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SearchWorld
-import org.mtgallium.agent.infoset.core.SearchWorldReuseKey
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import kotlinx.serialization.encodeToString
@@ -75,7 +78,7 @@ class ArgentumSearchWorld private constructor(
     private val heuristicAnnotator: ArgentumHeuristicAnnotator?,
     private val knownDecks: Map<String, Map<String, Int>>,
     private val heuristicResolutionSink: (ArgentumHeuristicResolution) -> Unit,
-) : ProgressiveSearchWorld, ReusableSearchWorld, PolicyAnnotatedSearchWorld, DerivedCacheTransferSearchWorld {
+) : ProgressiveSearchWorld, PolicyAnnotatedSearchWorld, DerivedCacheTransferSearchWorld {
     /** The engine environment owns the registry used for transition, projection, and materialization. */
     private val cardRegistry: CardRegistry = environment.cardRegistry
     private val projector = SafeObservationProjector()
@@ -84,8 +87,84 @@ class ArgentumSearchWorld private constructor(
     private var auditedState: GameState? = null
     private val cachedProjections = mutableMapOf<EntityId, StateCache<PreparedSemanticExpansionInput>>()
     private val cachedSafeProjections = mutableMapOf<EntityId, StateCache<SafeObservationProjection>>()
-    private val cachedInformationStates = mutableMapOf<String, StateCache<PolicyInformationState>>()
+    private val cachedInformationStates = mutableMapOf<String, StateCache<InformationStateRepresentation>>()
+    private val cachedEpistemicStates = mutableMapOf<String, StateCache<EpistemicState>>()
+    private val cachedDecisionContexts = mutableMapOf<DecisionView, StateCache<DecisionSiteRequest>>()
+    private var capturedRevision: StateCache<ArgentumSearchWorld>? = null
+    private var nativeEpistemicBuilds = 0
+    private var nativeDecisionCaptures = 0
+    private var nativeRevisionCaptures = 0
+    // At most one predecessor; derived worlds do not inherit this link.
+    private var lastExactObservation: Pair<ArgentumSearchWorld, String>? = null
+    // Only native-observation origin, not the factual optionality value or a predecessor world.
+    // Null denotes ordinary search/replay (or a derived world with no accepted transition).
+    private data class ObservedChoiceOrigin(val decisionIndex: Int, val actor: String, val signature: String)
+    private var lastObservedChoiceOrigin: ObservedChoiceOrigin? = null
+
+    /** Actual capture-only environment/history forks made by this world, excluding ordinary forks. */
+    internal fun decisionRevisionCaptureCount(): Int = nativeRevisionCaptures
+
+    /** Counts only derived projection work, not hidden-state data or scientific observations. */
+    fun semanticProjectionWork(): Pair<Int, Int> = nativeEpistemicBuilds to nativeDecisionCaptures
+
+    internal fun observedProposalExpansionAttempts(): Int = exactObservedActionExpander.expansionAttempts
+
+    override fun epistemicState(viewer: String): EpistemicState {
+        cachedEpistemicStates[viewer]?.takeIf { it.state === environment.state && it.decisionIndex == decisionIndex }
+            ?.let { return it.value }
+        capturedRevision?.takeIf { it.state === environment.state && it.decisionIndex == decisionIndex }?.let { captured ->
+            return captured.value.epistemicState(viewer).also { cachedEpistemicStates[viewer] = StateCache(environment.state, decisionIndex, it) }
+        }
+        val viewerId = rawPlayer(viewer)
+        val projection = project(viewerId)
+        val state = EpistemicState.capture(projection.observation, history.forViewer(viewerId),
+            history.commitmentForViewer(viewerId), history.knowledgeForViewer(viewerId, projection.observation, knownDecks),
+            environment.isTerminal, environment.winnerId?.let(aliases::getValue))
+        nativeEpistemicBuilds++
+        cachedEpistemicStates[viewer] = StateCache(environment.state, decisionIndex, state)
+        return state
+    }
+
+    override fun decisionContext(view: DecisionView): DecisionSiteRequest {
+        val effective = view.copy(limit = view.limit ?: cachedExpansion?.limit ?: DEFAULT_EXPANSION_LIMIT)
+        cachedDecisionContexts[effective]?.takeIf { it.state === environment.state && it.decisionIndex == decisionIndex }
+            ?.let { return it.value }
+        val actor = requireNotNull(actorToAct()) { "A decision context requires a current actor" }
+        val expanded = expansionResult(requireNotNull(effective.limit),
+            includePolicyAdmission = effective.admission == DecisionAdmission.PRODUCTION,
+            includePolicyAnnotations = effective.annotations).policy
+        // One private, never-advanced revision owns lazy projections for every requested view.
+        // Capture-only wrappers do not inherit requests or captures of earlier views.
+        val captured = capturedRevision?.takeIf {
+            it.state === environment.state && it.decisionIndex == decisionIndex
+        }?.value ?: derivedWorld(environment.fork(), history.fork()).also {
+            nativeRevisionCaptures++
+            it.cachedEpistemicStates.putAll(cachedEpistemicStates.filterValues { cache ->
+                cache.state === environment.state && cache.decisionIndex == decisionIndex
+            })
+            it.cachedProjections.putAll(cachedProjections.filterValues { cache -> cache.state === environment.state })
+            it.cachedSafeProjections.putAll(cachedSafeProjections.filterValues { cache -> cache.state === environment.state })
+            capturedRevision = StateCache(environment.state, decisionIndex, it)
+        }
+        val result = DecisionSiteRequest.capture(actor, expanded, { captured.epistemicState(actor) }, effective,
+            PolicyJson.digest(PolicyJson.format.encodeToJsonElement(UnifiedSemanticExpansionSpecification.serializer(), semanticExpansionSpecification())))
+        nativeDecisionCaptures++
+        cachedDecisionContexts[effective] = StateCache(environment.state, decisionIndex, result)
+        return result
+    }
+
+    /** Capture the admitted decision and safe action-reference relations at the same revision. */
+    fun policyDecisionProjection(view: DecisionView = DecisionView()): ArgentumPolicyDecisionProjection {
+        val request = decisionContext(view)
+        val captured = requireNotNull(capturedRevision).value
+        val references = captured.project(captured.rawPlayer(request.actor)).references.visibleSemanticGroups()
+        return ArgentumPolicyDecisionProjection(request.site(), references)
+    }
+
     private var cachedAuthoritativeFingerprint: StateCache<String>? = null
+
+    /** Existing accepted-choice coordinate; factual forks inherit it. Host observation only. */
+    val acceptedDecisionCountForHost: Int get() = decisionIndex
 
     override fun actorToAct(): String? = policyActor(environment)?.let(aliases::getValue)
 
@@ -96,19 +175,32 @@ class ArgentumSearchWorld private constructor(
         it.reusedCards to it.encodedCards
     }
 
+    /** Runtime history representation; forks inherit it through the history ledger. */
+    val historyEventOrder: PerspectiveHistoryEventOrder get() = history.eventOrder
+    val historyObjectReference: PerspectiveHistoryObjectReference get() = history.objectReference
+
     /** Declared candidate-generation behavior used by this world and all of its ordinary forks. */
     fun semanticExpansionSpecification(): UnifiedSemanticExpansionSpecification =
         expander.behaviorSpecification
 
-    override fun informationState(viewer: String): PolicyInformationState {
+    override fun informationState(viewer: String): InformationStateRepresentation {
         cachedInformationStates[viewer]?.takeIf {
             it.state === environment.state && it.decisionIndex == decisionIndex
         }?.let { return it.value }
+        return buildInformationState(viewer).also { information ->
+            cachedInformationStates[viewer] = StateCache(environment.state, decisionIndex, information)
+        }
+    }
+
+    private fun buildInformationState(
+        viewer: String,
+        capturedBase: PolicyExpansion? = null,
+    ): InformationStateRepresentation {
         val viewerId = rawPlayer(viewer)
         val projection = project(viewerId)
         val knowledge = history.knowledgeForViewer(viewerId, projection.observation, knownDecks)
         val actorId = policyActor(environment)
-        val expansion = if (actorId == viewerId && !environment.isTerminal) {
+        val expansion = capturedBase ?: if (actorId == viewerId && !environment.isTerminal) {
             expansionResult().policy
         } else {
             PolicyExpansion(
@@ -119,7 +211,7 @@ class ArgentumSearchWorld private constructor(
                 proposalSeed = proposalSeed(),
             )
         }
-        return PolicyInformationStateFactory.build(
+        return InformationStateRepresentationFactory.build(
             projection = projection,
             history = history.forViewer(viewerId),
             historyCommitment = history.commitmentForViewer(viewerId),
@@ -128,9 +220,7 @@ class ArgentumSearchWorld private constructor(
             terminated = environment.isTerminal,
             winnerId = environment.winnerId?.let(aliases::getValue),
             knowledge = knowledge,
-        ).also { information ->
-            cachedInformationStates[viewer] = StateCache(environment.state, decisionIndex, information)
-        }
+        )
     }
 
     /** Trusted conformance probe; returns counts/codes only and never exposes hidden identities. */
@@ -141,9 +231,12 @@ class ArgentumSearchWorld private constructor(
         val hidden = environment.state.getHand(opponent) + environment.state.getLibrary(opponent)
         if (hidden.size < 2) return HiddenTruthConformanceProbe(false, false, false, "INSUFFICIENT_HIDDEN_OBJECTS")
         val first = hidden.first()
-        val last = hidden.last()
         val firstCard = environment.state.getEntity(first)?.get<CardComponent>()
             ?: return HiddenTruthConformanceProbe(false, false, false, "MISSING_HIDDEN_CARD")
+        // Swapping identical cards would make a zero-effect check vacuous.
+        val last = hidden.lastOrNull { id ->
+            environment.state.getEntity(id)?.get<CardComponent>()?.name?.let { it != firstCard.name } == true
+        } ?: return HiddenTruthConformanceProbe(false, false, false, "NO_DISTINCT_HIDDEN_CARD_IDENTITIES")
         val lastCard = environment.state.getEntity(last)?.get<CardComponent>()
             ?: return HiddenTruthConformanceProbe(false, false, false, "MISSING_HIDDEN_CARD")
         val permutedState = environment.state
@@ -152,19 +245,7 @@ class ArgentumSearchWorld private constructor(
         val permutedEnvironment = environment.fork().also {
             it.restore(permutedState, environment.playerIds, environment.stepCount)
         }
-        val permuted = ArgentumSearchWorld(
-            environment = permutedEnvironment,
-            gameId = gameId,
-            seedBase = seedBase,
-            effectiveSetupSeed = effectiveSetupSeed,
-            aliases = aliases,
-            history = history.fork(),
-            decisionIndex = decisionIndex,
-            expander = expander,
-            heuristicAnnotator = heuristicAnnotator,
-            knownDecks = knownDecks,
-            heuristicResolutionSink = heuristicResolutionSink,
-        )
+        val permuted = derivedWorld(permutedEnvironment, history.fork())
         val leftInformation = informationState(viewer)
         val rightInformation = permuted.informationState(viewer)
         val informationEqual = leftInformation == rightInformation
@@ -181,21 +262,6 @@ class ArgentumSearchWorld private constructor(
         return HiddenTruthConformanceProbe(informationEqual, inputEqual, expansionEqual, null)
     }
 
-    fun verifyKnowledgeSupport(
-        viewer: String,
-        seed: Long,
-        particleCount: Int = 8,
-    ): KnowledgeSupportVerification = runCatching {
-        val information = informationState(viewer)
-        val batch = ArgentumKnownDeckBeliefWorldSource(this)
-            .sample(information, knownDecks, seed, particleCount)
-        val codes = batch.particles.mapNotNull { particle ->
-            val sampledWorld = particle.value as? ArgentumSearchWorld ?: return@mapNotNull "WORLD_TYPE"
-            sampledWorld.knowledgeSupportFailure(viewer, information)
-        }
-        KnowledgeSupportVerification(batch.particles.size, codes.size, codes.firstOrNull())
-    }.getOrElse { KnowledgeSupportVerification(0, 1, it::class.simpleName ?: "SUPPORT_FAILURE") }
-
     fun persistentHistoryForkSharesPrefix(viewer: String): Boolean =
         history.sharesLedgerPrefixWith(history.fork(), rawPlayer(viewer))
 
@@ -205,7 +271,7 @@ class ArgentumSearchWorld private constructor(
      * observation, knowledge projection, visible history, known objects/zones, and remembered
      * library prefix.
      */
-    fun knowledgeSupportFailure(viewer: String, expected: PolicyInformationState): String? {
+    fun knowledgeConsistencyFailure(viewer: String, expected: InformationStateRepresentation): String? {
         val sampled = informationState(viewer)
         ArgentumInformationSupport.failure(sampled, expected)?.let { return it }
         return ArgentumRememberedFactSupport.failure(
@@ -257,37 +323,153 @@ class ArgentumSearchWorld private constructor(
      */
     fun applyObservedAction(action: GameAction): ArgentumObservedStep {
         val actor = requireNotNull(policyActor(environment)) { "No actor in non-terminal world" }
+        require(action.playerId == actor) { "Observed action belongs to a different actor" }
         val rebound = if (action is SubmitDecision) {
             val pendingId = environment.pendingDecision?.id
                 ?: error("Observed a decision response while the shadow world has no pending decision")
             action.copy(response = action.response.withDecisionId(pendingId))
         } else action
-        // Observed host actions are always decoded against the unpruned rules profile. A local
-        // search abstraction may suppress mana actions for proposal purposes, but it must still
-        // accept and record one taken by a human or another policy.
-        val expansion = exactObservedActionExpander.expand(
-            environment,
-            cardRegistry,
-            proposalSeed(),
-            MAX_OBSERVED_EXPANSION,
-        )
-        val match = expansion.engineChoices.entries.singleOrNull { (_, choice) ->
-            when (choice) {
-                is ArgentumEngineChoice.Action -> choice.value == rebound
-                is ArgentumEngineChoice.Decision ->
-                    rebound is SubmitDecision &&
-                        rebound.playerId == actor &&
-                        choice.value == rebound.response
-            }
-        } ?: error(
-            "Observed ${action::class.simpleName} is absent or ambiguous in the current semantic expansion " +
-                "(${expansion.policy.candidates.size}/${expansion.policy.estimatedCandidateCount})"
-        )
-        val semantic = expansion.policy.candidates.single { it.signature == match.key }
+        val native = if (rebound is SubmitDecision) ArgentumEngineChoice.Decision(rebound.response)
+            else ArgentumEngineChoice.Action(rebound)
+        val prepared = preparedProjection(actor)
+        val semantic = exactObservedActionExpander.encodePreparedChoice(native, prepared)
         return ArgentumObservedStep(
             semantic,
-            applyChoice(semantic, suppliedExpansion = expansion),
+            submitNativeChoice(semantic, native),
         )
+    }
+
+    /** No proposal work: a singleton concrete pass, or a second engine-accepted declaration.
+     * Null means unqualified cardinality, never a claim that one search group is one native move.
+     * The supplied action itself is certified only by the shared owner's successful submission.
+     */
+    private fun observedChoiceOptionality(action: GameAction, prepared: PreparedSemanticExpansionInput): Boolean? {
+        if (action is com.wingedsheep.engine.core.PassPriority && environment.pendingDecision == null &&
+            prepared.legalActions.singleOrNull()?.action == action) return false
+        if (action is com.wingedsheep.engine.core.PassPriority) {
+            // Concrete native templates may establish a second choice, but their failure or
+            // the finite probe limit cannot establish a singleton.
+            return prepared.legalActions.asSequence().map { it.action }.filter { it != action }.take(2)
+                .any { environment.fork().stepExactlyOne(it) is ExactlyOneSubmissionResult.Applied }
+                .takeIf { it }
+        }
+        val alternative = when (action) {
+            is DeclareBlockers -> action.copy(blockers = emptyMap()).takeIf { it != action }
+            is DeclareAttackers -> action.copy(attackers = emptyMap(), bands = emptyList()).takeIf { it != action }
+            is SubmitDecision, is KeepHand, is TakeMulligan, is BottomCards -> null
+            else -> prepared.legalActions.map { it.action }.filterIsInstance<com.wingedsheep.engine.core.PassPriority>()
+                .singleOrNull()?.takeIf { it != action }
+        } ?: return null
+        return if (environment.fork().stepExactlyOne(alternative) is ExactlyOneSubmissionResult.Applied) true else null
+    }
+
+    /** Trusted capture at one immutable revision. Does not assert acceptance or positive policy mass. */
+    fun captureObservedActionForHost(
+        observer: String,
+        action: GameAction,
+        view: DecisionView = DecisionView(),
+    ): ArgentumObservedActionCapture {
+        val frozen = fork() as ArgentumSearchWorld
+        val actor = requireNotNull(policyActor(frozen.environment))
+        require(action.playerId == actor) { "Observed action belongs to a different actor" }
+        val native = if (action is SubmitDecision) ArgentumEngineChoice.Decision(action.response.withDecisionId(
+            requireNotNull(frozen.environment.pendingDecision).id)) else ArgentumEngineChoice.Action(action)
+        val semantic = frozen.exactObservedActionExpander.encodePreparedChoice(native, frozen.preparedProjection(actor))
+        val ids = requireNotNull(action.completeEntityReferencesOrNull()) { "Incomplete native references" } - aliases.keys
+        val effectiveView = view.copy(limit = view.limit ?: frozen.cachedExpansion?.limit ?: DEFAULT_EXPANSION_LIMIT)
+        return ArgentumObservedActionCapture(frozen.decisionContext(effectiveView), frozen.epistemicState(observer),
+            action, semantic, frozen.observedBindings(observer, ids), observedActionBehaviorId(),
+            decisionIndex, historyEventOrder, historyObjectReference, effectiveView, aliases.toMap())
+    }
+
+    fun observedActionBehaviorId(): String =
+        "${ArgentumActionCorrespondence.BEHAVIOR_ID}:${historyEventOrder.name}:${historyObjectReference.name}"
+
+    /**
+     * Trusted propagation of the latest accepted native observation by its search signature.
+     * Keeps representative selection and likelihood historical, but records the representative
+     * through the same native-optionality owner as the factual observation. This is not exact
+     * object correspondence. No factual optionality or hidden native declaration is transported.
+     * Search/replay and derived worlds return null, preserving ordinary [step] semantics.
+     */
+    fun observedChoicePropagationForHost(
+        actor: String,
+        choice: SemanticChoice,
+    ): ((SearchWorld, SemanticChoice) -> SearchStepResult)? {
+        val origin = lastObservedChoiceOrigin ?: return null
+        require(origin.decisionIndex + 1 == decisionIndex && origin.actor == actor && origin.signature == choice.signature) {
+            "Observed-choice propagation requires the latest accepted declaration"
+        }
+        val eventOrder = historyEventOrder
+        val objectReference = historyObjectReference
+        return { child, representative ->
+            require(child is ArgentumSearchWorld)
+            require(child.decisionIndex == origin.decisionIndex && child.actorToAct() == origin.actor &&
+                representative.signature == origin.signature && child.historyEventOrder == eventOrder &&
+                child.historyObjectReference == objectReference) {
+                "Observed-choice propagation requires the corresponding predecessor boundary"
+            }
+            child.applyChoice(representative, observedSubmission = true)
+        }
+    }
+
+    private fun observedBindings(observer: String, ids: Set<EntityId>): List<ArgentumObservedObjectBinding> {
+        val actor = requireNotNull(policyActor(environment))
+        val viewer = rawPlayer(observer)
+        val actorRefs = project(actor).references
+        val observerRefs = project(viewer).references
+        val actorHandles = history.knowledgeObjectBindingsForViewer(actor).entries.associate { it.value to it.key }
+        val observerHandles = history.knowledgeObjectBindingsForViewer(viewer).entries.associate { it.value to it.key }
+        val qualified = history.qualifiedBattlefieldBindings(viewer, environment.state)
+        return ids.map { id -> ArgentumObservedObjectBinding(id, environment.state.objectRef(id),
+            actorRefs.referenceOrNull(id), observerRefs.referenceOrNull(id), actorHandles[id], observerHandles[id],
+            id in qualified && observerRefs.referenceOrNull(id) != null) }
+    }
+
+    /** Resolve only through qualified observer-local handles, then let native legality decide. */
+    fun correspondObservedActionForHost(capture: ArgentumObservedActionCapture): ArgentumActionCorrespondence {
+        fun refuse(reason: ArgentumCorrespondenceRefusal) = ArgentumActionCorrespondence.Unsupported(reason)
+        if (decisionIndex != capture.decisionIndex || actorToAct() != capture.actingSite.actor ||
+            historyEventOrder != capture.eventOrder || historyObjectReference != capture.objectReference)
+            return refuse(ArgentumCorrespondenceRefusal.DIFFERENT_BOUNDARY)
+        val observer = capture.observerInformation.perspectivePlayerId
+        val current = epistemicState(observer)
+        if (current.historyCommitment != capture.observerInformation.historyCommitment ||
+            current.knowledge != capture.observerInformation.knowledge ||
+            current.observation != capture.observerInformation.observation)
+            return refuse(ArgentumCorrespondenceRefusal.DIFFERENT_OBSERVER_INFORMATION)
+        val sourceAction = capture.action
+        if (sourceAction.transportObservedObjects { it } == null)
+            return refuse(ArgentumCorrespondenceRefusal.UNSUPPORTED_ACTION_FAMILY)
+        val targetIds = history.knowledgeObjectBindingsForViewer(rawPlayer(observer)).values.toSet()
+        val (objects, reason) = QualifiedObservedObjectCorrespondence.bind(capture.bindings, observedBindings(observer, targetIds))
+        if (reason != null) return refuse(reason)
+        val players = capture.players.mapValues { (_, alias) -> rawPlayer(alias) }
+        val mapped = requireNotNull(sourceAction.transportObservedObjects { id ->
+            players[id] ?: requireNotNull(objects).getValue(id)
+        })
+        val context = decisionContext(capture.view)
+        val group = context.expansion.candidates.singleOrNull { it.signature == capture.searchGroup.signature }
+            ?: return refuse(ArgentumCorrespondenceRefusal.UNAVAILABLE_GROUP)
+        val encoded = exactObservedActionExpander.encodePreparedChoice(ArgentumEngineChoice.Action(mapped),
+            preparedProjection(requireNotNull(policyActor(environment))))
+        if (group.canonicalPayload != encoded.canonicalPayload || group.canonicalPayload != capture.searchGroup.canonicalPayload)
+            return refuse(ArgentumCorrespondenceRefusal.UNAVAILABLE_GROUP)
+        if (environment.fork().stepExactlyOne(mapped) is ExactlyOneSubmissionResult.Rejected)
+            return refuse(ArgentumCorrespondenceRefusal.NATIVE_REJECTED)
+        val representative = resolveChoice(group) as? ArgentumResolvedChoice.Action
+        return ArgentumActionCorrespondence.Matched(mapped, group,
+            if (representative?.value == mapped) 1.0 else 0.0)
+    }
+
+    /** Latest accepted transition only, available in the explicitly corrected representation mode. */
+    fun lastObservedActionCaptureForHost(observer: String): ArgentumObservedActionCapture? =
+        lastExactObservation?.let { (before, action) -> before.captureObservedActionForHost(observer,
+            PolicyJson.format.decodeFromString(GameAction.serializer(), action)) }
+
+    /** Family classification only; no proposal expansion or hidden identity leaves the host. */
+    fun lastObservedActionHasQualifiedTransportForHost(): Boolean? = lastExactObservation?.let { (_, bytes) ->
+        PolicyJson.format.decodeFromString(GameAction.serializer(), bytes).transportObservedObjects { it } != null
     }
 
     /** Stable full-truth fingerprint used only to prove a trusted shadow matches its live host. */
@@ -310,14 +492,30 @@ class ArgentumSearchWorld private constructor(
             cachedAuthoritativeFingerprint = StateCache(environment.state, decisionIndex, evidence.fingerprint)
         }
 
-    override fun privateSearchReuseKey(): SearchWorldReuseKey =
-        SearchWorldReuseKey.fromTrustedDigest(authoritativeFingerprint())
+    internal fun exactRevision(): ArgentumWorldRevision =
+        ArgentumWorldRevision(when {
+            historyObjectReference != PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1 ->
+                PolicyJson.sha256("${authoritativeFingerprint()}:${historyEventOrder.name}:${historyObjectReference.name}:${history.trustedReferenceStateDigest()}")
+            historyEventOrder != PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1 ->
+                PolicyJson.sha256("${authoritativeFingerprint()}:${historyEventOrder.name}")
+            else -> authoritativeFingerprint()
+        })
 
     override fun copyDerivedCachesFrom(source: SearchWorld): Boolean {
         val other = source as? ArgentumSearchWorld ?: return false
-        if (cardRegistry !== other.cardRegistry) return false
+        // Separately constructed owners may produce the same caches. Compare their behavior
+        // and the inputs retained by lazy requests, not the allocation identity of the owners.
+        if (expander.behaviorSpecification != other.expander.behaviorSpecification ||
+            heuristicAnnotator?.profile != other.heuristicAnnotator?.profile) return false
+        if (gameId != other.gameId || seedBase != other.seedBase ||
+            aliases != other.aliases || knownDecks != other.knownDecks) return false
+        if (cardRegistry !== other.cardRegistry || historyEventOrder != other.historyEventOrder ||
+            historyObjectReference != other.historyObjectReference) return false
         if (environment.state !== other.environment.state || decisionIndex != other.decisionIndex) return false
         if (aliases.keys.any { viewer -> !history.sharesLedgerPrefixWith(other.history, viewer) }) return false
+        if (historyObjectReference != PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1 &&
+            history.trustedReferenceStateDigest() != other.history.trustedReferenceStateDigest()) return false
+        if (other === this) return true
         cachedExpansion = other.cachedExpansion
         cachedProjections.clear()
         cachedProjections.putAll(other.cachedProjections.filterValues {
@@ -328,6 +526,17 @@ class ArgentumSearchWorld private constructor(
             it.state === environment.state && it.decisionIndex == decisionIndex
         })
         cachedInformationStates.clear()
+        cachedEpistemicStates.clear()
+        cachedDecisionContexts.clear()
+        capturedRevision = other.capturedRevision?.takeIf {
+            it.state === environment.state && it.decisionIndex == decisionIndex
+        }
+        cachedEpistemicStates.putAll(other.cachedEpistemicStates.filterValues {
+            it.state === environment.state && it.decisionIndex == decisionIndex
+        })
+        cachedDecisionContexts.putAll(other.cachedDecisionContexts.filterValues {
+            it.state === environment.state && it.decisionIndex == decisionIndex
+        })
         cachedInformationStates.putAll(other.cachedInformationStates.filterValues {
             it.state === environment.state && it.decisionIndex == decisionIndex
         })
@@ -340,6 +549,24 @@ class ArgentumSearchWorld private constructor(
 
     /** Trusted host bridge; never expose this value through a perspective-safe policy API. */
     fun authoritativeStateForHost(): GameState = environment.state
+
+    /** Diagnostic derivative of this history, never a new admitted origin or belief proposal. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    fun forkSwappingNativeIdsForHost(first: EntityId, second: EntityId): ArgentumSearchWorld {
+        require(first in environment.state.getBattlefield() && second in environment.state.getBattlefield())
+        require(first !in aliases && second !in aliases)
+        val swap = ArgentumNativeIdSwap(first, second)
+        val state = swap.apply(GameState.serializer(), environment.state)
+        val renamedEnvironment = environment.fork().also {
+            it.restore(state, environment.playerIds, environment.stepCount)
+        }
+        require(renamedEnvironment.legalActions().map(swap::legal) == environment.legalActions()) {
+            "NATIVE_ID_SWAP_LEGAL_CONTRACT_CHANGED"
+        }
+        val renamedHistory = history.swapNativeIds(swap)
+        check(renamedHistory.swapNativeIds(swap).trustedReferenceStateDigest() == history.trustedReferenceStateDigest())
+        return derivedWorld(renamedEnvironment, renamedHistory)
+    }
 
     /** Initializer events for privileged replay headers; call only before the first step. */
     fun initializationEventsForHost(): List<com.wingedsheep.engine.core.GameEvent> {
@@ -370,18 +597,15 @@ class ArgentumSearchWorld private constructor(
 
     private fun applyChoice(
         choice: SemanticChoice,
-        suppliedExpansion: UnifiedExpansionResult? = null,
         rawTraceSink: MutableList<ArgentumRawTransition>? = null,
+        observedSubmission: Boolean = false,
     ): SearchStepResult {
         check(!environment.isTerminal) { "Cannot step a terminal search world" }
-        val actor = requireNotNull(policyActor(environment))
-        var expansion = suppliedExpansion
-            ?: cachedExpansion?.annotated?.expansion?.takeIf { annotated ->
+        var expansion = cachedExpansion?.annotated?.expansion?.takeIf { annotated ->
                 annotated.policy.candidates.any { it.signature == choice.signature }
             }
             ?: expansionResult(cachedExpansion?.limit ?: DEFAULT_EXPANSION_LIMIT)
-        if (suppliedExpansion == null &&
-            expansion.policy.candidates.none { it.signature == choice.signature } &&
+        if (expansion.policy.candidates.none { it.signature == choice.signature } &&
             !expansion.policy.isExhaustive
         ) {
             for (limit in STEP_EXPANSION_LIMITS) {
@@ -401,6 +625,21 @@ class ArgentumSearchWorld private constructor(
             return SearchStepResult(false, "Choice payload does not match its current signature")
         }
         val engineChoice = expansion.engineChoices.getValue(choice.signature)
+        return submitNativeChoice(canonical, engineChoice,
+            legacySearchOptionality = if (observedSubmission) null
+                else expansion.policy.candidates.size > 1 || !expansion.policy.isExhaustive,
+            rawTraceSink = rawTraceSink)
+    }
+
+    /** Sole submission/history owner. Native admission is independent of representative lookup. */
+    private fun submitNativeChoice(
+        canonical: SemanticChoice,
+        engineChoice: ArgentumEngineChoice,
+        legacySearchOptionality: Boolean? = null,
+        rawTraceSink: MutableList<ArgentumRawTransition>? = null,
+    ): SearchStepResult {
+        check(!environment.isTerminal) { "Cannot step a terminal search world" }
+        val actor = requireNotNull(policyActor(environment))
         val beforeState = environment.state
         // Keep the already-built Gym input as well as the safe projection. A pure priority
         // transfer changes only three visible priority fields, so the next inputs can be derived
@@ -422,6 +661,17 @@ class ArgentumSearchWorld private constructor(
             is ArgentumEngineChoice.Action -> engineChoice.value
             is ArgentumEngineChoice.Decision -> SubmitDecision(actor, engineChoice.value)
         }
+        // V2 histories use the same bounded native witness on both submission routes.
+        // Unknown stays unknown even if search enumerated multiple representative groups.
+        // Older modes retain search's historical Boolean, but direct observation now uses
+        // native witnesses too; observedActionBehaviorId explicitly identifies that change.
+        val strategicallyOptional = if (
+            historyObjectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2 ||
+            legacySearchOptionality == null
+        ) observedChoiceOptionality(submittedAction, beforePrepared.getValue(actor))
+        else legacySearchOptionality
+        val exactBefore = if (historyObjectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2)
+            fork() as ArgentumSearchWorld else null
         val submission = environment.stepExactlyOne(submittedAction)
         val rejection = (submission as? ExactlyOneSubmissionResult.Rejected)?.reason
         rawTraceSink?.add(
@@ -436,12 +686,17 @@ class ArgentumSearchWorld private constructor(
         if (rejection != null) {
             return SearchStepResult(false, rejection)
         }
+        lastObservedChoiceOrigin = if (legacySearchOptionality == null)
+            ObservedChoiceOrigin(decisionIndex, aliases.getValue(actor), canonical.signature) else null
+        lastExactObservation = exactBefore?.let {
+            it to PolicyJson.format.encodeToString(GameAction.serializer(), submittedAction)
+        }
         history.recordChoice(
             actor,
             canonical,
             privateChoice,
             historyKind,
-            strategicallyOptional = expansion.policy.candidates.size > 1 || !expansion.policy.isExhaustive,
+            strategicallyOptional = strategicallyOptional,
             libraryBottomObjects = ((engineChoice as? ArgentumEngineChoice.Action)?.value as? BottomCards)
                 ?.cardIds
                 .orEmpty()
@@ -498,6 +753,13 @@ class ArgentumSearchWorld private constructor(
             before = before,
             after = after,
         )
+        // Event projection can acquire new handles. Publish the resulting snapshot from that
+        // ledger, not a cached pre-acquisition reference map. Historical modes keep their bytes.
+        val visibleAfter = if (historyObjectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2 &&
+            !isPurePriorityTransfer) {
+            invalidateStateDerivedCaches()
+            aliases.keys.associateWith { viewer -> project(viewer) }
+        } else after
         // PriorityChangedEvent already records every field changed by the engine's pure transfer.
         // Adding a catch-all observation transition here merely repeats that fact, including an
         // always-empty zone delta, in both ledgers and their hash chains.
@@ -506,7 +768,7 @@ class ArgentumSearchWorld private constructor(
         } else {
             history.recordVisibleTransition(
                 before.mapValues { it.value.observation },
-                after.mapValues { it.value.observation },
+                visibleAfter.mapValues { it.value.observation },
                 returnViewer = actor,
             )
         }
@@ -514,25 +776,23 @@ class ArgentumSearchWorld private constructor(
         return SearchStepResult(true, forcedTransitions = forced, privateToActor = privateChoice)
     }
 
-    override fun fork(): SearchWorld = ArgentumSearchWorld(
-        environment = environment.fork(),
-        gameId = gameId,
-        seedBase = seedBase,
-        effectiveSetupSeed = effectiveSetupSeed,
-        aliases = aliases,
-        history = history.fork(),
-        decisionIndex = decisionIndex,
-        expander = expander,
-        heuristicAnnotator = heuristicAnnotator,
-        knownDecks = knownDecks,
-        heuristicResolutionSink = heuristicResolutionSink,
-    ).also { fork ->
+    override fun fork(): SearchWorld = derivedWorld(environment.fork(), history.fork()).also { fork ->
         // GameEnvironment forks preserve the exact immutable state and entity identities. The
         // validated engine choices in this expansion therefore remain valid until either world
         // takes a step. Reusing them avoids rebuilding large combat candidate families once per
         // simulation; worlds reconstructed from a different sampled state use withSampledState()
         // and deliberately do not inherit this cache.
         fork.cachedExpansion = cachedExpansion
+        fork.capturedRevision = capturedRevision?.takeIf {
+            it.state === fork.environment.state && it.decisionIndex == fork.decisionIndex
+        }
+        fork.cachedEpistemicStates.putAll(cachedEpistemicStates.filterValues {
+            it.state === fork.environment.state && it.decisionIndex == fork.decisionIndex
+        })
+        // Requests already own captured revisions; sharing them cannot mutate either world.
+        fork.cachedDecisionContexts.putAll(cachedDecisionContexts.filterValues {
+            it.state === fork.environment.state && it.decisionIndex == fork.decisionIndex
+        })
         fork.cachedProjections.putAll(cachedProjections.filterValues { it.state === fork.environment.state })
         fork.cachedSafeProjections.putAll(
             cachedSafeProjections.filterValues { it.state === fork.environment.state }
@@ -552,29 +812,16 @@ class ArgentumSearchWorld private constructor(
      * Reannotates only a fork used inside simulated search. It preserves represented state,
      * history, and candidates, while deliberately discarding annotation-dependent caches.
      */
-    fun forkWithHeuristicProfile(profile: ArgentumHeuristicProfile): ArgentumSearchWorld = ArgentumSearchWorld(
-        environment = environment.fork(), gameId = gameId, seedBase = seedBase,
-        effectiveSetupSeed = effectiveSetupSeed, aliases = aliases, history = history.fork(),
-        decisionIndex = decisionIndex, expander = expander,
+    fun forkWithHeuristicProfile(profile: ArgentumHeuristicProfile): ArgentumSearchWorld = derivedWorld(
+        environment.fork(), history.fork(),
         heuristicAnnotator = ArgentumHeuristicAnnotator(cardRegistry, knownDecks, profile),
-        knownDecks = knownDecks, heuristicResolutionSink = heuristicResolutionSink,
     )
 
     /** Rebinds the root action-space policy after an exact scenario has been constructed. */
-    fun withActionSpaceProfile(profile: SearchActionSpaceProfile): ArgentumSearchWorld =
-        ArgentumSearchWorld(
-            environment = environment.fork(),
-            gameId = gameId,
-            seedBase = seedBase,
-            effectiveSetupSeed = effectiveSetupSeed,
-            aliases = aliases,
-            history = history.fork(),
-            decisionIndex = decisionIndex,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
-            heuristicAnnotator = heuristicAnnotator,
-            knownDecks = knownDecks,
-            heuristicResolutionSink = heuristicResolutionSink,
-        )
+    fun withActionSpaceProfile(profile: SearchActionSpaceProfile): ArgentumSearchWorld = derivedWorld(
+        environment.fork(), history.fork(),
+        expander = UnifiedSemanticExpander(actionSpaceProfile = profile),
+    )
 
     override fun terminalPayoff(rootPlayer: String): Double? {
         if (!environment.isTerminal) return null
@@ -630,26 +877,34 @@ class ArgentumSearchWorld private constructor(
         if (!includePolicyAdmission || heuristicAnnotator == null) return base
         val current = requireNotNull(cachedExpansion).takeIf { it.key == key && it.limit == limit }
             ?: CachedExpansion(key, limit, base).also { cachedExpansion = it }
-        val admission = current.admitted ?: heuristicAnnotator.admit(
-            environment,
-            aliases,
-            base,
-            seed,
-            rememberedObjectIds = rememberedKnowledgeObjectIds(
-                aliases.getValue(actor),
-                informationState(aliases.getValue(actor)),
-            ),
-            encodeSemanticChoice = { choice -> expander.encodePreparedChoice(choice, preparedProjection(actor)) },
-            priorAnchorSignature = current.priorAnchorSignature,
-        ).also { resolved ->
-            current.admitted = resolved
-        }
+        val admission = current.admit(heuristicAnnotator, actor, seed)
         if (!includePolicyAnnotations) return admission.expansion
-        val annotation = current.annotated ?: heuristicAnnotator.annotate(admission).also { resolved ->
-            current.annotated = resolved
-            resolved.diagnosis.resolution?.let(heuristicResolutionSink)
-        }
-        return annotation.expansion
+        return current.annotate(heuristicAnnotator, admission).expansion
+    }
+
+    private fun CachedExpansion.admit(
+        annotator: ArgentumHeuristicAnnotator,
+        actor: EntityId,
+        seed: Long,
+    ): ArgentumHeuristicAdmission = admitted ?: annotator.admit(
+        environment,
+        aliases,
+        base,
+        seed,
+        rememberedObjectIds = rememberedKnowledgeObjectIds(
+            aliases.getValue(actor),
+            informationState(aliases.getValue(actor)),
+        ),
+        encodeSemanticChoice = { choice -> expander.encodePreparedChoice(choice, preparedProjection(actor)) },
+        priorAnchorSignature = priorAnchorSignature,
+    ).also { admitted = it }
+
+    private fun CachedExpansion.annotate(
+        annotator: ArgentumHeuristicAnnotator,
+        admission: ArgentumHeuristicAdmission,
+    ): ArgentumHeuristicAnnotation = annotated ?: annotator.annotate(admission).also { resolved ->
+        annotated = resolved
+        resolved.diagnosis.resolution?.let(heuristicResolutionSink)
     }
 
     private fun expansionContaining(choice: SemanticChoice): UnifiedExpansionResult {
@@ -696,6 +951,9 @@ class ArgentumSearchWorld private constructor(
             ArgentumPolicyRuntimeProjector.project(environment.state, viewer, cardRegistry, observation),
             pendingDecision = environment.pendingDecision,
             previous = previous,
+            qualifiedBattlefieldHandles = if (historyObjectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2)
+                history.qualifiedBattlefieldBindings(viewer, environment.state) else emptyMap(),
+            canonicalCombatRows = historyObjectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2,
         )
         return PreparedSemanticExpansionInput(
             actor = viewer,
@@ -712,6 +970,9 @@ class ArgentumSearchWorld private constructor(
         cachedProjections.clear()
         cachedSafeProjections.clear()
         cachedInformationStates.clear()
+        cachedEpistemicStates.clear()
+        cachedDecisionContexts.clear()
+        capturedRevision = null
         cachedAuthoritativeFingerprint = null
     }
 
@@ -740,7 +1001,7 @@ class ArgentumSearchWorld private constructor(
     internal fun authoritativeState(): GameState = environment.state
     internal fun rememberedKnowledgeObjectIds(
         viewerAlias: String,
-        expected: PolicyInformationState,
+        expected: InformationStateRepresentation,
     ): Set<EntityId> {
         val bindings = history.knowledgeObjectBindingsForViewer(rawPlayer(viewerAlias))
         return expected.knowledge.knownObjects.map { knownObject ->
@@ -748,13 +1009,6 @@ class ArgentumSearchWorld private constructor(
                 ?: error("A represented remembered object is missing its trusted binding")
         }.toSet()
     }
-    internal fun authoritativeRng(): GameRng = environment.state.rng
-    internal fun environmentFork(): GameEnvironment = environment.fork()
-    internal fun historyFork(): PerspectiveHistory = history.fork()
-    internal fun decisionIndex(): Int = decisionIndex
-    internal fun gameId(): String = gameId
-    internal fun seedBase(): Long = seedBase
-    internal fun expander(): UnifiedSemanticExpander = expander
 
     /** Determinized production-heuristic choice projected back to the semantic contract. */
     fun determinizedHeuristicChoice(maxCandidates: Int = 2_048): SemanticChoice {
@@ -777,25 +1031,8 @@ class ArgentumSearchWorld private constructor(
         val key = "${aliases.getValue(actor)}:$decisionIndex:$seed"
         val current = requireNotNull(cachedExpansion).takeIf { it.key == key && it.limit == maxCandidates }
             ?: CachedExpansion(key, maxCandidates, base).also { cachedExpansion = it }
-        val admission = current.admitted ?: annotator.admit(
-            environment,
-            aliases,
-            base,
-            seed,
-            rememberedObjectIds = rememberedKnowledgeObjectIds(
-                aliases.getValue(actor),
-                informationState(aliases.getValue(actor)),
-            ),
-            encodeSemanticChoice = { choice -> expander.encodePreparedChoice(choice, preparedProjection(actor)) },
-            priorAnchorSignature = current.priorAnchorSignature,
-        ).also { resolved ->
-            current.admitted = resolved
-        }
-        val annotation = current.annotated ?: annotator.annotate(admission).also { resolved ->
-            current.annotated = resolved
-            resolved.diagnosis.resolution?.let(heuristicResolutionSink)
-        }
-        return annotation.diagnosis
+        val admission = current.admit(annotator, actor, seed)
+        return current.annotate(annotator, admission).diagnosis
     }
 
     /** Privileged evidence only; no authoritative state reference escapes this DTO. */
@@ -849,36 +1086,32 @@ class ArgentumSearchWorld private constructor(
             environment.playerIds,
             environment.stepCount,
         )
-        return ArgentumSearchWorld(
-            environment = sampledEnvironment,
-            gameId = gameId,
-            seedBase = seedBase,
-            effectiveSetupSeed = effectiveSetupSeed,
-            aliases = aliases,
-            history = history.fork(),
-            decisionIndex = decisionIndex,
-            expander = expander,
-            heuristicAnnotator = heuristicAnnotator,
-            knownDecks = knownDecks,
-            heuristicResolutionSink = heuristicResolutionSink,
-        )
+        return derivedWorld(sampledEnvironment, history.fork())
     }
 
     /** Adapter-internal audit seam for exercising construction from a reconstructed safe ledger. */
     internal fun withRememberedHistoryForVerification(reconstructedHistory: PerspectiveHistory): ArgentumSearchWorld =
-        ArgentumSearchWorld(
-            environment = environment.fork(),
-            gameId = gameId,
-            seedBase = seedBase,
-            effectiveSetupSeed = effectiveSetupSeed,
-            aliases = aliases,
-            history = reconstructedHistory.fork(),
-            decisionIndex = decisionIndex,
-            expander = expander,
-            heuristicAnnotator = heuristicAnnotator,
-            knownDecks = knownDecks,
-            heuristicResolutionSink = heuristicResolutionSink,
-        )
+        derivedWorld(environment.fork(), reconstructedHistory.fork())
+
+    /** Share session configuration; callers explicitly choose state/history and cache inheritance. */
+    private fun derivedWorld(
+        environment: GameEnvironment,
+        history: PerspectiveHistory,
+        expander: UnifiedSemanticExpander = this.expander,
+        heuristicAnnotator: ArgentumHeuristicAnnotator? = this.heuristicAnnotator,
+    ): ArgentumSearchWorld = ArgentumSearchWorld(
+        environment = environment,
+        gameId = gameId,
+        seedBase = seedBase,
+        effectiveSetupSeed = effectiveSetupSeed,
+        aliases = aliases,
+        history = history,
+        decisionIndex = decisionIndex,
+        expander = expander,
+        heuristicAnnotator = heuristicAnnotator,
+        knownDecks = knownDecks,
+        heuristicResolutionSink = heuristicResolutionSink,
+    )
 
     private data class CachedExpansion(
         val key: String,
@@ -895,7 +1128,6 @@ class ArgentumSearchWorld private constructor(
         const val DEFAULT_EXPANSION_LIMIT = 64
         private const val FUTURE_CHANCE_SEED_DOMAIN = "argentum-hypothetical-future-chance-v1"
         private val STEP_EXPANSION_LIMITS = listOf(128, 256, 512, 1_024, 2_048)
-        private const val MAX_OBSERVED_EXPANSION = 2_048
         fun create(
             environment: GameEnvironment,
             gameId: String,
@@ -905,6 +1137,8 @@ class ArgentumSearchWorld private constructor(
             knownDecks: Map<String, Map<String, Int>>? = null,
             projectionAuditSink: PerspectiveProjectionAuditSink = PerspectiveProjectionAuditSink.NONE,
             heuristicResolutionSink: (ArgentumHeuristicResolution) -> Unit = {},
+            historyEventOrder: PerspectiveHistoryEventOrder = PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
+            historyObjectReference: PerspectiveHistoryObjectReference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,
         ): ArgentumSearchWorld {
             require(environment.playerIds.isNotEmpty()) { "Environment must be reset before wrapping" }
             val aliases = environment.playerIds.mapIndexed { index, id -> id to "p$index" }.toMap()
@@ -914,7 +1148,7 @@ class ArgentumSearchWorld private constructor(
                 seedBase = seedBase,
                 effectiveSetupSeed = effectiveSetupSeed,
                 aliases = aliases,
-                history = PerspectiveHistory(environment.playerIds, projectionAuditSink),
+                history = PerspectiveHistory(environment.playerIds, projectionAuditSink, historyEventOrder, historyObjectReference),
                 decisionIndex = 0,
                 expander = expander,
                 heuristicAnnotator = knownDecks?.let { ArgentumHeuristicAnnotator(environment.cardRegistry, it, ArgentumHeuristicProfile.PRODUCTION) },
@@ -927,7 +1161,7 @@ class ArgentumSearchWorld private constructor(
 
 /** Checks the complete represented player input before a hidden world can enter a belief batch. */
 internal object ArgentumInformationSupport {
-    fun failure(sampled: PolicyInformationState, expected: PolicyInformationState): String? {
+    fun failure(sampled: InformationStateRepresentation, expected: InformationStateRepresentation): String? {
         if (sampled.observation != expected.observation) return "SAFE_OBSERVATION_MISMATCH"
         if (sampled.knowledge != expected.knowledge) return "SAFE_KNOWLEDGE_MISMATCH"
         if (sampled.historyCommitment != expected.historyCommitment || sampled.history != expected.history) {
@@ -1080,14 +1314,6 @@ data class HiddenTruthConformanceProbe(
     val passed: Boolean get() = unavailableReason == null && informationStateEqual && boundedInputEqual && expansionEqual
 }
 
-data class KnowledgeSupportVerification(
-    val particlesChecked: Int,
-    val failures: Int,
-    val failureCode: String?,
-) {
-    val passed: Boolean get() = particlesChecked > 0 && failures == 0
-}
-
 /** Choices over identities visible only to the chooser stay private; announced game choices do not. */
 internal fun com.wingedsheep.engine.core.PendingDecision?.isPrivateToChooser(): Boolean = when (this) {
     is SearchLibraryDecision, is ReorderLibraryDecision -> true
@@ -1113,7 +1339,7 @@ data class ArgentumPrivilegedDebugSnapshot(
 private class ArgentumHeuristicAnnotator(
     private val cardRegistry: CardRegistry,
     private val knownDecks: Map<String, Map<String, Int>>,
-    private val profile: ArgentumHeuristicProfile,
+    val profile: ArgentumHeuristicProfile,
 ) {
     private val materializer = KnownDeckWorldMaterializer(cardRegistry)
     // Share engine services for this annotator; every selection still gets fresh AI memory.

@@ -6,21 +6,21 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import org.mtgallium.agent.infoset.core.PolicyCardView
 import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.infoset.core.PolicyObservation
+import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
 import org.mtgallium.agent.infoset.core.PolicyZoneView
 
 class ObservationCanonicalFragmentsTest {
     private val card = PolicyCardView("zone:p0:0", null, "雪\"\\\n😀", "BATTLEFIELD", "p0", "p0",
         linkedSetOf("Artifact", "Creature"), linkedSetOf("Goblin"), linkedSetOf("RED"), emptySet(),
         "{R}", 1, "Text\t\u0000", 1, 1, false, false, false, 0, linkedMapOf("z" to 2, "a" to 1), null, emptyList())
-    private fun observation(cards: List<PolicyCardView> = listOf(card)) = PolicyObservation("p0", 1,
+    private fun observation(cards: List<PolicyCardView> = listOf(card)) = PlayerObservationSnapshot("p0", 1,
         "PRECOMBAT_MAIN", "MAIN", "p0", "p0", emptyList(),
         listOf(PolicyZoneView("p0", "BATTLEFIELD", false, cards.size, cards),
             PolicyZoneView("p1", "HAND", true, 7, emptyList())), emptyList(), pendingDecision = null, observationDigest = "ignored")
 
-    private fun check(view: PolicyObservation, previous: ObservationCanonicalFragments? = null): ObservationCanonicalFragments {
+    private fun check(view: PlayerObservationSnapshot, previous: ObservationCanonicalFragments? = null): ObservationCanonicalFragments {
         val fragments = ObservationCanonicalFragments.build(view, previous)
-        val canonical = PolicyJson.canonical(PolicyJson.format.encodeToJsonElement(PolicyObservation.serializer(),
+        val canonical = PolicyJson.canonical(PolicyJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(),
             view.copy(observationDigest = "")))
         assertContentEquals(canonical.toByteArray(Charsets.UTF_8), fragments.canonicalBytes())
         assertEquals(PolicyJson.sha256(canonical), fragments.digest())

@@ -1,6 +1,9 @@
 .gradle/
 .kotlin/
 .idea/
+.worktrees/
+.pi/
+.ai-bridge/
 build/
 **/build/
 out/
@@ -12,3 +15,7 @@ private-evidence/
 reports/
 *.tsbuildinfo
 __pycache__/
+
+# Personal project-level agent settings.
+/.codex/config.toml
+/AGENTS.local.md

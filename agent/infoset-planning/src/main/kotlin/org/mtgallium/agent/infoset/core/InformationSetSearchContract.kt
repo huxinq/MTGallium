@@ -1,0 +1,285 @@
+package org.mtgallium.agent.infoset.core
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
+
+@Serializable
+enum class LeafStateSource { CURRENT_INFORMATION_STATE, CURRENT_SAMPLED_WORLD, BOUNDED_ROLLOUT }
+
+/** A forced first edge's search estimate; it is not a policy recommendation or terminal outcome. */
+@Serializable
+data class RootActionSearchEstimate(
+    val action: SemanticChoice,
+    val meanBackedValue: Double,
+    val visits: Int,
+    val settlementCounts: SearchSettlementCounts,
+    val diagnostics: InformationSetSearchDiagnostics,
+) {
+    init {
+        require(meanBackedValue.isFinite() && visits > 0)
+        require(settlementCounts.successfulBackups == visits && diagnostics.simulations == visits)
+    }
+}
+
+@Serializable
+enum class RolloutCutoff {
+    EVALUATE,
+    QUIESCENCE,
+    POLICY_QUIESCENCE,
+}
+
+@Serializable
+data class LeafEvaluationConfig(
+    val stateSource: LeafStateSource,
+    val cutoff: RolloutCutoff = RolloutCutoff.EVALUATE,
+    val unresolved: UnresolvedLeafHandling = UnresolvedLeafHandling.EVALUATE,
+) {
+    init {
+        require(cutoff == RolloutCutoff.EVALUATE || stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
+            "A non-direct cutoff requires a bounded rollout"
+        }
+    }
+}
+
+@Serializable
+data class RolloutTurnHorizon(
+    val completedTurns: Int,
+    /** Safety limit, not a substitute evaluation horizon. Exhaustion stops the search. */
+    val maxPolicyDecisions: Int = 512,
+) {
+    init {
+        require(completedTurns > 0)
+        require(maxPolicyDecisions > 0)
+    }
+}
+
+enum class RolloutTurnHorizonFailure { DECISION_LIMIT, MISSING_DECISION }
+
+/** A requested turn boundary was not reached; no heuristic or terminal value is supplied. */
+class RolloutTurnHorizonException(
+    val failure: RolloutTurnHorizonFailure,
+    val targetTurnNumber: Int,
+    val policyDecisions: Int,
+) : IllegalStateException(
+    "Rollout turn horizon $targetTurnNumber not reached: $failure after $policyDecisions decisions"
+)
+
+@Serializable
+data class InformationSetSearchConfig(
+    val simulations: Int,
+    val explorationConstant: Double = 1.4,
+    val maxPolicyDecisions: Int = 256,
+    val leaf: LeafEvaluationConfig,
+    val initialExpansionLimit: Int = 64,
+    val wideningThresholds: List<Int> = listOf(64, 256, 1024),
+    val wideningLimits: List<Int> = listOf(128, 256, 512),
+    val maxQuiescenceDecisions: Int = 32,
+    val maxQuiescenceForcedPasses: Int = 256,
+    /** Exact semantic-prefix memoization. This is behavior-preserving and can be disabled for A/B validation. */
+    val cacheSimulationTransitions: Boolean = true,
+    /** Optional deployment-style budget. Null preserves exact fixed-simulation behavior. */
+    val wallClockBudgetMillis: Long? = null,
+    val minimumSimulations: Int = 1,
+    /** Evaluate at the first player decision after N complete turns, anchored to the search root. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rolloutTurnHorizon: RolloutTurnHorizon? = null,
+) {
+    init {
+        require(simulations > 0)
+        require(explorationConstant >= 0.0 && explorationConstant.isFinite())
+        require(maxPolicyDecisions > 0)
+        require(initialExpansionLimit > 0)
+        require(maxQuiescenceDecisions > 0)
+        require(maxQuiescenceForcedPasses > 0)
+        require(wallClockBudgetMillis == null || wallClockBudgetMillis > 0)
+        require(minimumSimulations in 1..simulations)
+        require(rolloutTurnHorizon == null || leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
+            "Completed-turn horizons require bounded rollout"
+        }
+        require(rolloutTurnHorizon == null || leaf.cutoff == RolloutCutoff.EVALUATE
+        ) { "A completed-turn horizon evaluates its boundary directly, without later quiescence" }
+        require(wideningThresholds.size == wideningLimits.size)
+        require(wideningThresholds.zipWithNext().all { (a, b) -> a < b })
+        require(wideningLimits.zipWithNext().all { (a, b) -> a < b })
+        require(wideningLimits.all { it > initialExpansionLimit }) {
+            "Every widening limit must be greater than the initial expansion limit"
+        }
+    }
+}
+
+@Serializable
+data class SearchCandidateStatistics(
+    val choice: SemanticChoice,
+    /** Successful backed settlements for this branch in the current search. */
+    val visits: Int,
+    /** Root-perspective mean of those settlements; zero is a placeholder when [visits] is zero. */
+    val meanValue: Double,
+    val policyProbability: Double,
+)
+
+/** The scalar and its contemporaneous search-settlement origin; never infer this after search. */
+data class SearchSettlement(
+    val backedValue: Double,
+    val origin: SearchSettlementOrigin,
+) {
+    init { require(backedValue.isFinite()) { "Search settlement must be finite" } }
+}
+
+/** Actual terminal continuation reached only by the production rollout-policy pair. */
+data class TerminalPolicyContinuation(
+    val payoff: Double,
+    val policyDecisions: Int,
+    val rootPolicyDecisions: OpponentPolicyDecisionSummary,
+    val opponentPolicyDecisions: OpponentPolicyDecisionSummary,
+) {
+    init {
+        require(payoff.isFinite() && payoff in -1.0..1.0)
+        require(policyDecisions >= 0)
+        require(rootPolicyDecisions.decisions + opponentPolicyDecisions.decisions == policyDecisions)
+        require(rootPolicyDecisions.evidenceInvalidatingReplacements == 0)
+        require(opponentPolicyDecisions.evidenceInvalidatingReplacements == 0)
+    }
+}
+
+/** Exact partition of successful backups for one candidate edge. */
+@Serializable
+data class SearchSettlementCounts(
+    val terminalPayoffBackups: Int = 0,
+    val heuristicSettlementBackups: Int = 0,
+    /** Absent in historical evidence, which therefore remains a zero-count unknown for this origin. */
+    val learnedOutcomeEstimateBackups: Int = 0,
+    val neutralUnresolvedSettlementBackups: Int = 0,
+) {
+    init {
+        require(terminalPayoffBackups >= 0)
+        require(heuristicSettlementBackups >= 0)
+        require(learnedOutcomeEstimateBackups >= 0)
+        require(neutralUnresolvedSettlementBackups >= 0)
+    }
+
+    val successfulBackups: Int
+        get() = terminalPayoffBackups + heuristicSettlementBackups +
+            learnedOutcomeEstimateBackups + neutralUnresolvedSettlementBackups
+
+    fun plus(other: SearchSettlementCounts): SearchSettlementCounts = SearchSettlementCounts(
+        terminalPayoffBackups + other.terminalPayoffBackups,
+        heuristicSettlementBackups + other.heuristicSettlementBackups,
+        learnedOutcomeEstimateBackups + other.learnedOutcomeEstimateBackups,
+        neutralUnresolvedSettlementBackups + other.neutralUnresolvedSettlementBackups,
+    )
+
+    companion object {
+        fun one(origin: SearchSettlementOrigin): SearchSettlementCounts = when (origin) {
+            SearchSettlementOrigin.TERMINAL_PAYOFF -> SearchSettlementCounts(terminalPayoffBackups = 1)
+            SearchSettlementOrigin.HEURISTIC_SETTLEMENT -> SearchSettlementCounts(heuristicSettlementBackups = 1)
+            SearchSettlementOrigin.LEARNED_OUTCOME_ESTIMATE ->
+                SearchSettlementCounts(learnedOutcomeEstimateBackups = 1)
+            SearchSettlementOrigin.NEUTRAL_UNRESOLVED_SETTLEMENT ->
+                SearchSettlementCounts(neutralUnresolvedSettlementBackups = 1)
+        }
+    }
+}
+
+/**
+ * The production Search Teacher's deterministic root-choice ordering.
+ *
+ * Keep evidence admission on this shared function: a serialized candidate table is not sufficient
+ * teacher authority unless its recorded choice is the winner under the production ordering.
+ */
+fun List<SearchCandidateStatistics>.selectedSearchWinnerOrNull(): SearchCandidateStatistics? =
+    maxWithOrNull(
+        compareBy<SearchCandidateStatistics> { it.visits }
+            .thenBy { it.meanValue }
+            .thenByDescending { it.choice.signature }
+    )
+
+@Serializable
+data class InformationSetSearchDiagnostics(
+    val simulations: Int,
+    val particles: Int,
+    val nodes: Int,
+    val maximumDepth: Int,
+    val exhaustiveNodes: Int,
+    val nonExhaustiveNodes: Int,
+    val wideningEvents: Int,
+    val opponentModelId: String,
+    val leaf: LeafEvaluationConfig,
+    val rootRolloutPolicyId: String? = null,
+    val opponentRolloutPolicyId: String? = null,
+    val rootRolloutDecisions: Int = 0,
+    val opponentRolloutDecisions: Int = 0,
+    val rootRolloutFallbacks: Int = 0,
+    val opponentRolloutFallbacks: Int = 0,
+    /** One exact component attribution for every sampled outer-opponent action. */
+    val opponentModelPolicyDecisions: OpponentPolicyDecisionSummary = OpponentPolicyDecisionSummary(),
+    /** One exact component attribution for every sampled root-seat rollout action. */
+    val rootRolloutPolicyDecisions: OpponentPolicyDecisionSummary = OpponentPolicyDecisionSummary(),
+    /** One exact component attribution for every sampled opponent-seat rollout action. */
+    val opponentRolloutPolicyDecisions: OpponentPolicyDecisionSummary = OpponentPolicyDecisionSummary(),
+    val quiescenceForcedPasses: Int = 0,
+    val quiescenceStrategicDecisions: Int = 0,
+    val quiescenceOverflows: Int = 0,
+    val quiescenceFallbacks: Int = 0,
+    val searchWorldSteps: Int = 0,
+    val policyAnnotatedExpansions: Int = 0,
+    val transitionCacheHits: Int = 0,
+    val transitionCacheMisses: Int = 0,
+    val transitionCacheSnapshots: Int = 0,
+    /** Child snapshots refreshed after deterministic projections/annotations were materialized. */
+    val transitionCacheDerivedSnapshots: Int = 0,
+    val policyAnnotationCacheHits: Int = 0,
+    val policyAnnotationCacheMisses: Int = 0,
+    val opponentDistributionCacheHits: Int = 0,
+    val opponentDistributionCacheMisses: Int = 0,
+    /** Any rejected simulated transition is a correctness defect, even if search can recover. */
+    val rejectedTransitions: Int = 0,
+    val evaluatorId: String = "unknown",
+    val evaluatorConfigurationId: String = evaluatorId,
+    val evaluatorCalls: Int = 0,
+    val evaluatorNanos: Long = 0,
+    val evaluatorOutputChecksum: String = "0000000000000000",
+    /** Unresolved horizon fallbacks backed up as neutral instead of evaluated. */
+    val quiescenceUnresolvedBackups: Int = 0,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rootSelectionGuidance: RootSelectionGuidance? = null,
+    val wallClockBudgetMillis: Long? = null,
+    /** Exact within-search rollout-prefix hits; policy choices are still sampled afresh. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheHits: Int = 0,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheSnapshots: Int = 0,
+    /** Prefixes whose new snapshot was refused by the runtime memory cap; execution continues. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val rolloutTransitionCacheBypasses: Int = 0,
+)
+
+@Serializable
+data class InformationSetSearchResult(
+    val chosen: SemanticChoice,
+    val rootValue: Double,
+    val candidates: List<SearchCandidateStatistics>,
+    /** Planner-only provenance keyed by the safe trajectory's existing candidate signatures. */
+    val candidateSettlementCounts: Map<String, SearchSettlementCounts>,
+    val diagnostics: InformationSetSearchDiagnostics,
+) {
+    init {
+        val candidateVisits = candidates.associate { it.choice.signature to it.visits }
+        require(candidateVisits.keys == candidateSettlementCounts.keys) {
+            "Settlement accounting must cover exactly the returned candidate family"
+        }
+        candidateVisits.forEach { (signature, visits) ->
+            require(candidateSettlementCounts.getValue(signature).successfulBackups == visits) {
+                "Settlement accounting must partition successful backups for $signature"
+            }
+        }
+    }
+
+    fun settlementCountsFor(choice: SemanticChoice): SearchSettlementCounts =
+        requireNotNull(candidateSettlementCounts[choice.signature]) {
+            "Search result has no settlement accounting for ${choice.signature}"
+        }
+}
+
+class InformationSetConformanceException(message: String) : IllegalStateException(message)

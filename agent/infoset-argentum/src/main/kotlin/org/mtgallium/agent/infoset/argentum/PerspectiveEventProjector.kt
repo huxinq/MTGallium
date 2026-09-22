@@ -34,9 +34,10 @@ internal object PerspectiveEventProjector {
         revealIdentityInvalidated: (EntityId) -> Boolean = { false },
         /** Perspective-local opaque keys invalidated by this shuffle; never raw engine ids. */
         shuffleInvalidatedKnowledgeObjectKeys: List<String> = emptyList(),
+        referenceResolver: PerspectiveEventReferenceResolver = PerspectiveEventReferenceResolver(beforeRefs, afterRefs),
     ): PolicyHistoryEvent? {
         fun alias(id: EntityId?): String? = id?.let(aliases::get)
-        fun ref(id: EntityId?): String? = afterRefs.referenceOrNull(id) ?: beforeRefs.referenceOrNull(id)
+        fun ref(id: EntityId?): String? = referenceResolver.resolve(id)
         fun cardName(state: GameState, id: EntityId): String? =
             state.getEntity(id)?.get<CardComponent>()?.name
         fun name(id: EntityId): String? = cardName(afterState, id) ?: cardName(beforeState, id)
@@ -183,7 +184,7 @@ internal object PerspectiveEventProjector {
                     eventType = "SPELL_OR_ABILITY_RESOLVED",
                     actorId = null,
                     sourceName = event.name,
-                    sourceObjectRef = ref(event.entityId),
+                    sourceObjectRef = referenceResolver.resolutionSource(event.entityId),
                     result = "RESOLVED",
                 )
                 kind = PolicyHistoryEventKind.CAUSAL

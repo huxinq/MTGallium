@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Private review derivative of officially verified position-bank terminal evidence.
+"""Read terminal reports from historical position-bank studies.
 
-This utility does not replace ResearchRunArtifacts/loadVerifiedRealGamePositionBank
-verification. The caller must run the official verifiers first, then supply their
-expected identities and --official-verification-completed. No root filtering or
-terminal execution is performed. Only Python's standard library is required.
+Verify the inputs with their producer revision's ResearchRunArtifacts and
+loadVerifiedRealGamePositionBank, then supply the expected identities and
+--official-verification-completed. Requires only Python's standard library.
 """
 
 import argparse

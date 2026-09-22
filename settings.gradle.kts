@@ -18,13 +18,14 @@ plugins {
 rootProject.name = "mtgallium"
 
 include(":evaluation:argentum")
-include(":agent:research-run")
-include(":agent:infoset-core")
+include(":agent:infoset-semantics")
+include(":agent:infoset-planning")
 include(":agent:infoset-argentum")
-include(":agent:search-teacher")
-include(":evaluation:search-teacher")
-include(":integration:argentum-search-teacher")
-include(":quality:architecture")
+include(":agent:mono-red-models")
+include(":agent:neural-policy")
+include(":agent:argentum-policy")
+include(":research:workbench")
+include(":integration:argentum-policy")
 
 includeBuild("third_party/argentum-engine") {
     dependencySubstitution {

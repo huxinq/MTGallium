@@ -103,6 +103,9 @@ class UnifiedSemanticExpander(
     private val actionSpaceProfile: SearchActionSpaceProfile = SearchActionSpaceProfile.RULES_EXACT_V1,
     private val proposalAlgorithmVersion: String = DEFAULT_PROPOSAL_ALGORITHM_VERSION,
 ) {
+    /** Adapter-local work counter, including failed expansion attempts; never a policy input. */
+    internal var expansionAttempts: Int = 0
+        private set
     private val projector = SafeObservationProjector()
     private val proposalVersion = "$proposalAlgorithmVersion:${actionSpaceProfile.profileId}"
     val behaviorSpecification: UnifiedSemanticExpansionSpecification =
@@ -145,12 +148,22 @@ class UnifiedSemanticExpander(
     internal fun encodePreparedChoice(
         choice: ArgentumEngineChoice,
         prepared: PreparedSemanticExpansionInput,
-    ): SemanticChoice = encodeChoice(
-        choice,
-        prepared.observation,
-        prepared.projection.references,
-        prepared.legalActions,
-    )
+    ): SemanticChoice {
+        // Native activation declarations do not carry the legal enumerator's mana flag.
+        // Recover only that classification from the same occurrence/ability, without proposing
+        // alternatives or substituting the engine declaration being encoded.
+        val activation = (choice as? ArgentumEngineChoice.Action)?.value as? ActivateAbility
+        val classified = if (activation == null) choice else {
+            val flags = prepared.legalActions.filter { row ->
+                val template = row.action as? ActivateAbility
+                template != null && template.playerId == activation.playerId && template.sourceId == activation.sourceId &&
+                    template.abilityId == activation.abilityId
+            }.map { it.isManaAbility }.distinct()
+            require(flags.size <= 1) { "Inconsistent native ability classification" }
+            (choice as ArgentumEngineChoice.Action).copy(isManaAbility = flags.singleOrNull() ?: choice.isManaAbility)
+        }
+        return encodeChoice(classified, prepared.observation, prepared.projection.references, prepared.legalActions)
+    }
 
     internal fun expandPrepared(
         environment: GameEnvironment,
@@ -160,6 +173,7 @@ class UnifiedSemanticExpander(
         validatedPrefix: UnifiedExpansionResult? = null,
         preparedInput: PreparedSemanticExpansionInput?,
     ): UnifiedExpansionResult {
+        expansionAttempts++
         require(responseLimit > 0 && responseLimit <= maxAttempts)
         if (environment.isTerminal) {
             return UnifiedExpansionResult(
@@ -270,10 +284,7 @@ class UnifiedSemanticExpander(
                 rejectedSignatures += semantic.signature
                 continue
             }
-            // An action copied verbatim from the engine's current legal-action list is already
-            // validated by that enumerator. Forking and executing the identical value here merely
-            // duplicates engine work. Synthesized/parameterized actions and decisions retain the
-            // fail-closed acceptance probe.
+            // Engine-enumerated actions skip the duplicate acceptance probe; generated choices retain it.
             val accepted = engineChoice is ArgentumEngineChoice.Action &&
                 engineChoice.copiedFromLegalAction || isAccepted(environment, engineChoice)
             if (!accepted) {
@@ -339,10 +350,7 @@ class UnifiedSemanticExpander(
         legalActions: List<com.wingedsheep.engine.legalactions.LegalAction>,
     ): GeneratedChoices {
         mulliganActions(environment)?.let { return it }
-        // Argentum's enumerator intentionally returns unaffordable presentation rows as well as
-        // executable actions. Every built-in selector filters those rows before choosing, and the
-        // old fork-and-step admission probe rejected them only after expensive encoding. They are
-        // not members of the executable semantic action space.
+        // The enumerator includes unaffordable presentation rows; omit them from the executable space.
         val affordable = legalActions.filter { it.affordable }
         val included = if (actionSpaceProfile.suppressesStandaloneManaAbilities) {
             affordable.filterNot { it.isManaAbility }
@@ -891,7 +899,7 @@ class UnifiedSemanticExpander(
     companion object {
         const val DEFAULT_RESPONSE_LIMIT = 64
         const val DEFAULT_MAXIMUM_ATTEMPTS = 2_048
-        const val DEFAULT_PROPOSAL_ALGORITHM_VERSION = "semantic-structured-actions-v4"
+        const val DEFAULT_PROPOSAL_ALGORITHM_VERSION = "semantic-structured-actions-v6"
         const val MAX_GENERATED_SCANS = 1_000_000
         private const val DECISION_PLACEHOLDER = "\$CURRENT_DECISION_ID"
 

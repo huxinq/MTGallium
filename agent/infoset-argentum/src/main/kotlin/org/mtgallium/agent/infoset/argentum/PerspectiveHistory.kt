@@ -13,8 +13,7 @@ import com.wingedsheep.engine.core.ShuffleCause
 import com.wingedsheep.engine.core.ZoneChangeEvent
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.sdk.model.EntityId
-import kotlinx.collections.immutable.PersistentList
-import kotlinx.collections.immutable.persistentListOf
+import org.mtgallium.agent.infoset.core.PolicyHistorySnapshot
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -25,22 +24,24 @@ import org.mtgallium.agent.infoset.core.PolicyAudienceScope
 import org.mtgallium.agent.infoset.core.PolicyExpansion
 import org.mtgallium.agent.infoset.core.PolicyHistoryEvent
 import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
-import org.mtgallium.agent.infoset.core.PolicyInformationState
-import org.mtgallium.agent.infoset.core.PolicyInformationStateDigest
+import org.mtgallium.agent.infoset.core.InformationStateRepresentation
+import org.mtgallium.agent.infoset.core.InformationStateRepresentationDigest
 import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
 import org.mtgallium.agent.infoset.core.PolicyKnowledgeAccumulator
 import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
 import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.infoset.core.PolicyObservation
+import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
 
 /** Mutable only inside one trusted world; [fork] performs a structural copy. */
 internal class PerspectiveHistory private constructor(
+    val eventOrder: PerspectiveHistoryEventOrder,
+    val objectReference: PerspectiveHistoryObjectReference,
+    private val rememberedReferences: Map<EntityId, RememberedHistoryReferences>,
     private val aliases: Map<EntityId, String>,
-    private val events: MutableMap<EntityId, PersistentList<PolicyHistoryEvent>>,
-    private val historyCommitments: MutableMap<EntityId, PolicyHistoryCommitment>,
+    private val events: MutableMap<EntityId, PolicyHistorySnapshot>,
     private val auditSink: PerspectiveProjectionAuditSink,
     /** Raw ids remain trusted; values are chronology-derived, perspective-local knowledge handles. */
     private val knowledgeHandles: MutableMap<EntityId, MutableMap<EntityId, String>>,
@@ -55,10 +56,14 @@ internal class PerspectiveHistory private constructor(
     constructor(
         playerIds: List<EntityId>,
         auditSink: PerspectiveProjectionAuditSink = PerspectiveProjectionAuditSink.NONE,
+        eventOrder: PerspectiveHistoryEventOrder = PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
+        objectReference: PerspectiveHistoryObjectReference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,
     ) : this(
+        eventOrder = eventOrder,
+        objectReference = objectReference,
+        rememberedReferences = playerIds.associateWith { RememberedHistoryReferences() },
         aliases = playerIds.mapIndexed { index, id -> id to "p$index" }.toMap(),
-        events = playerIds.associateWith { persistentListOf<PolicyHistoryEvent>() }.toMutableMap(),
-        historyCommitments = playerIds.associateWith { PolicyHistoryCommitment.empty() }.toMutableMap(),
+        events = playerIds.associateWith { PolicyHistorySnapshot.empty() }.toMutableMap(),
         auditSink = auditSink,
         knowledgeHandles = playerIds.associateWith { mutableMapOf<EntityId, String>() }.toMutableMap(),
         nextKnowledgeHandle = playerIds.associateWith { 0 }.toMutableMap(),
@@ -68,9 +73,11 @@ internal class PerspectiveHistory private constructor(
     )
 
     fun fork(): PerspectiveHistory = PerspectiveHistory(
+        eventOrder = eventOrder,
+        objectReference = objectReference,
+        rememberedReferences = rememberedReferences.mapValues { (_, references) -> references.fork() },
         aliases = aliases,
         events = events.toMutableMap(),
-        historyCommitments = historyCommitments.toMutableMap(),
         auditSink = auditSink,
         knowledgeHandles = knowledgeHandles.mapValues { (_, value) -> value.toMutableMap() }.toMutableMap(),
         nextKnowledgeHandle = nextKnowledgeHandle.toMutableMap(),
@@ -81,20 +88,51 @@ internal class PerspectiveHistory private constructor(
         nextEventId = nextEventId.toMutableMap(),
     )
 
+    /** Diagnostic only. Player IDs and all safe ledger bytes remain fixed. */
+    fun swapNativeIds(swap: ArgentumNativeIdSwap): PerspectiveHistory {
+        require(swap.first !in aliases && swap.second !in aliases)
+        return PerspectiveHistory(eventOrder, objectReference,
+            rememberedReferences.mapValues { (_, refs) -> refs.swapNativeIds(swap) }, aliases,
+            events.toMutableMap(), auditSink,
+            knowledgeHandles.mapValues { (_, handles) -> handles.entries.associate { (id, handle) ->
+                swap.id(id) to handle }.toMutableMap() }.toMutableMap(),
+            nextKnowledgeHandle.toMutableMap(),
+            knownLibraryOrderIds.mapValues { (_, byOwner) -> byOwner.mapValues { (_, order) ->
+                order.map(swap::id).toMutableList() }.toMutableMap() }.toMutableMap(),
+            knowledgeAccumulators.mapValues { (_, accumulator) -> accumulator.fork() }.toMutableMap(),
+            nextEventId.toMutableMap())
+    }
+
     fun forViewer(viewer: EntityId): List<PolicyHistoryEvent> = events.getValue(viewer)
 
-    fun commitmentForViewer(viewer: EntityId): PolicyHistoryCommitment = historyCommitments.getValue(viewer)
+    fun commitmentForViewer(viewer: EntityId): PolicyHistoryCommitment = events.getValue(viewer).commitment
+
+    /** New-mode cache state includes its retained eligibility, not just the current engine board. */
+    fun trustedReferenceStateDigest(): String = PolicyJson.sha256(PolicyJson.canonical(JsonObject(
+        aliases.entries.associate { (viewer, alias) -> alias to buildJsonObject {
+            put("history", JsonPrimitive(events.getValue(viewer).commitment.digest))
+            put("origins", rememberedReferences.getValue(viewer).trustedState())
+            put("handles", JsonObject(knowledgeHandles.getValue(viewer).entries.associate {
+                it.key.value to JsonPrimitive(it.value)
+            }))
+            put("nextHandle", JsonPrimitive(nextKnowledgeHandle.getValue(viewer)))
+        } }
+    )))
 
     /** Trusted binding used only to verify that a sampled world preserves a remembered object. */
     fun knowledgeObjectBindingsForViewer(viewer: EntityId): Map<String, EntityId> =
         knowledgeHandles.getValue(viewer).entries.associate { (rawId, handle) -> handle to rawId }
 
+    /** Existing acquired handles only, qualified against this world's retained incarnation. */
+    fun qualifiedBattlefieldBindings(viewer: EntityId, state: GameState): Map<EntityId, String> =
+        rememberedReferences.getValue(viewer).qualifiedAt(state, knowledgeHandles.getValue(viewer))
+
     fun sharesLedgerPrefixWith(other: PerspectiveHistory, viewer: EntityId): Boolean =
-        events.getValue(viewer) === other.events.getValue(viewer)
+        events.getValue(viewer).sharesStorageWith(other.events.getValue(viewer))
 
     fun knowledgeForViewer(
         viewer: EntityId,
-        currentObservation: PolicyObservation,
+        currentObservation: PlayerObservationSnapshot,
         knownDecks: Map<String, Map<String, Int>>,
     ): PolicyKnowledgeState = if (knownDecks.isEmpty()) {
         PolicyKnowledgeState.empty(currentObservation.perspectivePlayerId)
@@ -115,6 +153,15 @@ internal class PerspectiveHistory private constructor(
         after: Map<EntityId, SafeObservationProjection>,
     ): List<PolicyHistoryEvent> {
         val actorEvents = mutableListOf<PolicyHistoryEvent>()
+        val untapRange = when (eventOrder) {
+            PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V1 ->
+                qualifiedTurnUntapRange(engineEvents, beforeState, afterState)
+            PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2 ->
+                qualifiedTurnUntapRange(engineEvents, beforeState, afterState, allowOrderedPrefix = true)
+            PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1 -> null
+        }
+        val pendingUntaps = if (untapRange == null) emptyMap() else
+            events.keys.associateWith { mutableListOf<PolicyHistoryEvent>() }
         val invalidatedRevealIds = events.keys.associateWith { mutableSetOf<EntityId>() }
         fun randomizedIds(eventIndex: Int, event: LibraryShuffledEvent): Set<EntityId> = buildSet {
             val owner = event.playerId
@@ -130,6 +177,28 @@ internal class PerspectiveHistory private constructor(
                     else -> Unit
                 }
             }
+        }
+        // Freeze eligibility before any event can acquire a handle. In-batch leave/return
+        // and randomization disqualify every reference in the batch, even earlier events.
+        val excluded = engineEvents.filterIsInstance<ZoneChangeEvent>().map { it.entityId }.toMutableSet()
+        engineEvents.forEachIndexed { index, event ->
+            if (event is LibraryShuffledEvent) excluded += randomizedIds(index, event)
+        }
+        val resolvers = events.keys.associateWith { viewer ->
+            val beforeRefs = before.getValue(viewer).references
+            val afterRefs = after.getValue(viewer).references
+            val handles = knowledgeHandles.getValue(viewer)
+            val eligible = if (objectReference.remembersBattlefield) {
+                val remembered = rememberedReferences.getValue(viewer)
+                remembered.bindBoundary(beforeState, beforeRefs, handles)
+                remembered.eligible(beforeState, afterState, beforeRefs, afterRefs, handles.toMap(), excluded)
+            } else emptyMap()
+            val resolutionSources = if (objectReference in setOf(
+                PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1,
+                PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2)) {
+                qualifiedResolutionSources(engineEvents, beforeState, afterState, beforeRefs, nextEventId.getValue(viewer))
+            } else emptyMap()
+            PerspectiveEventReferenceResolver(beforeRefs, afterRefs, eligible, resolutionSources) { handles[it] }
         }
         engineEvents.forEachIndexed { eventIndex, engineEvent ->
             val randomizedObjectIds = (engineEvent as? LibraryShuffledEvent)?.let {
@@ -152,13 +221,21 @@ internal class PerspectiveHistory private constructor(
                     afterState = afterState,
                     beforeRefs = before.getValue(viewer).references,
                     afterRefs = after.getValue(viewer).references,
+                    referenceResolver = resolvers.getValue(viewer),
                     knowledgeObjectKey = { rawId -> knowledgeObjectKey(viewer, rawId) },
                     knownLibraryDrawObject = { rawId -> rawId in knownDrawIds },
                     revealIdentityInvalidated = { rawId -> rawId in invalidatedRevealIds.getValue(viewer) },
                     shuffleInvalidatedKnowledgeObjectKeys = randomizedObjectIds.mapNotNull { rawId ->
                         knowledgeHandles.getValue(viewer)[rawId]
                     }.distinct().sorted(),
-                )
+                )?.let { event ->
+                    val detail = event.detail
+                    if (objectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2 &&
+                        detail is PerspectiveEventDetail.Combat && detail.declaration in setOf("ATTACKERS", "BLOCKERS")) {
+                        event.copy(detail = detail.copy(assignments = detail.assignments.toSortedMap(),
+                            subjects = detail.subjects.sortedBy { it.objectRef }))
+                    } else event
+                }
                 auditSink.record(
                     PerspectiveProjectionAudit(
                         rawEventType = engineEvent::class.simpleName ?: "UnknownGameEvent",
@@ -174,8 +251,26 @@ internal class PerspectiveHistory private constructor(
                     )
                 )
                 if (projected == null) continue
-                append(viewer, projected)
-                if (viewer == actorViewer) actorEvents += projected
+                if (untapRange != null && eventIndex in untapRange) {
+                    pendingUntaps.getValue(viewer) += projected
+                } else {
+                    append(viewer, projected)
+                    if (viewer == actorViewer) actorEvents += projected
+                }
+            }
+            if (untapRange != null && eventIndex == untapRange.last) {
+                for (viewer in events.keys) {
+                    // Order already-projected safe data, never raw ids or hidden card identities.
+                    val ordered = pendingUntaps.getValue(viewer).sortedBy { event ->
+                        PolicyJson.canonical(PolicyJson.format.encodeToJsonElement(
+                            PolicyHistoryEvent.serializer(), event.copy(eventId = 0)))
+                    }
+                    for (event in ordered) {
+                        val numbered = event.copy(eventId = nextEventId.getValue(viewer))
+                        append(viewer, numbered)
+                        if (viewer == actorViewer) actorEvents += numbered
+                    }
+                }
             }
             updateRawKnowledgeTracking(engineEvent, afterState, randomizedObjectIds)
             when (engineEvent) {
@@ -200,6 +295,10 @@ internal class PerspectiveHistory private constructor(
             .toSet()
         if (ceasedObjectIds.isNotEmpty()) {
             knowledgeHandles.values.forEach { handles -> handles.keys.removeAll(ceasedObjectIds) }
+        }
+        if (objectReference.remembersBattlefield) {
+            for (viewer in events.keys) rememberedReferences.getValue(viewer).bindBoundary(
+                afterState, after.getValue(viewer).references, knowledgeHandles.getValue(viewer))
         }
         return actorEvents
     }
@@ -237,9 +336,9 @@ internal class PerspectiveHistory private constructor(
     }
 
     private fun append(viewer: EntityId, event: PolicyHistoryEvent) {
-        events[viewer] = events.getValue(viewer).adding(event)
-        historyCommitments[viewer] = historyCommitments.getValue(viewer).append(event)
-        knowledgeAccumulators.getValue(viewer).append(event)
+        val updated = events.getValue(viewer).append(event)
+        events[viewer] = updated
+        knowledgeAccumulators.getValue(viewer).append(updated.last())
         nextEventId[viewer] = event.eventId + 1
     }
 
@@ -261,7 +360,7 @@ internal class PerspectiveHistory private constructor(
         choice: SemanticChoice,
         privateToActor: Boolean,
         kind: PolicyHistoryEventKind,
-        strategicallyOptional: Boolean = true,
+        strategicallyOptional: Boolean? = true,
         libraryBottomObjects: List<LibraryBottomKnowledge> = emptyList(),
     ) {
         require(libraryBottomObjects.isEmpty() || privateToActor) {
@@ -322,8 +421,8 @@ internal class PerspectiveHistory private constructor(
      * This intentionally reconstructs semantic history instead of filtering raw GameEvents.
      */
     fun recordVisibleTransition(
-        before: Map<EntityId, PolicyObservation>,
-        after: Map<EntityId, PolicyObservation>,
+        before: Map<EntityId, PlayerObservationSnapshot>,
+        after: Map<EntityId, PlayerObservationSnapshot>,
         returnViewer: EntityId,
     ): List<PolicyHistoryEvent> {
         val emitted = mutableListOf<PolicyHistoryEvent>()
@@ -360,7 +459,7 @@ internal class PerspectiveHistory private constructor(
         return emitted
     }
 
-    private fun visibleZoneDelta(before: PolicyObservation, after: PolicyObservation): JsonArray {
+    private fun visibleZoneDelta(before: PlayerObservationSnapshot, after: PlayerObservationSnapshot): JsonArray {
         val beforeCounts = visibleCardCounts(before)
         val afterCounts = visibleCardCounts(after)
         val keys = (beforeCounts.keys + afterCounts.keys).sorted()
@@ -377,7 +476,7 @@ internal class PerspectiveHistory private constructor(
         }
     }
 
-    private fun visibleCardCounts(observation: PolicyObservation): Map<String, Int> =
+    private fun visibleCardCounts(observation: PlayerObservationSnapshot): Map<String, Int> =
         observation.zones.flatMap { zone ->
             zone.cards.map { card -> "${zone.ownerId}:${zone.zone}:${card.name}" }
         }.groupingBy { it }.eachCount()
@@ -389,7 +488,7 @@ internal data class LibraryBottomKnowledge(
     val cardName: String,
 )
 
-internal object PolicyInformationStateFactory {
+internal object InformationStateRepresentationFactory {
     fun build(
         projection: SafeObservationProjection,
         history: List<PolicyHistoryEvent>,
@@ -399,9 +498,9 @@ internal object PolicyInformationStateFactory {
         terminated: Boolean,
         winnerId: String?,
         knowledge: PolicyKnowledgeState,
-    ): PolicyInformationState {
+    ): InformationStateRepresentation {
         require(historyCommitment.cursor == history.size)
-        val informationDigest = PolicyInformationStateDigest.compute(
+        val informationDigest = InformationStateRepresentationDigest.compute(
             observationDigest = projection.observation.observationDigest,
             historyCommitment = historyCommitment,
             knowledgeDigest = knowledge.knowledgeDigest,
@@ -409,7 +508,7 @@ internal object PolicyInformationStateFactory {
             candidateSignatures = expansion.candidates.map { it.signature },
             proposalVersion = expansion.proposalVersion,
         )
-        return PolicyInformationState(
+        return InformationStateRepresentation(
             actingPlayerId = actingPlayerId,
             observation = projection.observation,
             informationStateDigest = informationDigest,

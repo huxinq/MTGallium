@@ -10,7 +10,7 @@ import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.BeliefStratumDiagnostic
 import org.mtgallium.agent.infoset.core.BeliefWorldSource
 import org.mtgallium.agent.infoset.core.ComponentSeeds
-import org.mtgallium.agent.infoset.core.PolicyInformationState
+import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
 import org.mtgallium.agent.infoset.core.SearchWorld
 import org.mtgallium.agent.infoset.core.Weighted
@@ -35,7 +35,7 @@ class ArgentumHybridBeliefWorldSource(
     )
 
     override fun sample(
-        rootInformation: PolicyInformationState,
+        rootInformation: InformationStateRepresentation,
         knownDecks: Map<String, Map<String, Int>>,
         beliefSeed: Long,
         count: Int,

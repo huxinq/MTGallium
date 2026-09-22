@@ -24,8 +24,7 @@ import com.wingedsheep.sdk.model.GameRng
  * library slots from caller-owned randomness. It never treats the authoritative identities already
  * occupying unresolved slots as evidence about the hypothesis.
  */
-internal class KnownDeckWorldMaterializer(cardRegistry: CardRegistry) {
-    private val cardRegistry = cardRegistry
+internal class KnownDeckWorldMaterializer(private val cardRegistry: CardRegistry) {
     private val visibility = Visibility(cardRegistry)
     private val materializer = HiddenWorldMaterializer(cardRegistry)
 
@@ -100,10 +99,7 @@ internal class KnownDeckWorldMaterializer(cardRegistry: CardRegistry) {
             HiddenWorldMaterializationRequest(assignments, futureRng),
         )) {
             is HiddenWorldMaterializationResult.Materialized ->
-                KnownDeckWorldMaterializationResult.Materialized(
-                    state = result.state,
-                    rewrittenCardCount = assignments.size,
-                )
+                KnownDeckWorldMaterializationResult.Materialized(result.state)
             is HiddenWorldMaterializationResult.Unsupported ->
                 KnownDeckWorldMaterializationResult.Unsupported(
                     listOf(
@@ -155,10 +151,7 @@ internal class KnownDeckWorldMaterializer(cardRegistry: CardRegistry) {
 }
 
 internal sealed interface KnownDeckWorldMaterializationResult {
-    data class Materialized(
-        val state: GameState,
-        val rewrittenCardCount: Int,
-    ) : KnownDeckWorldMaterializationResult
+    data class Materialized(val state: GameState) : KnownDeckWorldMaterializationResult
 
     data class Unsupported(val reasons: List<KnownDeckWorldFailure>) : KnownDeckWorldMaterializationResult {
         init {

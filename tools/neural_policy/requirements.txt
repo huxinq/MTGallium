@@ -1,0 +1,2 @@
+# Ordinary training; installed versions are recorded, not whitelisted.
+torch>=2.5

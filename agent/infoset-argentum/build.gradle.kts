@@ -4,7 +4,8 @@ plugins {
 }
 
 dependencies {
-    api(project(":agent:infoset-core"))
+    api(project(":agent:infoset-semantics"))
+    api(project(":agent:infoset-planning"))
     implementation("org.mtgallium.argentum:ai")
     implementation("org.mtgallium.argentum:gym")
     implementation("org.mtgallium.argentum:gym-trainer")

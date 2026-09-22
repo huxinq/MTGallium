@@ -29,8 +29,6 @@ import kotlin.test.assertTrue
 import org.mtgallium.agent.infoset.core.InformationSetSearch
 import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
 import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafEvaluationStrategy
-import org.mtgallium.agent.infoset.core.LeafEvaluator
 import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.LeafValueSource
 import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
@@ -53,7 +51,7 @@ class ArgentumSearchWorldTest {
                 val blank = view.copy(observationDigest = "")
                 assertEquals(org.mtgallium.agent.infoset.core.PolicyJson.digest(
                     org.mtgallium.agent.infoset.core.PolicyJson.format.encodeToJsonElement(
-                        org.mtgallium.agent.infoset.core.PolicyObservation.serializer(), blank)), view.observationDigest)
+                        org.mtgallium.agent.infoset.core.PlayerObservationSnapshot.serializer(), blank)), view.observationDigest)
             }
             if (world.actorToAct() == null) return@repeat
             val choices = world.expandChoices().candidates
@@ -151,10 +149,10 @@ class ArgentumSearchWorldTest {
 
         val pumped = world.fork() as ArgentumSearchWorld
         assertTrue(pumped.step(requireNotNull(original)).accepted)
-        val evaluated = mutableListOf<org.mtgallium.agent.infoset.core.PolicyInformationState>()
+        val evaluated = mutableListOf<org.mtgallium.agent.infoset.core.InformationStateRepresentation>()
         val evaluator = object : org.mtgallium.agent.infoset.core.InformationStateEvaluator {
-            override val id = LeafEvaluator.MTGALLIUM_VISIBLE_V2.evaluatorId
-            override fun evaluate(information: org.mtgallium.agent.infoset.core.PolicyInformationState, rootPlayer: String): Double {
+            override val id = "mono-red-visible-board-v2"
+            override fun evaluate(information: org.mtgallium.agent.infoset.core.InformationStateRepresentation, rootPlayer: String): Double {
                 evaluated += information
                 return 0.0
             }
@@ -162,12 +160,12 @@ class ArgentumSearchWorldTest {
         val settlement = InformationSetSearch(
             config = InformationSetSearchConfig(
                 simulations = 1, maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, LeafEvaluator.MTGALLIUM_VISIBLE_V2),
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
                 rolloutTurnHorizon = org.mtgallium.agent.infoset.core.RolloutTurnHorizon(1, 256),
             ),
             opponentPolicy = UniformOpponentPolicy, rolloutPolicy = UniformOpponentPolicy,
             rolloutOpponentPolicy = UniformOpponentPolicy,
-            leafEvaluationStrategy = LeafEvaluationStrategy(evaluator.id, LeafValueSource.Information(evaluator)),
+            valueSource = LeafValueSource.Information(evaluator),
         ).settleFirstUnvisitedEdge(pumped, "p0", 621L, 0, rootTurnNumber = 5)
         assertEquals(org.mtgallium.agent.infoset.core.SearchSettlementOrigin.HEURISTIC_SETTLEMENT, settlement.origin)
         val afterCleanup = evaluated.single().observation
@@ -178,10 +176,7 @@ class ArgentumSearchWorldTest {
             .all { it.power == 1 })
     }
 
-    private fun sampledWorldLeafStrategy() = LeafEvaluationStrategy(
-        configuredEvaluatorId = LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId,
-        source = LeafValueSource.SampledWorld(LeafEvaluator.ARGENTUM_BOARD_V1.evaluatorId),
-    )
+
 
     private fun registry() = CardRegistry().apply {
         register(PortalSet.cards)
@@ -367,12 +362,12 @@ class ArgentumSearchWorldTest {
             effectiveSetupSeed = 811L,
         )
         val fork = world.fork() as ArgentumSearchWorld
-        val key = world.privateSearchReuseKey()
+        val key = world.exactRevision()
 
-        assertEquals(key, fork.privateSearchReuseKey())
-        assertEquals("<private-search-world-key>", key.toString())
+        assertEquals(key, fork.exactRevision())
+        assertEquals("<private-world-revision>", key.toString())
         assertTrue(fork.step(fork.expandChoices().candidates.first()).accepted)
-        assertNotEquals(key, fork.privateSearchReuseKey())
+        assertNotEquals(key, fork.exactRevision())
     }
 
     @Test
@@ -467,7 +462,7 @@ class ArgentumSearchWorldTest {
         assertEquals(beforeState.rng, originalEnv.state.rng)
         assertEquals(16.0, left.diagnostics.effectiveSampleSizeBefore)
         assertTrue(left.particles.all { particle ->
-            (particle.value as ArgentumSearchWorld).knowledgeSupportFailure("p0", rootInfo) == null
+            (particle.value as ArgentumSearchWorld).knowledgeConsistencyFailure("p0", rootInfo) == null
         })
 
         val leftHybrid = ArgentumHybridBeliefWorldSource(leftRoot)
@@ -480,13 +475,12 @@ class ArgentumSearchWorldTest {
                 maxPolicyDecisions = 6,
                 leaf = LeafEvaluationConfig(
                     LeafStateSource.CURRENT_SAMPLED_WORLD,
-                    LeafEvaluator.ARGENTUM_BOARD_V1,
-                ),
+                    ),
             ),
             opponentPolicy = UniformOpponentPolicy,
             rolloutPolicy = UniformOpponentPolicy,
             rolloutOpponentPolicy = UniformOpponentPolicy,
-            leafEvaluationStrategy = sampledWorldLeafStrategy(),
+            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
         )
         val leftResult = search.search("p0", leftHybrid, searchSeed = 57L)
         val rightResult = search.search("p0", rightHybrid, searchSeed = 57L)
@@ -627,13 +621,12 @@ class ArgentumSearchWorldTest {
                 maxPolicyDecisions = 8,
                 leaf = LeafEvaluationConfig(
                     LeafStateSource.CURRENT_SAMPLED_WORLD,
-                    LeafEvaluator.ARGENTUM_BOARD_V1,
-                ),
+                    ),
             ),
             opponentPolicy = UniformOpponentPolicy,
             rolloutPolicy = UniformOpponentPolicy,
             rolloutOpponentPolicy = UniformOpponentPolicy,
-            leafEvaluationStrategy = sampledWorldLeafStrategy(),
+            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
         )
         val before = env.state
 
@@ -666,6 +659,44 @@ class ArgentumSearchWorldTest {
         assertEquals(root.informationState("p0"), rejuvenated.informationState("p0"))
         assertEquals(before, env.state)
         assertEquals(before.rng, env.state.rng)
+    }
+
+    @Test
+    fun `diagnosis and expansion share annotation state while only exact forks inherit it`() {
+        val resolutions = mutableListOf<ArgentumHeuristicResolution>()
+        val world = ArgentumSearchWorld.create(
+            environment(), "annotation-cache-boundary", 44L, 811L,
+            knownDecks = mapOf("p0" to deck, "p1" to deck),
+            heuristicResolutionSink = resolutions::add,
+        )
+        val information = world.informationState("p0")
+        val admitted = world.expandChoicesForPolicyAdmission(64)
+        assertTrue(resolutions.isEmpty())
+        val diagnosis = world.determinizedHeuristicChoiceDiagnosis(64)
+        val annotated = world.expandChoicesWithPolicyAnnotations(64)
+        assertEquals(listOf(assertNotNull(diagnosis.resolution)), resolutions)
+        assertEquals(admitted.candidates.map { it.signature }, annotated.candidates.map { it.signature })
+        assertEquals(assertNotNull(diagnosis.choice).signature, annotated.candidates.single {
+            ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags
+        }.signature)
+
+        val exact = world.fork() as ArgentumSearchWorld
+        assertEquals(annotated, exact.expandChoicesWithPolicyAnnotations(64))
+        assertEquals(diagnosis, exact.determinizedHeuristicChoiceDiagnosis(64))
+        assertEquals(1, resolutions.size)
+        val hypothetical = world.forkForHypotheticalSearch(933L)
+        assertEquals(information, hypothetical.informationState("p0"))
+        hypothetical.expandChoicesWithPolicyAnnotations(64)
+        assertEquals(2, resolutions.size)
+        world.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION)
+            .expandChoicesWithPolicyAnnotations(64)
+        assertEquals(3, resolutions.size)
+        val reprofiled = world.withActionSpaceProfile(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1)
+        assertEquals(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+            reprofiled.semanticExpansionSpecification().actionSpaceProfile)
+        reprofiled.expandChoicesWithPolicyAnnotations(64)
+        assertEquals(4, resolutions.size)
+        assertEquals(information, world.informationState("p0"))
     }
 
     @Test
@@ -854,7 +885,7 @@ class ArgentumSearchWorldTest {
         assertEquals(present.exactMass, actualPresent.sumOf { it.weight }, absoluteTolerance = 1e-12)
         assertEquals(1.0, batch.particles.sumOf { it.weight }, absoluteTolerance = 1e-12)
         assertTrue(batch.particles.all { particle ->
-            (particle.value as ArgentumSearchWorld).knowledgeSupportFailure("p0", information) == null
+            (particle.value as ArgentumSearchWorld).knowledgeConsistencyFailure("p0", information) == null
         })
     }
 

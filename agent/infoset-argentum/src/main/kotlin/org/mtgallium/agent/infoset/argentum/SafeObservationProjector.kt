@@ -17,7 +17,7 @@ import org.mtgallium.agent.infoset.core.PolicyCombatView
 import org.mtgallium.agent.infoset.core.PolicyDecisionChoiceSpec
 import org.mtgallium.agent.infoset.core.PolicyJson
 import org.mtgallium.agent.infoset.core.PolicyManaPool
-import org.mtgallium.agent.infoset.core.PolicyObservation
+import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
 import org.mtgallium.agent.infoset.core.PolicyPendingDecisionView
 import org.mtgallium.agent.infoset.core.PolicyPlayerView
 import org.mtgallium.agent.infoset.core.PolicyStackItemView
@@ -25,7 +25,7 @@ import org.mtgallium.agent.infoset.core.PolicyZoneView
 
 /** Result of one trusted projection. The routing map never crosses into infoset-core. */
 class SafeObservationProjection internal constructor(
-    val observation: PolicyObservation,
+    val observation: PlayerObservationSnapshot,
     internal val references: SafeReferenceMap,
     internal val canonicalFragments: ObservationCanonicalFragments = ObservationCanonicalFragments.build(observation),
 ) {
@@ -75,8 +75,11 @@ class SafeObservationProjector {
         runtime: ArgentumPolicyRuntimeProjection,
         pendingDecision: PendingDecision? = null,
         previous: SafeObservationProjection? = null,
+        qualifiedBattlefieldHandles: Map<EntityId, String> = emptyMap(),
+        canonicalCombatRows: Boolean = false,
     ): SafeObservationProjection {
-        val refs = SafeReferenceMap(observation, playerAliases, runtime.cards, previous?.references)
+        val refs = SafeReferenceMap(observation, playerAliases, runtime.cards, previous?.references,
+            qualifiedBattlefieldHandles)
         val chooserDecision = pendingDecision?.takeIf { decision ->
             decision.id == observation.pendingDecision?.decisionId &&
                 decision.playerId == observation.perspectivePlayerId
@@ -84,7 +87,7 @@ class SafeObservationProjector {
         val choiceSpec = chooserDecision?.toDecisionChoiceSpec()
         choiceSpec?.let(refs::admitAuthorizedChoiceReferences)
 
-        val safe = PolicyObservation(
+        val safe = PlayerObservationSnapshot(
             perspectivePlayerId = refs.player(observation.perspectivePlayerId),
             turnNumber = observation.turnNumber,
             phase = observation.phase.name,
@@ -173,14 +176,18 @@ class SafeObservationProjector {
             combat = runtime.combat?.let { combat ->
                 PolicyCombatView(
                     attackingPlayerId = combat.attackingPlayerId?.let(refs::player),
-                    attackers = combat.attackers.map { attacker ->
+                    attackers = combat.attackers.let { rows ->
+                        if (canonicalCombatRows) rows.sortedBy { refs.objectRef(it.attackerId) } else rows
+                    }.map { attacker ->
                         PolicyAttackerView(
                             attackerObjectRef = refs.objectRef(attacker.attackerId),
                             defenderObjectRef = refs.reference(attacker.defenderId),
                             blockerObjectRefs = attacker.blockerIds.map(refs::objectRef),
                         )
                     },
-                    blockers = combat.blockers.map { blocker ->
+                    blockers = combat.blockers.let { rows ->
+                        if (canonicalCombatRows) rows.sortedBy { refs.objectRef(it.blockerId) } else rows
+                    }.map { blocker ->
                         PolicyBlockerView(
                             blockerObjectRef = refs.objectRef(blocker.blockerId),
                             blockedAttackerObjectRefs = blocker.blockedAttackerIds.map(refs::objectRef),
@@ -229,7 +236,7 @@ class SafeObservationProjector {
                 canCancel = spec.canCancel,
             )
             is CardsChoiceSpec -> PolicyDecisionChoiceSpec.Cards(
-                options = spec.options.map(refs::reference),
+                options = full.array("options").map { (it as JsonPrimitive).content },
                 minSelections = spec.minSelections,
                 maxSelections = spec.maxSelections,
                 ordered = spec.ordered,
@@ -310,9 +317,11 @@ internal class SafeReferenceMap(
     playerAliases: Map<EntityId, String>? = null,
     cardRuntime: Map<EntityId, ArgentumPolicyCardRuntime> = emptyMap(),
     previous: SafeReferenceMap? = null,
+    qualifiedBattlefieldHandles: Map<EntityId, String> = emptyMap(),
 ) {
     private val rawToSafe = linkedMapOf<String, String>()
     private val rawToSemantic = linkedMapOf<String, String>()
+    internal val combatEdges = CombatEdgeReferenceMap()
     private var privateIndex = 0
     private data class CardDescriptor(
         val features: EntityFeatures,
@@ -449,10 +458,14 @@ internal class SafeReferenceMap(
             zone.cards.groupBy { refined.getValue(it.entityId.value) }
                 .toSortedMap()
                 .forEach { (descriptor, cards) ->
-                    cards.sortedBy { it.entityId.value }.forEachIndexed { index, card ->
+                    var unrememberedIndex = 0
+                    cards.sortedBy { it.entityId.value }.forEach { card ->
+                        val remembered = qualifiedBattlefieldHandles[card.entityId]
+                            ?.takeIf { zone.zoneType.name == "BATTLEFIELD" }
                         put(
                             card.entityId,
-                            "zone:$owner:${zone.zoneType.name}:${descriptor.take(16)}:$index",
+                            remembered?.let { "history-object:v1:$it" }
+                                ?: "zone:$owner:${zone.zoneType.name}:${descriptor.take(16)}:${unrememberedIndex++}",
                             "object:$owner:${zone.zoneType.name}:$descriptor",
                         )
                     }
@@ -485,6 +498,13 @@ internal class SafeReferenceMap(
     fun semanticReference(id: EntityId): String = rawToSemantic[id.value]
         ?: error("Semantic reference ${id.value} was not admitted by the masked observation")
 
+    /** Safe group-to-occurrence relations; no engine identifiers cross this projection. */
+    fun visibleSemanticGroups(): Map<String, List<String>> = java.util.Collections.unmodifiableMap(
+        rawToSemantic.entries.groupBy({ it.value }, { rawToSafe.getValue(it.key) }).mapValues { (_, members) ->
+            java.util.Collections.unmodifiableList(members.distinct().sorted())
+        }.toSortedMap()
+    )
+
     fun referenceOrNull(id: EntityId?): String? = id?.value?.let(rawToSafe::get)
 
     fun admits(id: EntityId): Boolean = id.value in rawToSafe
@@ -496,6 +516,9 @@ internal class SafeReferenceMap(
                 put(candidate, safe, safe)
             }
         }
+        // Register the live combat contract's edge references after its endpoints are admitted, so
+        // the projected contract and every response encoded for it share one mapping.
+        if (spec is CombatResolutionChoiceSpec) combatEdges.register(spec.edges, ::reference)
     }
 
     /** Mask only fields whose concrete decision schema declares an [EntityId]. */
@@ -532,7 +555,10 @@ internal class SafeReferenceMap(
                 }),
             )
             is CardsChoiceSpec -> {
-                replace("options", entityList(spec.options))
+                // Enumeration of an unordered selection is not observed choice order. Sort only
+                // admitted references, retaining distinct identities, duplicates and keyed metadata.
+                val options = spec.options.map(::reference).let { if (spec.ordered) it else it.sorted() }
+                replace("options", JsonArray(options.map(::JsonPrimitive)))
                 replace("nonSelectableOptions", entityList(spec.nonSelectableOptions))
                 spec.cardInfo?.let { replace("cardInfo", entityMapKeys(full["cardInfo"], it.keys)) }
                 replaceRecordEntities(
@@ -601,13 +627,22 @@ internal class SafeReferenceMap(
                 replaceRecordEntities("defenders", spec.defenders.map { defender ->
                     mapOf("id" to JsonPrimitive(reference(defender.id)))
                 })
-                replaceRecordEntities("edges", spec.edges.map { edge ->
-                    mapOf(
-                        "sourceId" to JsonPrimitive(reference(edge.sourceId)),
-                        "targetId" to JsonPrimitive(reference(edge.targetId)),
-                        "editableBy" to JsonPrimitive(reference(edge.editableBy)),
-                    )
-                })
+                val localReferences = spec.edges.map { combatEdges.local(it.id) }
+                val rawEdges = full["edges"] as? JsonArray ?: JsonArray(emptyList())
+                require(rawEdges.size == spec.edges.size) {
+                    "Typed edges record count changed during serialization"
+                }
+                // The contract's edge list order is incidental engine enumeration; order the
+                // policy-facing contract by its contract-local references so corresponding
+                // contracts and responses compare byte-for-byte across worlds.
+                replace("edges", JsonArray(spec.edges.indices.sortedBy { localReferences[it] }.map { index ->
+                    JsonObject((rawEdges[index] as JsonObject).toMutableMap().apply {
+                        put("id", JsonPrimitive(localReferences[index]))
+                        put("sourceId", JsonPrimitive(reference(spec.edges[index].sourceId)))
+                        put("targetId", JsonPrimitive(reference(spec.edges[index].targetId)))
+                        put("editableBy", JsonPrimitive(reference(spec.edges[index].editableBy)))
+                    })
+                }))
                 spec.coChooserId?.let { replace("coChooserId", JsonPrimitive(reference(it))) }
             }
             is ManaSourcesChoiceSpec -> {

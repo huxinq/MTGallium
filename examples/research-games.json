@@ -1,0 +1,22 @@
+{
+  "decks": [
+    {
+      "Mountain": 7
+    },
+    {
+      "Mountain": 7
+    }
+  ],
+  "policies": [
+    "random",
+    "random"
+  ],
+  "seed": 7,
+  "games": 1,
+  "threads": 1,
+  "startingHandSize": 7,
+  "skipMulligans": true,
+  "maximumDecisions": 32,
+  "recordDecisions": true,
+  "recordReplay": true
+}

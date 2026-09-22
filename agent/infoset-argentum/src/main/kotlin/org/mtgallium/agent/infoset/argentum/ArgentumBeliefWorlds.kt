@@ -13,7 +13,7 @@ import org.mtgallium.agent.infoset.core.BeliefWorldSource
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.ParticleBelief
 import org.mtgallium.agent.infoset.core.ParticleRejuvenator
-import org.mtgallium.agent.infoset.core.PolicyInformationState
+import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.SearchWorld
 import org.mtgallium.agent.infoset.core.Weighted
 
@@ -93,14 +93,14 @@ object ArgentumBeliefSupport {
     fun failures(
         worlds: Iterable<SearchWorld>,
         viewerAlias: String,
-        expected: PolicyInformationState,
+        expected: InformationStateRepresentation,
     ): Map<String, Int> = buildMap {
         worlds.forEach { world ->
             val candidate = world as? ArgentumSearchWorld
             val code = if (candidate == null) {
                 "WORLD_TYPE"
             } else {
-                candidate.knowledgeSupportFailure(viewerAlias, expected)
+                candidate.knowledgeConsistencyFailure(viewerAlias, expected)
             }
             if (code != null) put(code, getOrDefault(code, 0) + 1)
         }
@@ -109,7 +109,7 @@ object ArgentumBeliefSupport {
     fun completeFailures(
         worlds: Iterable<SearchWorld>,
         viewerAlias: String,
-        expected: PolicyInformationState,
+        expected: InformationStateRepresentation,
     ): Map<String, Int> {
         val candidates = worlds.toList()
         return buildMap {
@@ -125,17 +125,17 @@ object ArgentumBeliefSupport {
     fun incompatibleWorldCount(
         worlds: Iterable<SearchWorld>,
         viewerAlias: String,
-        expected: PolicyInformationState,
+        expected: InformationStateRepresentation,
     ): Int = worlds.count { world ->
         val candidate = world as? ArgentumSearchWorld
-        candidate == null || candidate.knowledgeSupportFailure(viewerAlias, expected) != null ||
+        candidate == null || candidate.knowledgeConsistencyFailure(viewerAlias, expected) != null ||
             world.informationState(viewerAlias).informationStateDigest != expected.informationStateDigest
     }
 
     fun requireSupported(
         worlds: Iterable<SearchWorld>,
         viewerAlias: String,
-        expected: PolicyInformationState,
+        expected: InformationStateRepresentation,
         purpose: String,
     ) {
         val failures = completeFailures(worlds, viewerAlias, expected)
@@ -157,7 +157,7 @@ class ArgentumKnownDeckBeliefWorldSource(
     private val materializer = KnownDeckWorldMaterializer(root.cardRegistry())
 
     override fun sample(
-        rootInformation: PolicyInformationState,
+        rootInformation: InformationStateRepresentation,
         knownDecks: Map<String, Map<String, Int>>,
         beliefSeed: Long,
         count: Int,
@@ -410,21 +410,6 @@ class ArgentumConditionalRejuvenator(
 
 /** Trusted aggregation of sampled hidden hands; only aggregate probabilities cross the boundary. */
 object ArgentumParticleDiagnostics {
-    fun opponentHandMarginals(belief: ParticleBelief, viewerAlias: String): Map<String, Double> {
-        val probabilities = mutableMapOf<String, Double>()
-        belief.weightedWorlds().forEach { weighted ->
-            val world = weighted.value as? ArgentumSearchWorld
-                ?: error("Argentum belief diagnostics received an untrusted world")
-            val viewer = world.rawPlayerIds().getValue(viewerAlias)
-            world.authoritativeState().turnOrder
-                .filter { it != viewer }
-                .flatMap { opponent -> world.authoritativeState().getHand(opponent) }
-                .mapNotNull { id -> world.authoritativeState().getEntity(id)?.get<CardComponent>()?.name }
-                .toSet()
-                .forEach { name ->
-                    probabilities[name] = probabilities.getOrDefault(name, 0.0) + weighted.weight
-                }
-        }
-        return probabilities.toSortedMap()
-    }
+    fun opponentHandMarginals(belief: ParticleBelief, viewerAlias: String): Map<String, Double> =
+        ArgentumHandBeliefQueries.snapshot(belief, viewerAlias).presenceMarginals()
 }

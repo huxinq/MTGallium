@@ -1,0 +1,6 @@
+# Optional production-format ONNX export and numerical comparisons.
+-r requirements.txt
+numpy
+onnx
+onnxruntime
+onnxscript

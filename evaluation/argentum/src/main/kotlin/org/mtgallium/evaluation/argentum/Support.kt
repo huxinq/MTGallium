@@ -8,7 +8,6 @@ import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
-import org.mtgallium.research.run.PrivateEvidencePaths
 
 internal val reportJson = Json {
     prettyPrint = true
@@ -62,8 +61,23 @@ internal fun gitOutput(root: Path, vararg args: String): String = try {
     "unknown (${error.message})"
 }
 
+/** Keep this application's external report location without a research artifact framework. */
+internal fun reportOutputDirectory(root: Path,
+    configured: String = System.getenv("MTGALLIUM_PRIVATE_EVIDENCE_ROOT").orEmpty(),
+    publicSource: Boolean = System.getenv("MTGALLIUM_PUBLIC_SOURCE") == "1",
+): Path {
+    val repository = root.toAbsolutePath().normalize()
+    if (configured.isBlank()) {
+        require(!publicSource) { "Choose MTGALLIUM_PRIVATE_EVIDENCE_ROOT outside public source" }
+        return repository.resolve("reports/argentum/latest")
+    }
+    val external = Path.of(configured.trim()).toAbsolutePath().normalize()
+    require(external != repository && !external.startsWith(repository)) { "Private reports belong outside source" }
+    return external.resolve("argentum/latest")
+}
+
 internal fun writeReport(root: Path, report: EvaluationReport) {
-    val outputDir = PrivateEvidencePaths.resolve(root, "reports/argentum/latest")
+    val outputDir = reportOutputDirectory(root)
     Files.createDirectories(outputDir)
     Files.writeString(outputDir.resolve("report.json"), reportJson.encodeToString(EvaluationReport.serializer(), report) + "\n")
     Files.writeString(outputDir.resolve("report.md"), renderMarkdown(report))

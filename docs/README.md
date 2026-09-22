@@ -1,21 +1,28 @@
 # Technical documentation
 
-- [Research CLI workbench](research-workbench.md) — design, freeze, preflight,
-  launch, retrieve, diagnose and review an experiment from one human interface.
-- [Research tooling development](research-tooling-development.md) — source ownership,
-  command registration and shared terminal workflow components.
+## Current research
 
-- [`../AGENTS.md`](../AGENTS.md) — coding-agent guidance and semantic invariants.
-- [`glossary.md`](glossary.md) — plain-language definitions, tools and subsystems, aliases, and source references.
-- [`architecture.md`](architecture.md) — stable public architecture and limits.
-- [`real-game-screening.md`](real-game-screening.md) — paired gameplay with early stopping and a copy-ready plan, private position banks and matched search diagnostics.
-- [`calibration-cloning-admission.md`](calibration-cloning-admission.md) — authenticated teacher-action examples from retained paired gameplay.
-- [`decision-local-learnability-pilot.md`](decision-local-learnability-pilot.md) — offline fitting and development evaluation over retained terminal labels.
-- [`decision-local-nonlinear-learnability.md`](decision-local-nonlinear-learnability.md) — phase-conditioned and nonlinear action-outcome models over the same retained inputs.
-- [`decision-local-root-coverage.md`](decision-local-root-coverage.md) — expanded training roots with a frozen historical engine and fresh evaluation panel.
-- [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — contribution expectations.
+Start with the [direct research library and CLI](research-workbench.md). The
+[architecture](architecture.md#module-responsibilities) maps source ownership and
+extension points. The [PyTorch guide](neural-policy.md) covers
+direct training, numerical checkpoints and optional export. The independent
+[durable runner](workbench/durable-runs.md) manages a foreground command's lifetime
+across sessions.
 
-Historical research chronology, canonical evidence, and private operation
-instructions are deliberately outside this source release.
+## Understand the system
 
-- [Reusable terminal research workflow](research-workflow.md): verified builds, fixed study composition, campaign data use, target sensitivity and deployment links.
+The [architecture](architecture.md), [shared glossary](glossary.md), and
+[terminology map](terminology.md) describe modules, definitions, and APIs.
+The [white paper](whitepapers/README.md) supplies the mathematical model. The
+[evidence and research boundary guide](architecture/evidence-and-research.md)
+describes record contents, output on interruption, and source metadata.
+
+[Record organization](research-records.md) covers working notes, run outputs and
+research navigation. [Historical source](history.md) locates retired protocols.
+
+## Implement and verify
+
+Follow the [coding-agent guide](../AGENTS.md) and use focused tests before the
+public `just check` command.
+The [architecture](architecture.md#module-responsibilities) and [neural
+verification commands](neural-policy.md#verification) identify the current checks.

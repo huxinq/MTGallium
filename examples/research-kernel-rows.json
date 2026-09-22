@@ -1,0 +1,94 @@
+[
+  {
+    "rootId": "positive",
+    "seedGroupId": "positive",
+    "features": [
+      {
+        "state": {
+          "indices": [
+            0
+          ],
+          "values": [
+            1.0
+          ]
+        },
+        "centeredCandidate": {
+          "indices": [
+            0
+          ],
+          "values": [
+            -1.0
+          ]
+        }
+      },
+      {
+        "state": {
+          "indices": [
+            0
+          ],
+          "values": [
+            1.0
+          ]
+        },
+        "centeredCandidate": {
+          "indices": [
+            0
+          ],
+          "values": [
+            1.0
+          ]
+        }
+      }
+    ],
+    "actionMeans": [
+      -0.3,
+      0.3
+    ]
+  },
+  {
+    "rootId": "negative",
+    "seedGroupId": "negative",
+    "features": [
+      {
+        "state": {
+          "indices": [
+            0
+          ],
+          "values": [
+            -1.0
+          ]
+        },
+        "centeredCandidate": {
+          "indices": [
+            0
+          ],
+          "values": [
+            -1.0
+          ]
+        }
+      },
+      {
+        "state": {
+          "indices": [
+            0
+          ],
+          "values": [
+            -1.0
+          ]
+        },
+        "centeredCandidate": {
+          "indices": [
+            0
+          ],
+          "values": [
+            1.0
+          ]
+        }
+      }
+    ],
+    "actionMeans": [
+      0.3,
+      -0.3
+    ]
+  }
+]

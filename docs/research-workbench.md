@@ -1,350 +1,250 @@
-# Research from the command line
+# Direct research tools
 
-`tools/mtgallium-research` connects experiment design, typed plans, preflight,
-durable execution, retrieval, features and review. Researchers work with editable
-JSON and short commands; the existing Kotlin code remains the authority for
-scientific settings, admission, representations, populations and evidence.
+## Build and run
 
-The [glossary](glossary.md#research-workbench) explains the workbench and related
-research terminology.
-
-```text
-question → draft → doctor / effective plan → frozen attempt → preflight → launch
-              ↑                                                           ↓
-           fork / diff ← review packet / extraction ← verify ← status / diagnose
-```
-
-The three durable records have different authority: the **draft** expresses
-intent, the **attempt** records exactly what was requested, and the **native
-manifest** authenticates the producer's retained artifacts.
-
-## Agent use
-
-The workbench is the primary experiment interface for agents as well as human
-researchers. Follow the [agent interface policy](../AGENTS.md#primary-experiment-interface):
-use supported commands and structured `--json` output and reuse retained work.
-When a capability is missing, normally improve the shared workbench so future
-users can reuse it, preserving its scientific checks and evidence contracts.
-Standalone adapters and direct native execution are bounded exceptions under
-that policy, not the default response to a capability gap.
-The command sequences below apply to both users. Source development and tests
-keep their normal tools; using the workbench does not authorize new experiments
-or turn a read-only task into permission to create records.
-
-## Start here
-
-Use Python 3.11+, JDK 21 and the repository's ordinary build prerequisites.
-Durable launch requires a Linux user systemd manager. There is no database,
-background workbench service or Python dependency to install.
-
-Run from the intended worktree. This optional shell function shortens the name
-while preserving arguments containing spaces:
+From the checkout, with Python 3 and the repository's Gradle/JDK setup:
 
 ```bash
-research() { python3 tools/mtgallium-research "$@"; }
-export MTGALLIUM_PUBLIC_SOURCE=1
-export MTGALLIUM_PRIVATE_EVIDENCE_ROOT=/absolute/private/evidence
-research catalog
-research --help
+python3 tools/mtgallium-research --help
+python3 tools/mtgallium-research build
+python3 tools/mtgallium-research games /absolute/private/plan.json /absolute/private/new-run
+python3 tools/mtgallium-research show /absolute/private/new-run/results.json
 ```
 
-Generated drafts, builds, attempts and exports belong below
-`$MTGALLIUM_PRIVATE_EVIDENCE_ROOT/search-teacher/work`. Output guards reject source
-checkouts and symlink routes. Canonical evidence and derivatives remain private.
-Every public command accepts `--json` after its name for scripting.
+Normal execution asks Gradle to update the compiled classes and classpath.
+`--no-build` reuses the last compiled output without checking for source changes.
+Close live sessions before rebuilding their classes. JVM arguments belong in
+`JAVA_OPTS`, for example `JAVA_OPTS='-Xmx4g'`. Relative input and output paths refer
+to the caller's working directory.
 
-Commit the treatment and build it once:
+Keep actual private research inputs, replays, and results outside the checkout.
+For result metadata and retained records, see [source context](architecture/evidence-and-research.md#source-context).
+
+## Runnable public examples
+
+The checked-in examples are small technical fixtures:
 
 ```bash
-research build --output /absolute/private/evidence/search-teacher/work/build-001
-export MTGALLIUM_RESEARCH_BUILD=/absolute/private/evidence/search-teacher/work/build-001
+work=$(mktemp -d)
+python3 tools/mtgallium-research fit examples/research-kernel-rows.json "$work/model.json" 0.001
+python3 tools/mtgallium-research predict "$work/model.json" examples/research-kernel-rows.json "$work/scores.json"
+python3 tools/mtgallium-research games examples/research-games.json "$work/game"
+python3 tools/mtgallium-research show "$work/game/results.json"
 ```
 
-This uses the existing forced-build authority and retains the source/Argentum
-revisions, command/log and ordered runtime. Keep the execution worktree unchanged
-while its producers run; use another worktree for concurrent source changes. A
-new source treatment needs a new committed build. Historical attempts keep their
-original identities.
+The fit uses artificial targets; the small game uses an intentionally tiny deck.
 
-## Design an experiment
+[`examples/python-value-search.py`](../examples/python-value-search.py) compares
+hand-authored value weights at decision horizons of 2 and 8 through the live interface.
 
-Choose a capability with `catalog`, and start from an explicit native plan. The
-public [sequential example](../examples/search-teacher-sequential.json) supplies
-a starting shape; its scientific settings are not a recommendation for a new
-research question:
+## Live games from Python
+
+Use `research_workspace` with `tools` on `PYTHONPATH`. A session builds once and
+keeps one JVM alive for its games, branches, and numerical calls. From the repository root:
 
 ```bash
-research new rollout-comparison --kind sequential \
-  --plan examples/search-teacher-sequential.json --deck /absolute/private/deck.json \
-  --question 'Does this declared continuation change improve the fixed policy?'
+PYTHONPATH=tools python3 - <<'PY'
+from research_workspace import Session
+
+with Session(java_options=['-Xmx1g']) as research:
+    with research.game([{'Mountain': 7}, {'Mountain': 7}], seed=17,
+                       starting_hand_size=7, skip_mulligans=True) as game:
+        decision = game.decision()
+        with game.fork() as branch:
+            branch.step(decision.actions[0])
+            print(branch.play(decision_limit=40))
+        assert game.status()['index'] == decision.index
+        rows = []
+        result = game.play({'p0': lambda d: d.actions[0]},
+                           decision_limit=40, record=rows.append)
+        print(result, len(rows))
+PY
 ```
 
-The new private directory contains `experiment.json`, `plan.json` and `deck.json`.
-Edit these copies. The original inputs are preserved.
+`Game(decks, ...)` is also a context manager that owns its own session. Prefer an
+explicit `Session` for several games. Closing one game releases its world without
+closing sibling games; closing the session ends its JVM. A standalone game's
+branches share its session and must finish before the owning game closes.
 
-| Draft area | Meaning |
-| --- | --- |
-| `design` | Question, actual learner/target, control, shared components, intervention, population, primary measure, decision rule, allowed claims, limits and data use |
-| `inputs` | Typed plan, deck and frozen build paths |
-| `execution` | JVM resource arguments, worker setting where applicable, explicit wall-time cap and rehearsal settings |
-| `lineage` | Parent reference and reason recorded by `fork`; design ancestry only |
+`decision()` returns the acting player's represented information, exact ordered
+`actions`, decision index, and both rules/menu-profile completeness flags. It
+returns `None` at a terminal state. An action's `family`, `label`, and `payload`
+are conveniences over its existing semantic record. `step(action)` applies one
+choice; `step(index)` uses an index in the current menu. A stale action raises
+`ResearchError`. The result contains the accepted-decision record and new
+game status. `information('p0')` reads that player's information; `state()` is a
+**privileged referee inspection**.
 
-Comparisons require explicit design fields; use a reasoned “not applicable” where
-appropriate. Banks, features and campaign snapshots require only the question,
-population, allowed claims, limits and data use. No seed, scientific sample cap,
-effect margin, gate or objective is invented by the workbench.
+`play` accepts native policy names or Python callbacks. A mapping such as
+`{'p0': policy}` replaces only that seat; other seats use their configured native
+policies. A Python callback receives a `Decision` and returns an `Action` or an
+integer in its supplied menu. An equivalent choice obtained from another view
+is rebound to the supplied menu before recording, so its index and optional
+encodings describe that same menu. `select('heuristic')` or `select('search')`
+queries a native policy without applying its choice. Native search state still
+observes accepted actions when Python overrides selection.
+
+`select('search')` returns the usual `Action`; `action.search` is the complete
+search result when search ran and `None` for a forced or singleton selection.
+`value_features(player=None)` returns the sparse value-feature map for the named
+player, or for the acting player when omitted.
+
+`fork()` copies game and native search state; copy Python policy state separately.
+Initialize a native search policy at game creation with
+`policies=('search', 'random')` when its belief history must run from the start.
+Later requesting search initializes its belief from the current world.
+
+`decision(kernel=True)` adds the existing sparse kernel features.
+`decision(factual=True)` adds the existing factual byte tensors, the acting
+player's encoded event prefix, its `eventPosition`, and encoding schema. A
+`from_event` cursor can request a suffix; retain the preceding prefix yourself.
+The optional `schema` uses `FactualTensorSchema` fields. Use `record=callback` with
+`play(..., kernel=True, factual=True)` to collect the corresponding pre-action
+encodings beside the actual accepted action. `research.fit(roots, ridge=...)`
+and `research.predict(model, menus)` call the existing kernel routines in that
+same JVM using Python dictionaries and lists.
+
+A complete Python-authored collection, branch, training, and live-policy example is:
 
 ```bash
-research schema sequential
-research schema sequential --type SearchTeacherCalibrationPlan
-research plan /absolute/private/evidence/search-teacher/work/rollout-comparison
-research doctor /absolute/private/evidence/search-teacher/work/rollout-comparison
+python3 examples/python-game-learning.py /absolute/private/new-collection
+# With PyTorch in the chosen Python environment:
+python examples/python-game-learning.py /absolute/private/new-learning --train --epochs 2
 ```
 
-`schema` shows actual serializer fields, types, enum values, optionality and
-nullability, with references for recursive/generic structures. It is a type guide,
-not a complete JSON Schema or proof that constructor constraints pass. `plan`
-uses the actual Kotlin decoder and displays effective defaults beside the design.
-Only that typed plan controls scientific settings. `doctor` lists missing design,
-input, source and configuration prerequisites without collecting samples. It
-checks deck readability and the actual native build attestation, using a transient
-private reference file that is removed after the check.
+It collects heuristic actions on short-deck fixtures as imitation targets, fits
+the PyTorch model, and uses its scores to select live game actions.
 
-`execution.timeoutSeconds` is required and bounds the launched workload **and
-final verification together**. A separate rehearsal invocation has that same cap;
-it is not a combined scientific cost budget. Native scientific caps remain in the
-plan. `execution.threads` applies to gameplay and position screen/features.
-Composed studies own `workers` in their typed plans; the generic thread setting
-does not override them. JVM processor count and heap are separate resources.
+The connection is synchronous and sequential. Fully native `play` without a
+Python recorder stays inside the JVM; Python callbacks cross the pipe at each
+decision.
+`decision_limit` and `seconds` bound a `play` call; time is checked between
+policy calls. A lost connection closes the session; accepted steps remain applied.
+After changing Kotlin source, create
+a new session to compile and load it. `build=False` explicitly uses compiled output
+without checking source changes.
 
-## Freeze, preflight and launch once
+## Games
+
+The convenience `games` command reads `GamesPlan` JSON:
+
+```json
+{
+  "decks": [{"Mountain": 8}, {"Mountain": 8}],
+  "policies": ["search", "random"],
+  "seed": 11,
+  "games": 1,
+  "threads": 1,
+  "startingHandSize": 2,
+  "skipMulligans": true,
+  "particles": 1,
+  "simulations": 2,
+  "searchDepth": 2,
+  "explorationConstant": 1.4,
+  "leaf": {"stateSource": "BOUNDED_ROLLOUT"},
+  "opponentModel": "mixture",
+  "maximumDecisions": 8,
+  "recordDecisions": true,
+  "recordReplay": true
+}
+```
+
+Built-in policies are `heuristic`, `random`, and `search`. The plan runs two players;
+each game gets `seed + gameIndex` with the configured seat assignments.
+
+`GamesPlan` is shared by the CLI and `Session.game`. Python converts top-level
+snake_case keyword names to the plan's camelCase JSON names; nested `leaf` keys
+remain `stateSource`, `cutoff`, and `unresolved`. Search settings are
+`valueWeights` (or `value_weights`), `explorationConstant`, `leaf`, optional
+`rolloutTurnHorizon`, and `opponentModel`. Omit `valueWeights` to use the visible
+heuristic, or supply a `LinearWeights` JSON object with required `weights` and
+optional `bias`. `opponentModel` is `mixture` by default, with `heuristic` and
+`random` also available.
+
+The default leaf is `LeafEvaluationConfig(BOUNDED_ROLLOUT)`, whose cutoff and
+unresolved handling both default to `EVALUATE`. Cutoffs are `EVALUATE`,
+`QUIESCENCE`, and `POLICY_QUIESCENCE`; the latter two require a bounded rollout.
+Set `unresolved` to `BACK_UP_NEUTRAL` to record a neutral unresolved settlement.
+`searchDepth` bounds player decisions across the simulated tree and rollout.
+`rolloutTurnHorizon` is optional and takes `completedTurns` plus optional
+`maxPolicyDecisions` (512 by default): it stops at the first player decision with
+`turnNumber >= rootTurnNumber + completedTurns`. The decision count is a safety limit.
+It requires a bounded rollout with `EVALUATE` cutoff.
+
+A new output directory contains the plan and execution context, per-game results,
+and a final `results.json` after all games succeed. Optional decision logs contain
+the acting player's information, observed `selectedIndex`, menu completeness, and
+`accepted`. Optional replay logs contain privileged full engine-state snapshots,
+including intermediate engine transitions.
+
+At a decision limit, `play` returns `payoffs=None`. `TERMINAL` carries actual
+game payoffs; `TIME_LIMIT` also returns `payoffs=None`. `maximumDecisions` and
+`maximumSeconds` may be null. The time limit is checked between decisions and does
+not interrupt an expensive policy call. A policy exception, rejected transition,
+or recording failure propagates and leaves completed files available.
+
+## Fit, score, encode, and read
 
 ```bash
-research preflight /absolute/private/evidence/search-teacher/work/rollout-comparison
-# Use the exact attempt path returned by preflight:
-research launch /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001
+python3 tools/mtgallium-research fit roots.json model.json 0.001
+python3 tools/mtgallium-research predict model.json menus.json predictions.json
+python3 tools/mtgallium-research encode decisions.jsonl.gz features.json
+python3 tools/mtgallium-research replay-state replay.jsonl.gz 3 state.json
+python3 tools/mtgallium-research show any-producers-data.jsonl.gz
 ```
 
-`preflight DRAFT` creates a fresh numbered attempt. `freeze DRAFT` lets you inspect
-its request before rehearsal. `preflight ATTEMPT` uses that attempt; a completed
-unchanged rehearsal is reverified by the native authority. Failed or partial
-rehearsals require inspection and a fresh attempt. Launch never silently runs
-missing smoke work.
+`fit` takes an array of `RootActionKernelTrainingRoot` values: `rootId`,
+`seedGroupId`, `features`, and `actionMeans`. Each feature has a sparse `state` and
+`centeredCandidate`, each represented by aligned `indices` and `values` arrays.
+The kernel is `(1 + state·state′) (candidate·candidate′)`. Targets are centered
+within each root. Default loss mass is equal per group, then per root, then per
+action. The callable fitter also accepts explicit positive action weights; they
+are used as supplied, not silently normalized. Scores are not clipped.
 
-```text
-attempts/0001/
-  experiment.json               frozen human design
-  plan.json, deck.json           exact copied inputs
-  effective-plan.json            native decoded settings
-  build-reference.json           build identity and manifest hash
-  request.json                   input hashes, source, argv, output and gate
-  preflight.json, preflight/     for rehearsal workloads
-  submitted.json, started.json
-  status.json, run.log, receipt.json
-  output/                       native artifacts and research manifest
-  verification.json             completed native byte verification
-```
+`predict` takes rows containing `features` and adds `scores` and `predictedIndex`.
+It retains other fields, including `selectedIndex`. `encode` normalizes state and
+candidate vectors, centers candidates within the menu, and retains
+rejection/completeness information.
 
-The launcher checks frozen input hashes and reconstructs the command before
-submission and again in the worker. Native code verifies source/build readiness
-and the required gate. Rehearsal verification and primary dispatch run in the
-**same JVM**, deriving the primary plan/deck/threads/output solely from the bound
-profile; conflicting overrides cannot be supplied.
+`rootActionKernelFeatures` consumes the current player schema 6 and candidate
+schema 4 contract with a live decision site or recorded information and an
+optional explicit menu.
 
-Default launch returns after starting a uniquely named user systemd service.
-`submitted.json` retains its unit and launcher. The wrapper records the process
-result and log; an outer service deadline also covers abnormal wrapper failures.
-Persistence across logout depends on the host's existing user-manager/linger
-configuration; the tool does not change it. `launch --foreground` runs bounded
-interactive work with the same gates and deadline.
+`replay-state` reads only through its requested frame. A later unfinished JSON
+record does not invalidate an already-complete earlier frame in a readable plain
+or gzip stream. A missing or malformed requested frame still fails. The callable
+`useJsonLines(path) { records -> ... }` similarly consumes records inside a scoped
+stream; materialize a list explicitly only when the computation needs it.
 
-Submitting an attempt twice refuses. There is no automatic retry, resume,
-deadline extension or statistical continuation. A killed process may leave a
-stale status file; `status` includes current service observations and does not
-infer completion from a stored RUNNING flag.
+## Kotlin experiments
 
-### Select the appropriate gate
-
-| Kind | Gate | Work performed by existing native authority |
-| --- | --- | --- |
-| `calibration`, `sequential` | Bound gameplay rehearsal | Fixed/sequential paired games |
-| `position-screen` | Bound SEARCH/ACTION_CONDITIONAL rehearsal | Matched saved-position search |
-| `position-features` | Authenticated bank/reconstruction | Existing `FEATURES` representation, no new search targets |
-| `position-bank` | Authenticated source games | Bank derivation/reconstruction |
-| `terminal-kernel-study` | Embedded development pilot | Targets, frozen fit, then validation |
-| `terminal-target-sensitivity` | Embedded variant pilots | Changed conditional targets with fixed models |
-| `factual-residual-study` | Authenticated factual corpus, allocation, and build; optional admission parent checked at preflight | Frozen V2 residual fit and declared diagnostics |
-| `direct-attack-kernel-screen` | Native model/bank/scope/population checks | Declared choices and conditional targets |
-| `terminal-prediction-diagnostic` | Authenticated development evidence | Reused-target diagnosis without fitting/collection |
-| `research-transfer-audit` | Authenticated model/role/gameplay links | Retained-evidence comparison |
-| `campaign-data-snapshot` | Native registry validation | Snapshot of recorded population use |
-
-For non-rehearsal kinds, workbench `preflight` checks the build and structural
-plan. Embedded pilots and input admission remain inside launch; the interface
-does not present those checks as a gameplay rehearsal pass.
-
-`catalog --all` lists every native suite. Specialized commands retain their own
-routes where output or continuation semantics differ. `native -- ...` prints an
-argument array/environment and does not execute it. `campaign-data-use` appends
-to its explicit registry. Continuation retains its original parent and protocol;
-it is not an ordinary fresh output. See [the scientific workflow contract](research-workflow.md).
-
-## Inspect execution and diagnose failures
+Kotlin entry points live in
+`research/workbench/src/main/kotlin/org/mtgallium/research/workbench`.
+Add an ordinary `main` there and run its fully qualified class:
 
 ```bash
-research status /absolute/private/evidence/search-teacher/work/rollout-comparison
-research logs /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001
-research diagnose /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001
-research verify /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001
-research inspect /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001
-research describe /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001 report.json
+python3 tools/mtgallium-research jvm org.mtgallium.research.workbench.MyExperimentKt input.json
 ```
 
-`status DRAFT` lists attempts. Attempt views separate process state, live service
-observations, artifact verification and research interpretation. `diagnose`
-checks request/source bindings and shows bounded operational failure files and
-log tails; it does not infer a scientific cause. `logs --preflight` reads the
-rehearsal log. No inspection command reruns scientific work.
+Call `createWorld`, `playGame`, `Player`, `selectorPlayer`, `searchPlayer`,
+`rootActionKernelFeatures`, or `fitRootActionKernel` directly. `playGame` accepts
+caller-owned policy callbacks, decision recording, and a privileged research hook
+before selection. A factual `world.fork()` is independent of its parent; continuing
+or branching preserves the world's existing accepted-decision coordinates. A
+stateful native search-policy session also needs its explicit factual-continuation
+fork; copying only the world does not clone a policy's belief state.
 
-Verification/inspection also accept a historical native directory with `--build`.
-Use `--identity` to require an original research-run identity. `verify` calls
-`ResearchRunArtifacts.loadAndVerify`; `inspect` shows authenticated artifact names,
-hashes and sizes; `describe` shows registered JSON keys without their values.
-Original manifest fields are preserved, including omitted defaults. Missing
-historical source fields remain unknown.
+Python experiments can use the [live interface](#live-games-from-python), or import
+`research_workspace.run` and `read_data` with `tools` on `PYTHONPATH` for coarse-grained
+process/file work. The [durable runner](workbench/durable-runs.md) can retain a long-running
+foreground command and its logs.
 
-COMPLETE means registered bytes were retained. It may accompany a failed
-rehearsal, invalid result or inconclusive trial. Byte verification does not replace
-specialized bank/model/checkpoint/population/gameplay admission. Interpret the
-appropriate native report and its declared populations before making a claim.
+## Verification
 
-## Retrieve evidence and features
-
-```bash
-research find rollout
-research find SOURCE_SHA --limit 20 --json
-```
-
-Discovery searches experiment/request/manifest metadata, including questions and
-frozen source/build declarations. It does not open outcome reports, update an
-index or rewrite evidence. Matches remain unverified. Malformed markers are
-reported separately; absent declarations are not filled by inference. Traversal
-is deterministic, avoids directory symlinks and bounds returned entries/errors.
-
-To generate features, create a `position-features` experiment with the existing
-`PositionBankScreenPlan` in `FEATURES` mode, then preflight/launch it. This uses
-the source-owned bank, perspective, menu and feature implementation and refuses
-search-mode plans. See [position-bank screening](real-game-screening.md).
-
-To retrieve a field that already exists in an artifact:
-
-```bash
-research extract /absolute/private/evidence/search-teacher/work/screen/output report.json \
-  --pointer /rows --purpose 'Development representation inspection' \
-  --output /absolute/private/evidence/search-teacher/work/row-export-001
-```
-
-Choose the pointer from the actual report schema; units differ across suites.
-Empty pointer selects the entire artifact. Retrieval preserves array order,
-nulls, refusals and numeric tokens without filtering rows or inventing outcomes.
-`value.json` and `receipt.json` retain the original run identity, manifest/artifact
-hashes, pointer, extractor revision/dirty state/script hash, purpose and output
-hash. Producer and extractor identity stay separate. JSON retrieval is limited
-to 64 MiB; larger reports need their existing specialized streaming reader.
-Fresh output directories are required, and symlink/traversal paths refuse.
-
-Before exposing outcomes for a new use, register the appropriate explicit
-`campaign-data-use` record through the native authenticated population authority.
-The export purpose is a record of intent, not population registration. An empty
-registry does not establish fresh validation. See [population usage](research-workflow.md#campaign-population-usage).
-
-## Interpret and design the next experiment
-
-```bash
-research packet /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001 \
-  --output /absolute/private/evidence/search-teacher/work/review-001
-research fork /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001 \
-  rollout-comparison-v2 --reason 'Change only the declared continuation setting'
-research diff /absolute/private/evidence/search-teacher/work/rollout-comparison/attempts/0001 \
-  /absolute/private/evidence/search-teacher/work/rollout-comparison-v2
-```
-
-The packet requires a completed receipt bound to the exact request, then compares
-current evidence with the identity/hash verified at execution. Substituting a
-different valid output refuses. It links design, effective settings and artifact
-inventory; `review.json` asks for observations, interpretation, alternatives,
-supported claims and the next decision. It does not create an effect estimate or
-promote a model. The actual producer and current packet authoring source remain
-separate.
-
-Account for planned, executed, inspected, overshoot, refused, stopped and missing
-populations through the relevant native report. Distinguish terminal outcomes,
-conditional sampled targets and heuristic settlements. Existing gameplay summaries,
-prediction diagnostics, sensitivity studies and transfer audits provide the
-specialized readouts.
-
-A fork of an attempt copies its frozen inputs; later old-draft edits cannot change
-that ancestry. `diff` compares actual plan/design fields and deck contents/hashes,
-preserving missing versus null. Differences do not prove causal isolation or semantic equivalence. Reuse a
-completed study stage only through explicit native retained references in the new
-plan; forking neither continues a statistical test nor resets its boundaries.
-
-## Keep the interface durable
-
-`ResearchWorkbench.kt` owns serializer introspection and routes into scientific
-APIs. Python owns drafts, execution records, process supervision, retrieval and
-presentation. There is no alternate payoff, feature, gate or population definition.
-See [research tooling development](research-tooling-development.md) for module
-ownership, native command registration and the shared terminal workflow helpers.
-
-For a recurring workflow, add its actual native serializer and precise gate,
-reuse its runner/verifier, and expose matching human purpose/output/worker semantics
-in the Python capability table. Leave unsupported operations explicit. Add a
-reachable identity/refusal regression and a small successful technical witness;
-update this guide and the relevant scientific contract. Historical fixtures stay
-private. Avoid adding arbitrary shell launch hooks or result-dependent defaults.
-
-`just research-tools-check` runs synthetic Python pipeline and retrieval tests.
-`just check` includes those and the native public-source adapter regressions.
-Independent semantic review applies to interpretation-bearing changes. Technical
-checks establish implementation behavior, not a scientific result.
-
-## Audit retained completion and recoverable work
-
-```bash
-research status /absolute/private/evidence/study/attempts/0001 --json
-research audit /absolute/private/evidence/study/attempts/0001 --json
-research audit /absolute/private/evidence/historical/output \
-  --build /absolute/private/evidence/compatible-frozen-build \
-  --deck /absolute/private/evidence/retained-deck.json --json
-```
-
-`status` adds bounded, explicitly unverified observations of recorded scientific
-stages. A process exit or sealed manifest does not imply a completed fit or game.
-For factual admission failures, status discovers child report/manifest pairs;
-these are candidates for authentication, not a certified reusable population.
-Malformed or oversized metadata leaves scientific completion unestablished.
-
-`audit` verifies bytes and uses the selected frozen runtime's scientific readers
-to authenticate supported populations and bindings. Gameplay reports separate
-executed games, the inspected stopping prefix, overshoot, and ineligible games;
-only eligible inspected games contribute to the displayed outcome counts.
-Factual residual studies report allocated/admitted/refused/missing games,
-complete groups, rows by role, original trajectory references, and recorded
-training/search stages. An absent checkpoint leaves fit execution unknown.
-Retained prediction metrics are checked structurally, not recomputed.
-
-The factual adapter supports the `factual-residual-study-v1` continuation API.
-Older producer builds may need a compatible newer frozen `--build` solely for
-inspection. Its identity and the current adapter hash are reported separately
-from every original producer identity. Unknown protocols or missing APIs refuse;
-the command never falls back to jars from the inspection checkout. See the
-[adapter compatibility contract](../tools/research_workspace/audits/README.md).
-The audit is read-only and bounded by `--timeout` (default 180 seconds, maximum
-1800) and `--heap-mib` (default 4096, maximum 8192).
-
-Recovery discovery does not launch work or approve continuation. Use an explicit
-new plan and the native continuation preflight to establish eligibility. A sealed
-corpus is beyond the supported admission-continuation boundary. Preserve the
-original attempt and reuse authenticated references through the owning contract;
-do not automatically replay completed work after a later stage fails.
+`just check` runs the public tests. Native tests use public
+fixtures for real transitions, factual branches, recording, and numerical checks;
+Python tests exercise normal builds, arbitrary JVM entry points and arguments,
+file reading, and real live-game journeys through one JVM, including Python policies,
+native search-policy forks, menu binding, factual encodings, limits, and transport cleanup.
+Neural training, optional ONNX export, and CUDA checks have separate commands in
+the neural guide.
