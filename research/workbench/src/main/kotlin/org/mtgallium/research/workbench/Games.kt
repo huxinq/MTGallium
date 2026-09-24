@@ -93,7 +93,11 @@ fun playGame(
     record: ((GameDecision) -> Unit)? = null,
     rawTrace: ((ArgentumRawTransition) -> Unit)? = null,
     beforeChoice: ((ArgentumSearchWorld, DecisionSiteRequest, Int) -> Unit)? = null,
+    luckCorrection: LuckCorrection? = null,
 ): GameResult {
+    require(luckCorrection == null || maximumSeconds == null) {
+        "Luck correction does not support maximumSeconds; use a decision limit"
+    }
     require(players.isNotEmpty())
     require(maximumDecisions == null || maximumDecisions >= 0)
     require(maximumSeconds == null || (maximumSeconds.isFinite() && maximumSeconds > 0))
@@ -122,12 +126,14 @@ fun playGame(
         val nanos = System.nanoTime() - decisionStarted
         val selected = context.expansion.candidates.indexOf(choice)
         check(selected >= 0) { "Policy returned a choice outside its current decision menu" }
-        val trace = rawTrace?.let { world.stepWithReplayTrace(choice) }
+        val luckBefore = luckCorrection?.before(world)
+        val trace = if (rawTrace != null || luckBefore != null) world.stepWithReplayTrace(choice) else null
         val step = trace?.result ?: world.step(choice)
         trace?.rawTransitions?.forEach { rawTrace?.invoke(it) }
         record?.invoke(GameDecision(index, site.information(),
             context.expansion.isExhaustive, context.expansion.isProfileExhaustive, selected, step.accepted, nanos))
         check(step.accepted) { "Engine rejected decision $index: ${step.diagnostic}" }
+        if (luckBefore != null) luckCorrection.after(luckBefore, choice, world, requireNotNull(trace))
         players.values.forEach { it.observe(actor, choice, step, index) }
     }
 }

@@ -24,6 +24,9 @@ class PythonGame internal constructor(
     private val sessions: MutableMap<Pair<String, String>, SearchPolicySession> = linkedMapOf(),
     private val policies: NativePolicies = NativePolicies.installed,
 ) {
+    private var luckConfig: LuckCorrectionConfig? = null
+    private var luckOpening: ArgentumSearchWorld? = null
+    private var luckUsed = false
     private val knownDecks = plan.decks.mapIndexed { index, deck -> "p$index" to deck }.toMap()
     private val actors = knownDecks.keys.toList()
     private val policyContext = NativePolicyContext(plan, world, gameId, knownDecks)
@@ -169,7 +172,17 @@ class PythonGame internal constructor(
     }
 
     /** Shadow choices consume the candidate's actual history but are never applied. */
-    fun compare(candidateSeat: String, incumbent: String, maximumDecisions: Int?, maximumSeconds: Double?): JsonObject {
+    fun compare(candidateSeat: String, incumbent: String, maximumDecisions: Int?, maximumSeconds: Double?,
+        luckCorrection: LuckCorrectionConfig? = null): JsonObject {
+        require(luckCorrection == null || maximumSeconds == null) {
+            "Luck correction does not support maximumSeconds; use a decision limit"
+        }
+        require(luckCorrection == luckConfig) { "Supply identical luckCorrection at create and compare" }
+        val luck = luckCorrection?.let { config ->
+            check(!luckUsed && world.acceptedDecisionCountForHost == 0) { "Luck pilot requires one fresh full-game compare" }
+            luckUsed = true
+            LuckCorrection(config.copy(seed = ComponentSeeds.derive(plan.seed, "host-luck-pilot", config.seed.toString())), candidateSeat).also { it.opening(requireNotNull(luckOpening)) }
+        }
         require(candidateSeat in actors)
         val baseline = nativePlayer(incumbent, candidateSeat)
         var decisions = 0
@@ -183,9 +196,10 @@ class PythonGame internal constructor(
             if (expected.signature != selected.signature) changed++
             selected
         }
-        val result = playGame(world, compared, plan.seed, maximumDecisions, maximumSeconds)
+        val result = playGame(world, compared, plan.seed, maximumDecisions, maximumSeconds, luckCorrection = luck)
         return buildJsonObject {
             put("result", researchJson.encodeToJsonElement(result))
+            if (luck != null) put("luck", luck.result(result.payoffs))
             put("candidateDecisions", decisions)
             put("changedDecisions", changed)
         }
@@ -198,7 +212,8 @@ class PythonGame internal constructor(
     }
 
     companion object {
-        fun create(plan: GamesPlan, registry: CardRegistry, id: String): PythonGame {
+        fun create(plan: GamesPlan, registry: CardRegistry, id: String, luckCorrection: LuckCorrectionConfig? = null): PythonGame {
+            require(luckCorrection == null || !plan.useHandSmoother) { "Uniform luck pilot does not support hand smoothing" }
             require(plan.decks.size == 2 && plan.policies.size == 2) { "The convenience setup takes two decks and two policy names" }
             val known = plan.decks.mapIndexed { i, cards -> "p$i" to cards }.toMap()
             val config = GameConfig(players = plan.decks.mapIndexed { i, cards ->
@@ -206,7 +221,11 @@ class PythonGame internal constructor(
             }, startingHandSize = plan.startingHandSize, skipMulligans = plan.skipMulligans,
                 useHandSmoother = plan.useHandSmoother, startingPlayerIndex = plan.startingPlayerIndex, seed = plan.seed)
             return PythonGame(plan, createWorld(config, known, registry, id, plan.seed, plan.actionProfile), id)
-                .also { it.initializePolicies() }
+                .also {
+                    it.luckConfig = luckCorrection
+                    if (luckCorrection != null) it.luckOpening = it.world.fork() as ArgentumSearchWorld
+                    it.initializePolicies()
+                }
         }
     }
 }
@@ -240,7 +259,8 @@ class PythonResearchConnection {
             "create" -> {
                 val plan = decodeGamesPlan(request.getValue("plan").jsonObject)
                 // Search RNG identity must not depend on which worker/session happened to run a setup.
-                remember(PythonGame.create(plan, registry, "python-game-${plan.seed}"))
+                remember(PythonGame.create(plan, registry, "python-game-${plan.seed}",
+                    request["luckCorrection"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement<LuckCorrectionConfig>(it) }))
             }
             "fork" -> remember(game().fork())
             "close" -> { games.remove(request.getValue("game").jsonPrimitive.int); JsonNull }
@@ -266,7 +286,8 @@ class PythonResearchConnection {
             "compare" -> game().compare(request.getValue("candidateSeat").jsonPrimitive.content,
                 request.getValue("incumbent").jsonPrimitive.content,
                 request["maximumDecisions"]?.jsonPrimitive?.intOrNull,
-                request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull)
+                request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull,
+                request["luckCorrection"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement<LuckCorrectionConfig>(it) })
             "information" -> researchJson.encodeToJsonElement(game().world.informationState(request.getValue("player").jsonPrimitive.content))
             "value-features" -> {
                 val world = game().world

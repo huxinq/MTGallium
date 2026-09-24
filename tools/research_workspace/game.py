@@ -97,12 +97,14 @@ class Session:
             return response['value']
 
     def game(self, decks: Sequence[Mapping[str, int]], *, seed: int = 1,
-             policies: Sequence[str] = ('random', 'random'), **settings: Any) -> Game:
+             policies: Sequence[str] = ('random', 'random'), luck_correction: Mapping | None = None,
+             **settings: Any) -> Game:
         plan = {''.join(word if i == 0 else word[:1].upper() + word[1:]
                         for i, word in enumerate(key.split('_'))): value
                 for key, value in settings.items()}
         plan.update(decks=list(decks), seed=seed, policies=list(policies))
-        result = self._call('create', plan=plan)
+        arguments = {} if luck_correction is None else {'luckCorrection': dict(luck_correction)}
+        result = self._call('create', plan=plan, **arguments)
         return Game._from(self, result['game'], tuple(policies))
 
     def fit(self, roots: Sequence[Mapping], ridge: float = .001, *, weights: Mapping | None = None) -> dict:

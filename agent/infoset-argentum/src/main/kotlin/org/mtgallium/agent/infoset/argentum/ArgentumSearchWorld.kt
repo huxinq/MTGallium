@@ -617,6 +617,39 @@ class ArgentumSearchWorld private constructor(
     /** Trusted host bridge; never expose this value through a perspective-safe policy API. */
     fun authoritativeStateForHost(): GameState = environment.state
 
+    /** Host-only chance pilot: rebuild printed identities in fixed zone slots, preserving RNG. */
+    fun luckPlayerIdsForHost(): Map<String, EntityId> = aliases.entries.associate { it.value to it.key }
+
+    fun forkPermutingChanceForHost(player: String, order: List<EntityId>, includeHand: Boolean = false): ArgentumSearchWorld {
+        val owner = rawPlayer(player)
+        val state = environment.state
+        val hand = if (includeHand) state.getHand(owner) else emptyList()
+        val original = hand + state.getLibrary(owner)
+        require(order.size == original.size && order.toSet() == original.toSet())
+        val assignments = original.zip(order).associate { (slot, source) ->
+            slot to requireNotNull(cardRegistry.getCard(requireNotNull(state.getEntity(source)?.get<CardComponent>()).name))
+        }
+        val coherent = when (val result = com.wingedsheep.engine.hidden.HiddenWorldMaterializer(cardRegistry).materialize(
+            state, com.wingedsheep.engine.hidden.HiddenWorldMaterializationRequest(assignments, state.rng))) {
+            is com.wingedsheep.engine.hidden.HiddenWorldMaterializationResult.Materialized -> result.state
+            is com.wingedsheep.engine.hidden.HiddenWorldMaterializationResult.Unsupported ->
+                error("CHANCE_MATERIALIZATION_${result.reason.kind.name}")
+        }
+        check(coherent.rng == state.rng && coherent.zones == state.zones)
+        val child = environment.fork().also {
+            it.restore(coherent, environment.playerIds, environment.stepCount)
+        }
+        return derivedWorld(child, history.fork())
+    }
+
+    /** Snapshot-only value input: no remembered history or library order enters the pilot V. */
+    fun luckValueInformationForHost(viewer: String): InformationStateRepresentation {
+        val snapshot = derivedWorld(environment.fork(), PerspectiveHistory(environment.playerIds,
+            eventOrder = history.eventOrder, objectReference = history.objectReference))
+        return snapshot.buildInformationState(viewer, PolicyExpansion(emptyList(), true, 0,
+            "luck-snapshot-v1", 0))
+    }
+
     /** Diagnostic derivative of this history, never a new admitted origin or belief proposal. */
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     fun forkSwappingNativeIdsForHost(first: EntityId, second: EntityId): ArgentumSearchWorld {

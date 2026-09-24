@@ -47,32 +47,96 @@ row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
                decks=[deck, deck], setups=100)
 ```
 
-A setup is two games with the same seed and swapped policy/deck seats. New seeds
-come from the operating system; pass `seeds=[...]` with the matching `setups` to
-reproduce a run. Rows keep seeds, config, commit, uncommitted diff, engine pin,
-hashes of model files (settings named `*_model` other than `opponent_model`),
-individual outcomes, and per-game counts of changed decisions. With
-`MTGALLIUM_RESEARCH_BUILD` set, they also keep that build's commit and diff.
+A setup is two games with the same seed and swapped policy/deck seats. Existing
+calls retain their legacy fixed-size behavior and OS-generated seeds. Old rows
+are never rewritten. Opt into shared deals with `seed_pool="development"`;
+sequential calls select this pool automatically unless explicit seeds are given:
 
-At every candidate decision, the incumbent also chooses a move on the same
-history without playing it (a *shadow* choice); the row counts where the two
-differ. Search-based shadows observe accepted moves from game creation. A game
-stopped by a limit has no payoff. On an error the row is still written, marked
-failed, before the call raises. Unfinished and unexecuted games are counted
-separately from wins, losses and draws.
+```python
+row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
+               decks=[deck, deck], sequential="improvement")
+```
 
-The score averages complete setup pairs. The conservative 95% interval uses
-independent setup counts and allows every unfinished game either outcome; the
-additional normal interval is approximate and uses complete pair means. Both are
-per-comparison intervals. Fix the sample size before running, and for final
-claims use a new `phase="confirmation"` call with fresh seeds after development
-comparisons.
+The first pool allocation freezes 8,192 development seeds and 32,768 disjoint
+confirmation seeds from OS randomness in `ladder/seed-pools.json` under the
+evidence root. Development runs start at position zero, so candidates share
+deals. Rows record the pool hash and zero-based positions. `pool_start` selects
+an explicit offset. `seeds=[...]` remains available for reproduction; reproducing
+a confirmation is not a fresh claim. Keep the pools and their ledger together;
+missing or corrupt state fails closed. Allocate from a filesystem with coherent
+POSIX file locking (use the evidence host for shared storage).
 
-Candidates, incumbents and opponents can also be Python `Decision -> Action | int`
-callbacks; give candidate and incumbent callbacks explicit `name` and
-`incumbent_name`. Callable objects are copied per game, so function closures must
-not share mutable policy state. Native games and their shadow comparisons run
-inside the JVM.
+The sequential unit is a complete seat-swapped pair. `sequential="improvement"`
+tests 0 versus +20 Elo; `sequential="non_regression"` tests -10 versus 0 Elo,
+using `1 / (1 + 10**(-elo/400))`. A normal profile GSPRT uses alpha=beta=0.05.
+`max_pairs` caps the comparison. The improvement default is 1,376 pairs (2,752
+games), derived as `ceil(v * (z(.975) + z(.95))**2 / delta**2)` with pair variance
+`v=0.0875`, 95% planning power, and the 20-Elo score difference. Non-regression
+uses the same calculation for its smaller 10-Elo difference. These assumptions
+and any explicit cap are recorded. Each look forecasts the
+probability of crossing either bound within the remaining budget using a
+Brownian approximation with the current drift and variance. Below 10%, it stops
+for futility. The normal model and error targets are approximate.
+
+Improvement outcomes are **BETTER**, **NOT_BETTER**, or **INCONCLUSIVE**;
+non-regression outcomes are **NON_INFERIOR**, **INFERIOR**, or **INCONCLUSIVE**.
+Futility and budget exhaustion are inconclusive. The row retains an interval,
+thresholds, sample count and stopping reason. Effect sizes selected from stopped
+runs are labeled biased upward; their normal intervals are descriptive, not
+confidence sequences. Each opponent has its own test, and the row finishes when
+all tests stop. Workers issue seeds in pool order, and only the contiguous
+completed prefix changes a decision. In-flight games are recorded separately
+and cannot change a stopped result. Unfinished games count as candidate losses
+in the new score and are also counted separately. Errors still fail the row.
+
+For a final claim, use a predeclared **fixed-size** confirmation:
+
+```python
+row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
+               decks=[deck, deck], phase="confirmation",
+               seed_pool="confirmation", claim="predeclared comparison identifier")
+```
+
+Without `setups`, confirmation uses the recorded power calculation for 20 Elo.
+An append-only, locked `ladder/confirmation-reservations.jsonl` ledger consumes a
+never-used block before play. Repeated claims and overlapping blocks are refused,
+even after a failed run. Fix the claim, policies, models and sample size before
+running. Confirmation has no sequential stopping and supplies the unbiased raw
+estimate and ordinary fixed-sample interval.
+
+`luck_correction` enables an **experimental secondary statistic**. It is off by
+default and never feeds a stopping decision. The host JVM combines evaluators on
+each player's own information into a candidate win probability; library order
+is excluded. The pilot compares the public V2 evaluator and optional supplied
+linear weights, retaining model hashes. For eligible single-card draws it
+replays each distinct remaining name, weighted by copies. Opening hands and
+mulligan redraws use independent uniform re-permutations. Other randomness and
+failed counterfactuals are skipped and counted. Event sampling is chosen before
+the outcome. Rows report payoff minus summed luck (beta=1), a beta fitted on the
+opposite setup fold, paired variance ratios with bootstrap intervals, event
+counts and timing. Corrected values are not clipped. Adoption as the headline
+score requires an explicit research decision after the pilot.
+
+For example, `luck_correction={"rate": 0.01, "samples": 8, "models":
+[{"name": "v2"}, {"name": "linear", "model": "model.json", "link": "tanh"}]}`
+samples steps and openings independently at 1% before observing outcomes.
+Retained terms are unweighted: skipped events contribute zero. The default
+enabled rate is 1; measure overhead before choosing a rate for compute runs.
+The pilot V uses current own-perspective snapshots without history features,
+and maps values as `0.5 + (candidate_value - opponent_value) / 4`. Known library
+order is unsupported, and hand smoothing is rejected because its opening
+distribution is not uniform. A deterministic mirror may have zero raw pair
+variance; its paired ratio is then undefined, and the additional game-level
+ratio uses setup-pair cluster resampling.
+
+Rows retain seeds, config, source provenance, model hashes, individual outcomes,
+and changed-decision counts. At every candidate decision the incumbent chooses
+on the same history without playing it (a *shadow* choice); native comparisons
+run inside the JVM. Legacy complete-pair and conservative missing-outcome fields
+remain unchanged. New loss-scored and test fields are additive. Callable
+policies remain supported for ordinary comparisons; the correction pilot uses
+native policies. Give callbacks explicit `name` and `incumbent_name`. Callable
+objects are copied per game, so closures must not share mutable policy state.
 
 ## Cost measurement
 
