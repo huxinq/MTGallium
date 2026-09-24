@@ -21,6 +21,9 @@ remembered facts. Unknown opponent cards and engine RNG state remain in the adap
 Decision views from one captured revision share a lazy epistemic source. Feature
 projection is computed on demand: state features are reused for a captured
 state, while menu normalization and centering are recomputed for the supplied menu.
+`DecisionSiteRequest.semanticReferenceGroups` lazily projects and freezes the
+acting player's visible action-reference relations from that same captured
+revision, for factual encoders used within search or continuation policies.
 
 ## Live selection
 

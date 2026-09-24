@@ -147,7 +147,8 @@ class ArgentumSearchWorld private constructor(
             capturedRevision = StateCache(environment.state, decisionIndex, it)
         }
         val result = DecisionSiteRequest.capture(actor, expanded, { captured.epistemicState(actor) }, effective,
-            PolicyJson.digest(PolicyJson.format.encodeToJsonElement(UnifiedSemanticExpansionSpecification.serializer(), semanticExpansionSpecification())))
+            PolicyJson.digest(PolicyJson.format.encodeToJsonElement(UnifiedSemanticExpansionSpecification.serializer(), semanticExpansionSpecification())),
+            referenceGroups = { captured.project(captured.rawPlayer(actor)).references.visibleSemanticGroups() })
         nativeDecisionCaptures++
         cachedDecisionContexts[effective] = StateCache(environment.state, decisionIndex, result)
         return result

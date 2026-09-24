@@ -10,12 +10,17 @@ class InformationSetSearch(
     private val rolloutPolicy: ActionSelector,
     private val rolloutOpponentPolicy: ActionSelector,
     private val valueSource: LeafValueSource,
+    private val searchPrior: SearchPrior? = null,
 ) {
     private val invokedEvaluatorId: String = valueSource.invokedEvaluatorId
     private val invokedEvaluatorConfigurationId: String =
         valueSource.invokedEvaluatorConfigurationId
 
     init {
+        searchPrior?.let {
+            require(it.configurationId.isNotBlank() && it.candidateLimit >= config.initialExpansionLimit)
+            require(it.explorationConstant.isFinite() && it.explorationConstant >= 0.0)
+        }
         listOf(opponentPolicy, rolloutPolicy, rolloutOpponentPolicy).forEach { policy ->
             require(!policy.requiresPolicyAnnotations || policy.requiresProductionAdmission) {
                 "Policy annotations require production admission"
@@ -132,6 +137,7 @@ class InformationSetSearch(
         requireConformantRoot(rootPlayer, belief)
         // Snapshot the caller's map so one immutable preference set owns the entire search.
         val guidance = rootSelectionGuidance?.copy(scores = rootSelectionGuidance.scores.toMap())
+        require(searchPrior == null || guidance == null) { "PUCT and root UCT guidance are mutually exclusive" }
         guidance?.let {
             require(rootActionSignature == null)
             val representative = belief.particles.first().value
@@ -453,15 +459,38 @@ class InformationSetSearch(
             world,
             DERIVED_BASE or DERIVED_INFORMATION,
         )
-        val node = tree.getOrPut(key) { SearchNode(rootContext, config.initialExpansionLimit) }
+        val node = tree.getOrPut(key) {
+            SearchNode(rootContext, config.initialExpansionLimit).also { node ->
+                searchPrior?.let { prior ->
+                    val probabilities = prior.probabilities(rootContext)
+                    require(probabilities.keys == node.edges.keys)
+                    require(probabilities.values.all { it.isFinite() && it >= 0.0 })
+                    val total = probabilities.values.sum()
+                    require(total.isFinite() && total > 0.0)
+                    val retained = node.edges.values.sortedWith(compareByDescending<SearchEdge> {
+                        probabilities.getValue(it.choice.signature)
+                    }.thenBy { it.choice.signature }).take(config.initialExpansionLimit)
+                    if (retained.size < node.edges.size) {
+                        node.exhaustive = false
+                        node.profileExhaustive = false
+                    }
+                    node.edges.clear()
+                    val retainedTotal = retained.sumOf { probabilities.getValue(it.choice.signature) }
+                    for (edge in retained) {
+                        edge.prior = probabilities.getValue(edge.choice.signature) / retainedTotal
+                        node.edges[edge.choice.signature] = edge
+                    }
+                }
+            }
+        }
         node.requireCompatible(rootContext)
-        if (node.expansionLimit > config.initialExpansionLimit && world is ProgressiveSearchWorld) {
+        if (searchPrior == null && node.expansionLimit > config.initialExpansionLimit && world is ProgressiveSearchWorld) {
             val widened = world.decisionContext(DecisionView(node.expansionLimit))
             node.merge(widened)
         }
         val wideningIndex = config.wideningThresholds.indexOfLast { node.visits >= it }
         // A profile-exhaustive menu is complete for this action space; a higher limit adds nothing.
-        if (wideningIndex >= 0 && !node.profileExhaustive && world is ProgressiveSearchWorld) {
+        if (searchPrior == null && wideningIndex >= 0 && !node.profileExhaustive && world is ProgressiveSearchWorld) {
             val desired = config.wideningLimits[wideningIndex]
             if (desired > node.expansionLimit) {
                 val widened = world.decisionContext(DecisionView(desired))
@@ -746,7 +775,8 @@ class InformationSetSearch(
             var policyInformationUsed = false
             val selected = run {
                 // The outer opponent remains an independently configurable stochastic environment.
-                val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
+                val basePolicy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
+                val policy = (basePolicy as? RolloutPolicySchedule)?.atStep(rolloutDecisions) ?: basePolicy
                 val policyContext = initialPolicyContext(world, policy, workAudit)
                 val decision = policy.select(
                     context = policyContext,
@@ -1052,10 +1082,12 @@ class InformationSetSearch(
     }
 
     private fun initialDecision(world: SearchWorld): DecisionSiteRequest =
-        world.decisionContext(DecisionView(config.initialExpansionLimit))
+        world.decisionContext(DecisionView(searchPrior?.candidateLimit ?: config.initialExpansionLimit,
+            admission = searchPrior?.admission ?: DecisionAdmission.SEMANTIC))
 
     private fun initialExpansion(world: SearchWorld): PolicyExpansion =
-        world.initialPolicyChoices(config.initialExpansionLimit)
+        if (searchPrior == null) world.initialPolicyChoices(config.initialExpansionLimit)
+        else initialDecision(world).expansion
 
     private fun initialPolicyContext(world: SearchWorld, policy: PolicyComponent, workAudit: SearchWorkAudit): DecisionSiteRequest {
         if (world is PolicyAnnotatedSearchWorld && policy.requiresPolicyAnnotations) workAudit.policyAnnotatedExpansions++
@@ -1082,6 +1114,11 @@ class InformationSetSearch(
         guidance: RootSelectionGuidance?,
     ): SearchEdge {
         check(guidance == null || depth == 0)
+        searchPrior?.let { prior ->
+            return node.edges.values.maxWith(compareBy<SearchEdge> {
+                it.meanValue() + prior.explorationConstant * it.prior * sqrt(node.visits + 1.0) / (1.0 + it.visits)
+            }.thenByDescending { it.choice.signature })
+        }
         val unvisited = node.edges.values.filter { it.visits == 0 }
         if (unvisited.isNotEmpty()) {
             if (guidance == null) return unvisited.minBy { edge ->
@@ -1129,6 +1166,7 @@ class InformationSetSearch(
     }
 
     private class SearchEdge(val choice: SemanticChoice) {
+        var prior: Double = 0.0
         var visits: Int = 0
         var valueSum: Double = 0.0
         var settlementCounts: SearchSettlementCounts = SearchSettlementCounts()

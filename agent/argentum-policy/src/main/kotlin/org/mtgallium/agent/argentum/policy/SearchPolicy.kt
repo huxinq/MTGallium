@@ -139,6 +139,7 @@ class SearchPolicySession private constructor(
         ArgentumBeliefProposalAuditSink.NONE,
     private val rootSelectionPolicy: RootSelectionPolicy? = null,
     private val directRootSelectionPolicy: DecisionPolicy? = null,
+    private val searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
     forkedFrom: SearchPolicySession?,
 ) {
     constructor(root: ArgentumSearchWorld, viewer: String, knownDecks: Map<String, Map<String, Int>>,
@@ -148,9 +149,10 @@ class SearchPolicySession private constructor(
         valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
         integration: IntegrationSpecification = IntegrationSpecification(),
         beliefProposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
-        rootSelectionPolicy: RootSelectionPolicy? = null, directRootSelectionPolicy: DecisionPolicy? = null) :
+        rootSelectionPolicy: RootSelectionPolicy? = null, directRootSelectionPolicy: DecisionPolicy? = null,
+        searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null) :
         this(root, viewer, knownDecks, parameters, opponentPolicy, gameId, rolloutPolicy, rolloutOpponentPolicy,
-            valueSource, integration, beliefProposalAuditSink, rootSelectionPolicy, directRootSelectionPolicy, null)
+            valueSource, integration, beliefProposalAuditSink, rootSelectionPolicy, directRootSelectionPolicy, searchPrior, null)
 
     val behaviorSpecification: PolicyBehaviorSpecification =
         PolicyIdentity.specification(
@@ -169,7 +171,8 @@ class SearchPolicySession private constructor(
         }?.name, rootSelectionGuidanceId = rootSelectionPolicy?.let {
             require(it.configurationId.isNotBlank())
             "$ROOT_SELECTION_GUIDANCE_RULE:${it.configurationId}"
-        }, directRootSelectionId = directRootSelectionPolicy?.configurationId?.also { require(it.isNotBlank()) })
+        }, directRootSelectionId = directRootSelectionPolicy?.configurationId?.also { require(it.isNotBlank()) },
+            searchPriorId = searchPrior?.let { "puct-v1:${it.configurationId}:limit=${it.candidateLimit}:admission=${it.admission}:c=${it.explorationConstant}" })
     init {
         require(directRootSelectionPolicy == null || rootSelectionPolicy == null)
         require(forkedFrom == null || behaviorSpecification == forkedFrom.behaviorSpecification)
@@ -189,6 +192,7 @@ class SearchPolicySession private constructor(
         rolloutPolicy = rolloutPolicy,
         rolloutOpponentPolicy = rolloutOpponentPolicy,
         valueSource = valueSource,
+        searchPrior = searchPrior,
     )
     private var acceptedDecisionCount: Int = forkedFrom?.acceptedDecisionCount ?: 0
 
@@ -200,10 +204,14 @@ class SearchPolicySession private constructor(
     fun forkForFactualContinuation(root: ArgentumSearchWorld): SearchPolicySession {
         return SearchPolicySession(root, viewer, knownDecks, parameters, opponentPolicy, gameId,
             rolloutPolicy, rolloutOpponentPolicy, valueSource, integration, beliefProposalAuditSink,
-            rootSelectionPolicy, directRootSelectionPolicy, this)
+            rootSelectionPolicy, directRootSelectionPolicy, searchPrior, this)
     }
 
     val latestBeliefDiagnostics: BeliefDiagnostics get() = belief.latestDiagnostics
+    /** Host admission must include candidates scored by an optional wider search prior. */
+    val decisionView: org.mtgallium.agent.infoset.core.DecisionView
+        get() = org.mtgallium.agent.infoset.core.DecisionView(limit = searchPrior?.candidateLimit,
+            admission = searchPrior?.admission ?: org.mtgallium.agent.infoset.core.DecisionAdmission.SEMANTIC)
     val beliefDiagnosticsHistory: List<BeliefDiagnostics> get() = belief.diagnosticsHistory
     val beliefReconditionings: Int get() = belief.reconditionings
     val beliefParticleDepletions: Int get() = belief.particleDepletions
@@ -233,7 +241,7 @@ class SearchPolicySession private constructor(
         searchSeed: Long,
     ): RootActionSelection {
         require(actor == viewer) { "Policy session for $viewer cannot choose for $actor" }
-        val context = world.decisionContext()
+        val context = world.decisionContext(decisionView)
         val expansion = context.expansion
         return RootActionSelector(parameters.singletonSelection.enabled, directRootSelectionPolicy).select(
             context, searchSeed,

@@ -5,6 +5,23 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
 class DecisionSiteTest {
+    @Test fun `reference groups are lazy and frozen after projection`() {
+        val menu = expansion(listOf(choice("a"), choice("b")))
+        val info = information(menu)
+        val members = mutableListOf("visible-a")
+        var calls = 0
+        val request = DecisionSiteRequest.capture("p0", menu, { EpistemicState.capture(info) },
+            referenceGroups = { calls++; mapOf("group" to members) })
+        assertEquals(0, calls)
+        assertEquals(listOf("visible-a"), request.semanticReferenceGroups.getValue("group"))
+        members += "visible-b"
+        assertEquals(listOf("visible-a"), request.semanticReferenceGroups.getValue("group"))
+        assertEquals(1, calls)
+        assertFailsWith<UnsupportedOperationException> {
+            (request.semanticReferenceGroups.getValue("group") as MutableList<String>).add("illegal")
+        }
+    }
+
     @Test fun `epistemic identity ignores action enumeration while site and information identities distinguish it`() {
         val firstExpansion = expansion(listOf(choice("a"), choice("b")))
         val secondExpansion = expansion(listOf(choice("b"), choice("a")), "another-enumerator")

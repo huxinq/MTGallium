@@ -9,6 +9,61 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 
 class InformationSetSearchTest {
+    @Test fun `PUCT skips low prior first tries and ranks beyond the original cap`() {
+        val seen = mutableListOf<Int>()
+        val prior = object : SearchPrior {
+            override val configurationId = "synthetic-last"
+            override val candidateLimit = 128
+            override val explorationConstant = 2.0
+            override fun probabilities(context: DecisionSiteRequest): Map<String, Double> {
+                assertEquals("p0", context.site().epistemic.perspectivePlayerId)
+                seen += context.expansion.candidates.size
+                return context.expansion.candidates.associate { it.signature to if (it.display.label == "C99") 1.0 else 0.0 }
+            }
+        }
+        val search = InformationSetSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy,
+            UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.SampledWorld("argentum-board-v1"), prior)
+        val result = search.search("p0", batch(listOf(FakeWorld(candidateCount = 100))), 71L)
+        assertEquals("C99", result.chosen.display.label)
+        assertEquals(listOf(100), seen)
+        assertEquals(64, result.candidates.size)
+        assertEquals(8, result.candidates.single { it.choice.display.label == "C99" }.visits)
+        assertEquals(1, result.candidates.count { it.visits > 0 })
+    }
+
+    @Test fun `invalid PUCT priors fail rather than replacing probabilities`() {
+        for (mass in listOf(-1.0, Double.NaN, 0.0)) {
+            val prior = object : SearchPrior {
+                override val configurationId = "invalid"
+                override val candidateLimit = 64
+                override val explorationConstant = 1.0
+                override fun probabilities(context: DecisionSiteRequest) = context.expansion.candidates.associate { it.signature to mass }
+            }
+            val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy,
+                UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.SampledWorld("argentum-board-v1"), prior)
+            assertFailsWith<IllegalArgumentException> { search.search("p0", batch(listOf(FakeWorld())), 1L) }
+        }
+    }
+
+    @Test fun `rollout step resets for each continuation and spans both players`() {
+        val seen = mutableListOf<Int>()
+        val schedule = object : RolloutPolicySchedule {
+            override val id = "step-test"
+            override fun atStep(step: Int): ActionSelector { seen += step; return UniformOpponentPolicy }
+            override fun select(context: DecisionSiteRequest, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision = error("step required")
+        }
+        val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 4,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy,
+            schedule, schedule, LeafValueSource.SampledWorld("argentum-board-v1"))
+        repeat(2) {
+            val child = FakeWorld(depth = 1, terminalAtDepth = 5)
+            search.settleFirstUnvisitedEdge(child, "p0", 71L, it)
+        }
+        assertEquals(listOf(0, 1, 2, 0, 1, 2), seen)
+    }
+
 
     @Test
     fun `leaf scores reject nonfinite values before clipping`() {

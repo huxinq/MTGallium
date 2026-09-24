@@ -14,10 +14,12 @@ fun createSearch(
     rolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
     rolloutOpponentPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
     valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
+    searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
 ): InformationSetSearch = InformationSetSearch(
     config = config,
     opponentPolicy = opponentPolicy,
     rolloutPolicy = rolloutPolicy,
     rolloutOpponentPolicy = rolloutOpponentPolicy,
     valueSource = valueSource,
+    searchPrior = searchPrior,
 )
