@@ -24,6 +24,8 @@ jobs:
           # Only pushes to main publish shared caches; all other runs may restore them.
           cache-read-only: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
       - name: Install tooling prerequisites
-        run: sudo apt-get update && sudo apt-get install -y just nodejs
+        run: sudo apt-get update && sudo apt-get install -y just nodejs npm
+      - name: Install durable runner dependencies
+        run: npm ci --prefix tools/durable-run --ignore-scripts
       - name: Public-source check
         run: just check "$RUNNER_TEMP/mtgallium-private-evidence"

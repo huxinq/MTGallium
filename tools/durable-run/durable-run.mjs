@@ -5,9 +5,12 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url)
+export const WAKE_MECHANISM = 'app-server turn/start (steer or start)'
+export const CODEX_PROXY_HELP = 'Proxy stdio bytes to the running app-server control socket'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}$/
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -39,7 +42,8 @@ Launch options:
   --output <path>        Expected result/artifact location (repeatable)
   --log <path>           Combined command stdout/stderr (default: run state directory)
   --thread <uuid>        Exact Codex thread (default: CODEX_THREAD_ID)
-  --no-wake              Do not queue a completion message to Codex
+  --wake-codex <path>    Codex executable or SSH forwarding script (requires --thread)
+  --no-wake              Do not send a completion message to Codex
   --require-wake         Refuse before launch unless the exact-task wake is available
   --no-notify            Disable external notifications, including saved configuration
   --json                 Print a structured launch receipt
@@ -84,7 +88,7 @@ export function parseLaunchArgs(args) {
       parsed[option.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = true
       continue
     }
-    if (!['--name', '--workdir', '--output', '--log', '--thread', '--env', '--estimated-seconds', '--ntfy-config', '--state-root'].includes(option)) {
+    if (!['--name', '--workdir', '--output', '--log', '--thread', '--wake-codex', '--env', '--estimated-seconds', '--ntfy-config', '--state-root'].includes(option)) {
       throw new Error(`unknown launch option: ${option}`)
     }
     const value = optionValue(options, index, option)
@@ -100,6 +104,9 @@ export function parseLaunchArgs(args) {
     if (!ENV_NAME.test(name)) throw new Error(`invalid environment variable name: ${name}`)
   }
   if (parsed.thread && !UUID.test(parsed.thread)) throw new Error('--thread must be an exact Codex thread UUID')
+  if (parsed.wakeCodex !== undefined && (!parsed.wakeCodex || !parsed.thread)) {
+    throw new Error('--wake-codex requires a nonempty executable and an explicit --thread for its destination')
+  }
   if (parsed.thread && parsed.noWake) throw new Error('--thread and --no-wake cannot be used together')
   if (parsed.requireWake && parsed.noWake) throw new Error('--require-wake and --no-wake cannot be used together')
   if (parsed.estimatedSeconds !== undefined && parsed.estimatedSeconds <= 0) throw new Error('--estimated-seconds must be greater than zero')
@@ -401,14 +408,18 @@ export function loadNtfyConfiguration(explicitPath, environment = process.env) {
   }
 }
 
-function codexQueueSupport(codexPath) {
+function codexWakeSupport(codexPath) {
   if (!codexPath) return { supported: false, reason: 'codex executable was not found at launch' }
-  const checked = spawnSync(codexPath, ['queue', '--help'], { encoding: 'utf8', timeout: 10_000 })
+  // Only completion delivery needs the WebSocket client; other commands run without npm dependencies.
+  try { createRequire(import.meta.url).resolve('ws') } catch {
+    return { supported: false, reason: 'run npm ci --prefix tools/durable-run to install the completion client' }
+  }
+  const checked = spawnSync(codexPath, ['app-server', 'proxy', '--help'], { encoding: 'utf8', timeout: 10_000 })
   const output = `${checked.stdout || ''}\n${checked.stderr || ''}`
-  if (checked.status === 0 && output.includes('Queue a message for an existing session') && output.includes('--thread')) {
+  if (checked.status === 0 && output.includes(CODEX_PROXY_HELP)) {
     return { supported: true }
   }
-  return { supported: false, reason: 'installed codex does not expose the fail-closed queue --thread interface' }
+  return { supported: false, reason: 'installed codex does not expose the app-server proxy interface' }
 }
 
 function capturedEnvironment(names, environment = process.env) {
@@ -495,12 +506,12 @@ function initialStatus(request, completionConfig) {
     },
     wake: {
       configured: Boolean(completionConfig.wake.supported && request.codexThreadId),
-      mechanism: completionConfig.wake.supported ? 'codex queue --thread' : null,
+      executable: completionConfig.wake.codexPath,
+      mechanism: completionConfig.wake.supported ? WAKE_MECHANISM : null,
       targetThreadId: request.codexThreadId,
       state: wakeReason ? 'unavailable' : 'pending',
       reason: wakeReason || null,
       attemptedAt: null,
-      exitCode: null,
     },
   }
 }
@@ -520,10 +531,11 @@ export function prepareRun(parsed, environment = process.env) {
   if (codexThreadId && !UUID.test(codexThreadId)) throw new Error('CODEX_THREAD_ID is not an exact Codex thread UUID')
   const ntfy = parsed.noNotify ? { source: 'disabled by --no-notify' } : loadNtfyConfiguration(parsed.ntfyConfig, environment)
   const curlPath = findExecutable('curl', environment)
-  const codexPath = findExecutable('codex', environment)
-  const queueSupport = parsed.noWake ? { supported: false, reason: 'disabled by --no-wake' } : codexQueueSupport(codexPath)
-  if (parsed.requireWake && (!codexThreadId || !queueSupport.supported)) {
-    throw new Error(`Required completion wake unavailable: ${!codexThreadId ? 'supply --thread or CODEX_THREAD_ID' : queueSupport.reason}`)
+  const codexPath = findExecutable(parsed.wakeCodex ?? 'codex', environment)
+  const wakeSupport = parsed.noWake ? { supported: false, reason: 'disabled by --no-wake' }
+    : (!codexThreadId ? { supported: false, reason: 'no Codex thread' } : codexWakeSupport(codexPath))
+  if (parsed.requireWake && (!codexThreadId || !wakeSupport.supported)) {
+    throw new Error(`Required completion wake unavailable: ${!codexThreadId ? 'supply --thread or CODEX_THREAD_ID' : wakeSupport.reason}`)
   }
   const createdAt = now()
   const request = {
@@ -535,6 +547,7 @@ export function prepareRun(parsed, environment = process.env) {
     runDirectory,
     stateRoot,
     workingDirectory,
+    executionHost: os.hostname(),
     command: { argv: parsed.command },
     environment: environmentValues,
     logPath,
@@ -550,8 +563,8 @@ export function prepareRun(parsed, environment = process.env) {
     ntfy: { url: ntfy.url || null, token: ntfy.token || null, curlPath: curlPath || null },
     wake: {
       requested: !parsed.noWake,
-      supported: queueSupport.supported,
-      reason: queueSupport.reason || null,
+      supported: wakeSupport.supported,
+      reason: wakeSupport.reason || null,
       codexPath: codexPath || null,
     },
   }
@@ -914,14 +927,21 @@ function attemptHumanNotification(request, status, ntfy, kind) {
   }
 }
 
-function wakeCodex(request, status, wake) {
-  const message = `Detached MTGallium run "${request.name}" (${request.runId}) finished with exit ${status.experiment.exitCode}. Continue the original task. Inspect ${path.join(request.runDirectory, 'status.json')}, ${request.logPath}, and the recorded output locations; do not rerun the expensive command unless those outputs are invalid.`
-  const queued = spawnSync(wake.codexPath, [
-    'queue', '--thread', request.codexThreadId, '--message', message,
-  ], { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024 })
+async function wakeCodex(request, status, wake) {
+  const message = `Detached MTGallium run "${request.name}" (${request.runId}) finished with exit ${status.experiment.exitCode} on ${request.executionHost || os.hostname()}. Continue the original task. Inspect ${path.join(request.runDirectory, 'status.json')}, ${request.logPath}, and the recorded output locations on that execution host (use SSH if needed); do not rerun the expensive command unless those outputs are invalid.`
+  const { sendCompletion, NOT_STEERABLE } = await import('./codex-wake.mjs')
+  try {
+    await sendCompletion(wake.codexPath, request.codexThreadId, message)
+    return { state: 'succeeded', error: null }
+  } catch (error) {
+    if (error.code !== NOT_STEERABLE) throw error
+  }
+  // A compact or review turn cannot be steered; queue the message for after it instead.
+  const queued = spawnSync(wake.codexPath, ['queue', '--thread', request.codexThreadId, '--message', message],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024 })
   return {
     state: queued.status === 0 ? 'succeeded' : 'failed',
-    exitCode: queued.status,
+    fallback: 'codex queue --thread',
     error: queued.status === 0 ? null : redact(queued.stderr || queued.error?.message || 'codex queue failed', []),
   }
 }
@@ -965,9 +985,9 @@ export async function executeRun(runDirectory) {
     }))
     let outcome
     try {
-      outcome = wakeCodex(request, status, completionConfig.wake)
+      outcome = await wakeCodex(request, status, completionConfig.wake)
     } catch (error) {
-      outcome = { state: 'failed', exitCode: null, error: redact(error, []) }
+      outcome = { state: 'failed', error: redact(error, []) }
     }
     status = updateStatus(runDirectory, (current) => ({
       ...current,
@@ -1027,6 +1047,7 @@ function inspection(stateRoot, runId) {
     ...status,
     runDirectory,
     workingDirectory: request.workingDirectory,
+    executionHost: request.executionHost ?? null,
     command: request.command,
     capturedEnvironmentNames: Object.keys(request.environment),
     logPath: request.logPath,

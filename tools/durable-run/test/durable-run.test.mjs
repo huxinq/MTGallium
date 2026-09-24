@@ -5,8 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { fakeCodex, readCodexCalls } from './fake-codex.mjs'
 import {
   DEFAULT_PROGRESS_POLICY,
+  WAKE_MECHANISM,
   atomicWriteJson,
   deriveRunnerEta,
   parseEnvironmentFile,
@@ -111,12 +113,11 @@ function fixture(command, options = {}) {
     },
     wake: {
       configured: Boolean(options.thread && completionConfig.wake.supported),
-      mechanism: completionConfig.wake.supported ? 'codex queue --thread' : null,
+      mechanism: completionConfig.wake.supported ? WAKE_MECHANISM : null,
       targetThreadId: options.thread || null,
       state: options.thread && completionConfig.wake.supported ? 'pending' : 'unavailable',
       reason: options.thread && completionConfig.wake.supported ? null : 'unconfigured for test',
       attemptedAt: null,
-      exitCode: null,
     },
   }
   atomicWriteJson(path.join(runDirectory, 'request.json'), request)
@@ -266,12 +267,12 @@ test('an unspawnable command is recorded as exit 127', () => {
 test('compute failure remains the service exit when notification fails and exact-thread wake succeeds', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-durable-run-routing-'))
   const recordedArgs = path.join(root, 'codex-args.txt')
-  const fakeCodex = path.join(root, 'codex')
-  fs.writeFileSync(fakeCodex, `#!/bin/sh\nprintf '%s\\n' "$@" > "${recordedArgs}"\n`, { mode: 0o700 })
+  const codexPath = path.join(root, 'codex')
+  fakeCodex(codexPath, recordedArgs)
   const { runDirectory } = fixture(['/bin/sh', '-c', 'exit 23'], {
     thread: THREAD,
     ntfy: { url: 'https://example.invalid/private', token: 'private-token', curlPath: '/usr/bin/false' },
-    wake: { requested: true, supported: true, reason: null, codexPath: fakeCodex },
+    wake: { requested: true, supported: true, reason: null, codexPath },
   })
   const executed = spawnSync(process.execPath, [SCRIPT, '_execute', '--run-dir', runDirectory], { encoding: 'utf8' })
   assert.equal(executed.status, 23, executed.stderr)
@@ -279,7 +280,34 @@ test('compute failure remains the service exit when notification fails and exact
   assert.equal(status.experiment.exitCode, 23)
   assert.equal(status.notification.state, 'failed')
   assert.equal(status.wake.state, 'succeeded')
-  assert.deepEqual(fs.readFileSync(recordedArgs, 'utf8').trim().split('\n').slice(0, 3), ['queue', '--thread', THREAD])
+  const calls = readCodexCalls(recordedArgs)
+  assert.deepEqual(calls[0], ['app-server', 'proxy'])
+  const start = calls.find(call => call.method === 'turn/start')
+  assert.equal(start.params.threadId, THREAD)
+  assert.match(start.params.input[0].text, /finished with exit 23/)
+  assert.equal(calls.filter(call => call.method === 'turn/start').length, 1)
+})
+
+test('an unsteerable active turn falls back to queueing the completion for the exact thread', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-durable-run-queue-'))
+  const record = path.join(root, 'codex-calls.txt')
+  const codexPath = path.join(root, 'codex')
+  fakeCodex(codexPath, record, 'unsteerable')
+  const { runDirectory } = fixture(['/bin/true'], {
+    thread: THREAD,
+    wake: { requested: true, supported: true, reason: null, codexPath },
+  })
+  const executed = spawnSync(process.execPath, [SCRIPT, '_execute', '--run-dir', runDirectory], { encoding: 'utf8' })
+  assert.equal(executed.status, 0, executed.stderr)
+  const status = JSON.parse(fs.readFileSync(path.join(runDirectory, 'status.json'), 'utf8'))
+  assert.equal(status.wake.state, 'succeeded')
+  assert.equal(status.wake.fallback, 'codex queue --thread')
+  const calls = readCodexCalls(record)
+  assert.equal(calls.filter(call => call.method === 'turn/start').length, 1)
+  const queued = calls.filter(call => call[0] === 'queue')
+  assert.equal(queued.length, 1)
+  assert.deepEqual(queued[0].slice(0, 4), ['queue', '--thread', THREAD, '--message'])
+  assert.match(queued[0][4], /finished with exit 0/)
 })
 
 test('configured ntfy can succeed while a wake failure remains independent of successful compute', () => {
@@ -319,12 +347,12 @@ test('configured ntfy can succeed while a wake failure remains independent of su
 test('structured progress is observed, malformed and stale updates are isolated, and only terminal wakes Codex', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-durable-run-progress-'))
   const codexCalls = path.join(root, 'codex-calls.txt')
-  const fakeCodex = path.join(root, 'codex')
-  fs.writeFileSync(fakeCodex, `#!/bin/sh\nprintf 'call\\n' >> "${codexCalls}"\nprintf '%s\\n' "$@" >> "${codexCalls}"\n`, { mode: 0o700 })
+  const codexPath = path.join(root, 'codex')
+  fakeCodex(codexPath, codexCalls)
   const { runDirectory } = fixture([process.execPath, PROGRESS_CANARY, '40', '--await-observation'], {
     thread: THREAD,
     ntfy: { url: 'https://example.invalid/private', token: null, curlPath: '/usr/bin/false' },
-    wake: { requested: true, supported: true, reason: null, codexPath: fakeCodex },
+    wake: { requested: true, supported: true, reason: null, codexPath },
     progressPolicy: {
       pollIntervalMs: 10,
       minimumNotificationIntervalMs: 0,
@@ -340,9 +368,11 @@ test('structured progress is observed, malformed and stale updates are isolated,
   assert.equal(status.progress.eta.source, 'runner')
   assert.ok(status.notification.progress.failedCount >= 1)
   assert.equal(status.wake.state, 'succeeded')
-  const wakeCalls = fs.readFileSync(codexCalls, 'utf8')
-  assert.equal(wakeCalls.match(/^call$/gm).length, 1)
-  assert.deepEqual(wakeCalls.trim().split('\n').slice(1, 4), ['queue', '--thread', THREAD])
+  const calls = readCodexCalls(codexCalls)
+  assert.deepEqual(calls[0], ['app-server', 'proxy'])
+  const starts = calls.filter(call => call.method === 'turn/start')
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].params.threadId, THREAD)
 })
 
 test('malformed and stale progress never change compute success', () => {

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Run a command on linuxbox from a snapshot of this working tree.
+# Usage: tools/remote <name> -- <command...>
+#        tools/remote status|logs <run-id>
+set -euo pipefail
+host=${MTG_REMOTE_HOST:-linuxbox}
+runner='python3 tools/mtgallium-research durable'
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+case "${1:-}" in
+  status|logs)
+    [[ $# -eq 2 ]] || { echo "usage: $0 $1 <run-id>" >&2; exit 2; }
+    extra=; [[ $1 == logs ]] && extra='--lines 40'
+    ssh "$host" "cd mtg-runs/$2/src && $runner $1 $extra \$(cat ../runner-id)" ; exit ;;
+  ''|-h|--help) sed -n '2,4p' "$0"; exit 2 ;;
+esac
+
+name=$1; shift
+[[ ${1:-} == -- ]] || { echo "usage: $0 <name> -- <command...>" >&2; exit 2; }
+shift; [[ $# -gt 0 ]] || { echo "missing command" >&2; exit 2; }
+[[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "name: letters, digits, . _ - only" >&2; exit 2; }
+
+id=$(date +%Y%m%d-%H%M%S)-$name
+dir=mtg-runs/$id
+cd "$here"
+pin=$(git rev-parse HEAD:third_party/argentum-engine)
+engine=mtg-runs/.argentum-$pin   # one shared copy per engine pin; incremental after the first
+ssh "$host" "mkdir -p $dir/src/third_party $engine"
+# Worktrees lack the submodule checkout; take the engine from the main checkout at the pin.
+main=$(cd "$(git rev-parse --git-common-dir)/.." && pwd)
+src_engine=$main/third_party/argentum-engine
+[[ -f $src_engine/settings.gradle.kts && $(git -C "$src_engine" rev-parse HEAD) == "$pin" ]] || {
+  echo "engine at $src_engine is missing or not at pin $pin" >&2; exit 1; }
+rsync -a --delete --exclude build --exclude .gradle --exclude node_modules \
+  "$src_engine/" "$host:$engine/"
+rsync -a --exclude .git --exclude node_modules --exclude build --exclude .gradle --exclude __pycache__ \
+  --exclude /third_party/argentum-engine ./ "$host:$dir/src/"
+ssh "$host" "ln -sfn ~/$engine $dir/src/third_party/argentum-engine"
+# Worktrees lack the ignored node_modules; install once per lockfile and link it.
+lock=$(git hash-object tools/durable-run/package-lock.json)
+ssh "$host" "set -e; n=mtg-runs/.node-$lock; if [ ! -d \$n/node_modules ]; then mkdir -p \$n && \
+  cp $dir/src/tools/durable-run/package*.json \$n/ && npm ci --prefix \$n --silent; fi; \
+  rm -rf $dir/src/tools/durable-run/node_modules; ln -s ~/\$n/node_modules $dir/src/tools/durable-run/node_modules"
+# Snapshots carry no .git; record provenance here (engine head from the checked main engine).
+python3 - "$(git rev-parse HEAD)" "$(git -C "$src_engine" rev-parse HEAD)" "$pin" \
+  3< <(git diff HEAD --binary) 4< <(git status --porcelain=v1) <<'PY' | ssh "$host" "cat > $dir/source.json"
+import json, os, sys  # same fields as research_workspace.ladder.source_provenance
+read = lambda fd: os.fdopen(fd).read().rstrip('\n')
+print(json.dumps({'commit': sys.argv[1], 'diff': read(3), 'status': read(4),
+                  'engine_head': sys.argv[2], 'engine_pin': sys.argv[3]}))
+PY
+
+cmd=$(printf '%q ' "$@")
+ssh "$host" "cd $dir/src && export MTG_SOURCE_JSON=\$HOME/$dir/source.json TMPDIR=\$HOME/.cache/mtg-tmp && mkdir -p \$TMPDIR && \
+  $runner launch --name $id --env MTG_SOURCE_JSON --env TMPDIR --no-wake --no-notify --json -- bash -c $(printf %q "$cmd") \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"runId\"])' > ../runner-id"
+echo "run: $id   (tools/remote status $id | tools/remote logs $id)"

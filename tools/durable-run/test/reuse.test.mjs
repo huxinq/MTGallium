@@ -5,7 +5,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseLaunchArgs, prepareRun, privateOperationalPath, submitRun } from '../durable-run.mjs'
+import { executeRun, parseLaunchArgs, prepareRun, privateOperationalPath, submitRun } from '../durable-run.mjs'
+import { fakeCodex, readCodexCalls } from './fake-codex.mjs'
 
 const SCRIPT = fileURLToPath(new URL('../durable-run.mjs', import.meta.url))
 const THREAD = '12345678-1234-4234-9234-123456789abc'
@@ -58,11 +59,53 @@ test('task-only launch ignores ntfy config and captures public evidence environm
   assert.equal(fs.statSync(path.join(request.runDirectory, 'request.json')).mode & 0o777, 0o600)
 })
 
+for (const behavior of ['success', 'unsteerable']) {
+  test(`explicit wake executable owns delivery and queue fallback: ${behavior}`, async t => {
+    const root = temporary(t)
+    const localCalls = path.join(root, 'local-calls')
+    const remoteCalls = path.join(root, 'remote-calls')
+    const remote = path.join(root, 'remote codex')
+    fakeCodex(path.join(root, 'codex'), localCalls)
+    fakeCodex(remote, remoteCalls, behavior)
+    const options = ['--name', 'remote result ; $(literal)', '--workdir', root,
+      '--state-root', path.join(root, 'state'), '--wake-codex', remote,
+      '--thread', THREAD, '--require-wake', '--no-notify', '--', '/bin/true']
+    const { request } = prepareRun(parseLaunchArgs(options), {
+      PATH: root, CODEX_THREAD_ID: '87654321-4321-4321-8321-cba987654321',
+    })
+    assert.equal(await executeRun(request.runDirectory), 0)
+    const status = JSON.parse(fs.readFileSync(path.join(request.runDirectory, 'status.json'), 'utf8'))
+    assert.equal(status.wake.state, 'succeeded')
+    assert.equal(status.wake.executable, remote)
+    assert.equal(fs.existsSync(localCalls), false)
+    const calls = readCodexCalls(remoteCalls)
+    assert.deepEqual(calls.find(call => call.method === 'thread/resume').params,
+      { threadId: THREAD, excludeTurns: true })
+    const message = calls.find(call => call.method === 'turn/start').params.input[0].text
+    assert.ok(message.includes(request.executionHost))
+    assert.match(message, /use SSH if needed/)
+    if (behavior === 'unsteerable') assert.deepEqual(calls.at(-1), ['queue', '--thread', THREAD, '--message', message])
+  })
+}
+
+test('an explicit wake executable requires its own task and never falls back to local Codex', t => {
+  const root = temporary(t)
+  fakeCodex(path.join(root, 'codex'), path.join(root, 'calls'))
+  const options = ['--name', 'wrong host', '--workdir', root,
+    '--state-root', path.join(root, 'state'), '--wake-codex', path.join(root, 'missing'),
+    '--require-wake', '--no-notify']
+  assert.throws(() => parseLaunchArgs([...options, '--', '/bin/true']), /explicit --thread/)
+  assert.throws(() => prepareRun(parseLaunchArgs([...options, '--thread', THREAD, '--', '/bin/true']),
+    { PATH: root }), /Required completion wake unavailable/)
+  assert.equal(fs.existsSync(path.join(root, 'state')), false)
+  assert.equal(fs.existsSync(path.join(root, 'calls')), false)
+})
+
 test('JSON launch preserves argv and configures the checked exact-task wake', t => {
   const root = temporary(t)
   const bin = path.join(root, 'bin')
   fs.mkdirSync(bin)
-  fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\nprintf "Queue a message for an existing session --thread\\n"\n', { mode: 0o700 })
+  fakeCodex(path.join(bin, 'codex'), path.join(root, 'codex-calls'))
   fs.writeFileSync(path.join(bin, 'systemd-run'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
   const command = ['/bin/echo', 'spaces ; $(literal)']
   const result = spawnSync(process.execPath, [SCRIPT, 'launch', '--name', 'receipt',
