@@ -173,7 +173,7 @@ class PythonGame internal constructor(
 
     /** Shadow choices consume the candidate's actual history but are never applied. */
     fun compare(candidateSeat: String, incumbent: String, maximumDecisions: Int?, maximumSeconds: Double?,
-        luckCorrection: LuckCorrectionConfig? = null): JsonObject {
+        luckCorrection: LuckCorrectionConfig? = null, choiceSeed: Long? = null): JsonObject {
         require(luckCorrection == null || maximumSeconds == null) {
             "Luck correction does not support maximumSeconds; use a decision limit"
         }
@@ -196,8 +196,11 @@ class PythonGame internal constructor(
             if (expected.signature != selected.signature) changed++
             selected
         }
-        val result = playGame(world, compared, plan.seed, maximumDecisions, maximumSeconds, luckCorrection = luck)
+        // Direct policy choices can use an independent stream without changing the deal.
+        // Search sessions retain their own configured seeds; this is not a search-seed override.
+        val result = playGame(world, compared, choiceSeed ?: plan.seed, maximumDecisions, maximumSeconds, luckCorrection = luck)
         return buildJsonObject {
+            if (choiceSeed != null) put("choiceSeed", choiceSeed)
             put("result", researchJson.encodeToJsonElement(result))
             if (luck != null) put("luck", luck.result(result.payoffs))
             put("candidateDecisions", decisions)
@@ -287,7 +290,8 @@ class PythonResearchConnection {
                 request.getValue("incumbent").jsonPrimitive.content,
                 request["maximumDecisions"]?.jsonPrimitive?.intOrNull,
                 request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull,
-                request["luckCorrection"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement<LuckCorrectionConfig>(it) })
+                request["luckCorrection"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement<LuckCorrectionConfig>(it) },
+                request["choiceSeed"]?.jsonPrimitive?.longOrNull)
             "information" -> researchJson.encodeToJsonElement(game().world.informationState(request.getValue("player").jsonPrimitive.content))
             "value-features" -> {
                 val world = game().world

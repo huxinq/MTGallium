@@ -42,6 +42,31 @@ data class LuckEvent(val index: Int, val kind: String, val player: String?, val 
 class LuckCorrection(private val config: LuckCorrectionConfig, private val candidate: String) {
     val events = mutableListOf<LuckEvent>()
     var nanos: Long = 0; private set
+    private enum class Category(val key: String) {
+        STEP("counterfactualStep"), FORK("materializationFork"),
+        INFORMATION("informationStateMenu"), VALUE("valueEvaluators")
+    }
+    private val categoryNanos = LongArray(Category.entries.size)
+
+    /**
+     * Additive wall-clock nanoseconds within before/opening/after, also emitted in result().
+     * Categories are exclusive call-site timings: step includes engine-internal projections;
+     * fork includes materialization but not permutation preparation; information includes both
+     * own-value snapshots/menus and pre-draw eligibility informationState calls; value includes
+     * evaluator feature extraction. Other is the residual (bookkeeping, checks, timing overhead).
+     * Failed/skipped work is included. Construction and result serialization are outside nanos.
+     * Read between hook calls on the owning thread; all five entries sum exactly to nanos.
+     */
+    val nanosByCategory: Map<String, Long>
+        get() = Category.entries.associate { it.key to categoryNanos[it.ordinal] } +
+            ("other" to (nanos - categoryNanos.sum()))
+
+    // Keep these scopes disjoint: engine-internal work belongs to the enclosing call category.
+    private inline fun <T> measured(category: Category, block: () -> T): T {
+        val start = System.nanoTime()
+        try { return block() } finally { categoryNanos[category.ordinal] += System.nanoTime() - start }
+    }
+
     private val sums = config.models.associate { it.name to 0.0 }.toMutableMap()
     private var calls = 0
     private var selected = 0
@@ -60,7 +85,7 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
         calls++
         if (sample(world.acceptedDecisionCountForHost, "step")) {
             selected++
-            world.fork() as ArgentumSearchWorld
+            measured(Category.FORK) { world.fork() as ArgentumSearchWorld }
         } else null
     }
 
@@ -70,15 +95,17 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
         val other = seats.single { it != candidate }
         val terminal = world.terminalPayoff(candidate)
         if (terminal != null) return config.models.associate { it.name to ((terminal + 1) / 2) }
-        val own = world.luckValueInformationForHost(candidate)
-        val opponent = world.luckValueInformationForHost(other)
+        val own = measured(Category.INFORMATION) { world.luckValueInformationForHost(candidate) }
+        val opponent = measured(Category.INFORMATION) { world.luckValueInformationForHost(other) }
         // This pilot excludes library-position inputs, including publicly revealed library cards.
         require(listOf(own, opponent).all { information ->
             information.knowledge.knownLibraryOrders.all { it.top.isEmpty() && it.bottom.isEmpty() } &&
                 information.observation.zones.filter { it.zone == "LIBRARY" }.all { it.cards.isEmpty() }
         }) { "LIBRARY_INFORMATION" }
         return evaluators.mapValues { (_, evaluator) ->
-            (0.5 + (evaluator.evaluate(own, candidate) - evaluator.evaluate(opponent, other)) / 4).also {
+            val ownValue = measured(Category.VALUE) { evaluator.evaluate(own, candidate) }
+            val opponentValue = measured(Category.VALUE) { evaluator.evaluate(opponent, other) }
+            (0.5 + (ownValue - opponentValue) / 4).also {
                 require(it.isFinite())
             }
         }
@@ -106,8 +133,9 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
                     compareBy({ state.getEntity(it)?.get<CardComponent>()?.name }, { it.toString() }))
                 repeat(config.samples) { k ->
                     // Always start from the factual world: the other seat stays conditioned on its actual hand.
-                    val child = world.forkPermutingChanceForHost(seat, pool.shuffled(Random(
-                        ComponentSeeds.derive(config.seed, "luck-opening", k.toString(), seat))), true)
+                    val order = pool.shuffled(Random(
+                        ComponentSeeds.derive(config.seed, "luck-opening", k.toString(), seat)))
+                    val child = measured(Category.FORK) { world.forkPermutingChanceForHost(seat, order, true) }
                     values(child).forEach { (name, value) -> mean[name] = mean.getValue(name) + value / config.samples }
                 }
                 retain(-1, "opening", seat, actual, mean, config.samples)
@@ -135,9 +163,10 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
                 val pool = (state.getHand(owner) + state.getLibrary(owner)).sortedWith(compareBy({ state.getEntity(it)?.get<CardComponent>()?.name }, { it.toString() }))
                 val mean = sums.mapValues { 0.0 }.toMutableMap()
                 repeat(config.samples) { k ->
-                    val child = before.forkPermutingChanceForHost(actor, pool.shuffled(Random(
-                        ComponentSeeds.derive(config.seed, "luck-mulligan", index.toString(), k.toString()))), true)
-                    val replay = child.stepWithReplayTrace(choice)
+                    val order = pool.shuffled(Random(
+                        ComponentSeeds.derive(config.seed, "luck-mulligan", index.toString(), k.toString())))
+                    val child = measured(Category.FORK) { before.forkPermutingChanceForHost(actor, order, true) }
+                    val replay = measured(Category.STEP) { child.stepWithReplayTrace(choice) }
                     require(replay.result.accepted) { "REPLAY_REJECTED" }
                     require(drawShape(replay) == drawShape(trace)) { "DIFFERENT_DRAWS" }
                     values(child).forEach { (name, value) -> mean[name] = mean.getValue(name) + value / config.samples }
@@ -157,7 +186,7 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
             require(library.isNotEmpty() && draw.cardIds.single() == library.first()) { "NOT_PRESTEP_TOP_DRAW" }
             // Known top/bottom conditioning needs its own chance kernel; never assume it uniform.
             require(before.luckPlayerIdsForHost().keys.all { viewer ->
-                before.informationState(viewer).knowledge.knownLibraryOrders.all {
+                measured(Category.INFORMATION) { before.informationState(viewer) }.knowledge.knownLibraryOrders.all {
                     it.playerId != seat || (it.top.isEmpty() && it.bottom.isEmpty())
                 }
             }) { "KNOWN_LIBRARY_ORDER" }
@@ -167,8 +196,8 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
                 val order = library.toMutableList()
                 val position = order.indexOf(ids.first())
                 order[position] = order[0]; order[0] = ids.first()
-                val child = before.forkPermutingChanceForHost(seat, order)
-                val replay = child.stepWithReplayTrace(choice)
+                val child = measured(Category.FORK) { before.forkPermutingChanceForHost(seat, order) }
+                val replay = measured(Category.STEP) { child.stepWithReplayTrace(choice) }
                 require(replay.result.accepted) { "REPLAY_REJECTED" }
                 require(drawShape(replay) == drawShape(trace)) { "DIFFERENT_DRAWS" }
                 val alternate = replay.rawTransitions.flatMap { it.events }.filterIsInstance<CardsDrawnEvent>().single()
@@ -228,6 +257,9 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
         put("opening", JsonPrimitive(config.opening))
         put("candidate", JsonPrimitive(candidate))
         put("nanos", JsonPrimitive(nanos))
+        put("nanosByCategory", buildJsonObject {
+            nanosByCategory.forEach { (category, elapsed) -> put(category, JsonPrimitive(elapsed)) }
+        })
         put("steps", JsonPrimitive(calls))
         put("selectedSteps", JsonPrimitive(selected))
         put("events", researchJson.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(LuckEvent.serializer()), events))

@@ -35,8 +35,18 @@ def _interval(values):
     return [mean-radius, mean+radius]
 
 
+def _percentile_interval(values):
+    samples = sorted(values)
+    return ([samples[int(.025*(len(samples)-1))],
+             samples[int(.975*(len(samples)-1))]] if samples else None)
+
+
 def summarize_luck(games, *, bootstrap=1000, seed=1701):
-    """Cross-fit on opposite even/odd setup folds, never on an individual game.
+    """Cross-fit on opposite even/odd setup folds, keeping both seats together.
+
+    The legacy fit minimizes pair variance; cross_fitted_game fits training
+    games to minimize game variance. Pair terms are averages unless explicitly
+    named sums. Event variances use retained weightedLuck values only.
 
     Bootstrap resamples pairs within folds and refits beta each time. Intervals
     are exploratory percentile intervals, not sequential decision inputs.
@@ -53,7 +63,10 @@ def summarize_luck(games, *, bootstrap=1000, seed=1701):
     names = sorted(set.intersection(*(set(game['luck']['models']) for pair in pairs for game in pair)))
     result = {'status': 'pilot_only', 'decision_input': False, 'pairs': len(pairs),
               'raw_mean': statistics.mean(raw), 'raw_normal_95': _interval(raw),
-              'raw_pair_variance': _variance(raw), 'models': {},
+              'raw_pair_variance': _variance(raw),
+              'raw_game_variance': _variance([game['payoff'] if game['payoff'] is not None else 0
+                                              for pair in pairs for game in pair]),
+              'models': {},
               'beta_zero_variance_threshold': 1e-24,
               'bootstrap': {'unit': 'setup pair, stratified by cross-fit fold', 'replicates': bootstrap, 'seed': seed}}
     for name in names:
@@ -64,23 +77,56 @@ def summarize_luck(games, *, bootstrap=1000, seed=1701):
         crossfit, betas = _crossfit(raw, luck, folds)
         ratios = {'beta_one': [], 'cross_fitted': []}
         game_ratios = []
+        means = {'beta_one': [], 'cross_fitted': [], 'cross_fitted_game': []}
+        fitted_game_ratios, fitted_pair_ratios = [], []
+        gx = [v for pair in game_raw for v in pair]
+        gy = [v for pair in game_luck for v in pair]
+        gf = [fold for fold in folds for _ in range(2)]
+        game_crossfit, game_betas = _crossfit(gx, gy, gf)
+        game_pair_crossfit = [statistics.mean(game_crossfit[i:i+2])
+                              for i in range(0, len(game_crossfit), 2)]
         generator = random.Random(seed)
         indices = [[i for i, f in enumerate(folds) if f == fold] for fold in (0, 1)]
         for _ in range(bootstrap):
             sample = [generator.choice(group) for group in indices for _ in group]
             x, y, f = ([values[i] for i in sample] for values in (raw, luck, folds))
+            fitted, _ = _crossfit(x, y, f)
+            means['beta_one'].append(statistics.mean([a-b for a, b in zip(x, y)]))
+            means['cross_fitted'].append(statistics.mean(fitted))
             variance = _variance(x)
             if variance:
                 ratios['beta_one'].append(_variance([a-b for a, b in zip(x, y)])/variance)
-                ratios['cross_fitted'].append(_variance(_crossfit(x, y, f)[0])/variance)
+                ratios['cross_fitted'].append(_variance(fitted)/variance)
             gx = [v for i in sample for v in game_raw[i]]
             gy = [v for i in sample for v in game_luck[i]]
+            gf = [fold for fold in f for _ in range(2)]
+            fitted_games, _ = _crossfit(gx, gy, gf)
+            means['cross_fitted_game'].append(statistics.mean(fitted_games))
+            if variance:
+                fitted_pairs = [statistics.mean(fitted_games[i:i+2])
+                                for i in range(0, len(fitted_games), 2)]
+                fitted_pair_ratios.append(_variance(fitted_pairs)/variance)
             if _variance(gx):
+                fitted_game_ratios.append(_variance(fitted_games)/_variance(gx))
                 game_ratios.append(_variance([a-b for a, b in zip(gx, gy)])/_variance(gx))
         model = {'luck_pair_mean': statistics.mean(luck), 'luck_pair_normal_95': _interval(luck),
                  'cross_fit_betas': betas, 'events': {}}
         gx = [v for pair in game_raw for v in pair]
         gy = [v for pair in game_luck for v in pair]
+        model['luck_game_variance'] = _variance(gy)
+        model['luck_pair_variance'] = _variance(luck)
+        model['cross_fitted_game'] = {
+            'cross_fit_betas': game_betas,
+            'mean': statistics.mean(game_crossfit),
+            'normal_95': _interval(game_pair_crossfit),
+            'mean_bootstrap_95': _percentile_interval(means['cross_fitted_game']),
+            'game_variance': _variance(game_crossfit),
+            'pair_variance': _variance(game_pair_crossfit),
+            'game_variance_ratio': _variance(game_crossfit)/_variance(gx) if _variance(gx) else None,
+            'pair_variance_ratio': _variance(game_pair_crossfit)/_variance(raw) if _variance(raw) else None,
+            'game_variance_ratio_bootstrap_95': _percentile_interval(fitted_game_ratios),
+            'pair_variance_ratio_bootstrap_95': _percentile_interval(fitted_pair_ratios),
+        }
         samples = sorted(game_ratios)
         model['beta_one_game_variance_ratio'] = {
             'ratio': _variance([a-b for a, b in zip(gx, gy)])/_variance(gx) if _variance(gx) else None,
@@ -90,16 +136,22 @@ def summarize_luck(games, *, bootstrap=1000, seed=1701):
             samples = sorted(ratios[key])
             model[key] = {'mean': statistics.mean(values), 'normal_95': _interval(values),
                           'pair_variance': _variance(values),
+                          'mean_bootstrap_95': _percentile_interval(means[key]),
                           'variance_ratio': _variance(values)/_variance(raw) if _variance(raw) else None,
                           'variance_ratio_bootstrap_95': [samples[int(.025*(len(samples)-1))],
                                                           samples[int(.975*(len(samples)-1))]] if samples else None}
         kinds = sorted({event['kind'] for pair in pairs for game in pair for event in game['luck']['events']})
         for kind in kinds:
             pair_sums, counts, statuses = [], [], Counter()
+            individual_values, game_sums = [], []
             for pair in pairs:
                 events = [event for game in pair for event in game['luck']['events'] if event['kind'] == kind]
                 statuses.update(event['status'] for event in events)
                 retained = [event for event in events if event['status'] == 'retained']
+                individual_values.extend(event['weightedLuck'][name] for event in retained)
+                game_sums.extend(sum(event['weightedLuck'][name] for event in game['luck']['events']
+                                     if event['kind'] == kind and event['status'] == 'retained')
+                                 for game in pair)
                 pair_sums.append(sum(event['weightedLuck'][name] for event in retained))
                 counts.append(len(retained))
             total = sum(counts)
@@ -108,6 +160,14 @@ def summarize_luck(games, *, bootstrap=1000, seed=1701):
             radius = (1.959963984540054 * math.sqrt(len(pairs) * _variance(
                 [s-mean*c for s, c in zip(pair_sums, counts)]))/total) if total else None
             model['events'][kind] = {'statuses': dict(statuses), 'count': total, 'mean_luck': mean,
-                                      'cluster_normal_95': [mean-radius, mean+radius] if total else None}
+                                      'cluster_normal_95': [mean-radius, mean+radius] if total else None,
+                                      'individual_luck_variance': _variance(individual_values) if total > 1 else None,
+                                      'game_sum_luck_variance': _variance(game_sums),
+                                      'pair_sum_luck_variance': _variance(pair_sums),
+                                      'game_sum_luck_mean': statistics.mean(game_sums),
+                                      # Pair sums divided by two are the per-game cluster observations.
+                                      'game_sum_cluster_normal_95': _interval([s/2 for s in pair_sums]),
+                                      'pair_sum_luck_mean': statistics.mean(pair_sums),
+                                      'pair_sum_cluster_normal_95': _interval(pair_sums)}
         result['models'][name] = model
     return result

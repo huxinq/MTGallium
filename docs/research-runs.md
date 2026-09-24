@@ -133,6 +133,43 @@ ratio uses setup-pair cluster resampling.
 Wall-clock game limits are rejected with correction enabled, so instrumentation
 cannot turn an otherwise completed game into a timeout loss; use decision limits.
 
+Measure variance reduction at `rate=1, samples=8` before choosing a cheaper
+sampling rate. Sparse event sampling measures only the benefit of that sparse
+correction; a ratio near one at 1% does not establish the full correction's value.
+Compare both game and setup-pair variance. The existing `cross_fitted` statistic
+fits beta on pair means; `cross_fitted_game` fits on games, keeping both seats of
+each setup in the same fold. Its game and pair ratios have setup-cluster bootstrap
+intervals that refit beta in every replicate. Event summaries include individual
+luck variance and the variance of summed terms per game and pair. These are
+exploratory estimates, not sequential-test inputs.
+Seat swapping can already cancel shared opening and redraw luck. A reduction
+in single-game variance therefore need not improve the paired ladder estimate;
+use the pair-level result to decide whether further ladder cost/model work is
+justified.
+
+Per-game `luck.nanosByCategory` partitions host-hook time into counterfactual
+steps, materialization/forks, information-state/menu construction, evaluator
+calls, and other work. Categories are exclusive at their call sites: projections
+inside an engine step belong to the step category. Failed work is included;
+hook construction, result serialization, and factual-step tracing are outside
+the partition. Measure total overhead separately with warmed, alternating
+same-seed runs with correction off and on, checking identical primary outcomes.
+
+V2 uses life totals, hand **counts**, and battlefield characteristics, not hand
+card names. Pure draws and opening/redraw alternatives preserve those counts
+and public quantities, so V2's terms are zero apart from floating-point error.
+A useful control variate requires a value model sensitive to the corrected
+chance event, not merely a strong policy or a board-value heuristic.
+
+A null comparison must have nonzero sampling variance. Identical deterministic
+mirrors on identical seeds cancel by construction and cannot validate centering.
+For direct stochastic policies the native `compare` bridge accepts an optional
+`choiceSeed`, recorded in its response, independent of the setup seed. Supply
+independent choice and correction-sampling seeds for each game of a randomized
+mirror. This overrides the stream delivered to direct choices, not internal
+search-session seeds. Omitting it preserves existing play exactly. Check raw
+and corrected centering, event-type means, and adequate mulligan counts.
+
 Rows retain seeds, config, source provenance, model hashes, individual outcomes,
 and changed-decision counts. At every candidate decision the incumbent chooses
 on the same history without playing it (a *shadow* choice); native comparisons

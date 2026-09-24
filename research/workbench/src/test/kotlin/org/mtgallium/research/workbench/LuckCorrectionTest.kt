@@ -34,6 +34,48 @@ class LuckCorrectionTest {
         it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
     }
 
+    private fun assertProfile(correction: LuckCorrection, hasSteps: Boolean) {
+        val profile = correction.nanosByCategory
+        assertEquals(setOf("counterfactualStep", "materializationFork", "informationStateMenu",
+            "valueEvaluators", "other"), profile.keys)
+        assertTrue(profile.values.all { it >= 0 })
+        assertEquals(correction.nanos, profile.values.sum())
+        for (key in listOf("materializationFork", "informationStateMenu", "valueEvaluators")) {
+            assertTrue(profile.getValue(key) > 0, key)
+        }
+        if (hasSteps) assertTrue(profile.getValue("counterfactualStep") > 0)
+        else assertEquals(0L, profile.getValue("counterfactualStep"))
+        val result = correction.result(null)
+        assertEquals(profile, result.getValue("nanosByCategory").jsonObject.mapValues { it.value.jsonPrimitive.long })
+        assertEquals(correction.nanos, result.getValue("nanos").jsonPrimitive.long)
+    }
+
+    @Test fun `same seed profiling preserves opening terms and factual state`() {
+        val world = world(2)
+        val fingerprint = world.freshAuthoritativeFingerprintForHost()
+        val feature = ValueFeatures.compile(world.luckValueInformationForHost("p0"), "p0")
+            .values.keys.first { it.startsWith("card/") }
+        for (samples in listOf(1, 2)) {
+            val config = LuckCorrectionConfig(seed = 37, samples = samples, models = listOf(
+                LuckModelConfig(), LuckModelConfig("linear", LinearWeights(weights = mapOf(feature to 0.7)))))
+            val first = LuckCorrection(config, "p0")
+            val second = LuckCorrection(config, "p0")
+            assertTrue(first.nanosByCategory.values.all { it == 0L })
+            first.opening(world)
+            second.opening(world)
+            assertEquals(2, first.events.size)
+            assertTrue(first.events.all { it.status == "retained" })
+            assertEquals(first.events, second.events)
+            // All pre-existing result fields, including model luck/adjusted scores, are deterministic.
+            fun terms(correction: LuckCorrection) = correction.result(mapOf("p0" to 1.0, "p1" to -1.0))
+                .filterKeys { it != "nanos" && it != "nanosByCategory" }
+            assertEquals(terms(first), terms(second))
+            assertProfile(first, hasSteps = false)
+            assertProfile(second, hasSteps = false)
+            assertEquals(fingerprint, world.freshAuthoritativeFingerprintForHost())
+        }
+    }
+
     @Test fun `enumerating actual single draws gives nontrivial zero mean linear luck`() {
         val world = world()
         var found = false
@@ -72,6 +114,7 @@ class LuckCorrectionTest {
                 val frozen = requireNotNull(correction.before(pre))
                 val actualTrace = pre.stepWithReplayTrace(action)
                 correction.after(frozen, action, pre, actualTrace)
+                assertProfile(correction, hasSteps = true)
                 val event = correction.events.single()
                 assertEquals("retained", event.status)
                 assertEquals(2, event.branches)
@@ -222,6 +265,7 @@ class LuckCorrectionTest {
         assertEquals("mulligan", correction.events.single().kind)
         assertEquals("retained", correction.events.single().status)
         assertEquals(3, correction.events.single().branches)
+        assertProfile(correction, hasSteps = true)
     }
 
     @Test fun `each opening expectation holds the other realized hand fixed`() {
