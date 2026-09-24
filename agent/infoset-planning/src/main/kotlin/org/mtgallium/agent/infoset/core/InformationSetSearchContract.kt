@@ -29,15 +29,36 @@ enum class RolloutCutoff {
     POLICY_QUIESCENCE,
 }
 
+/** Which singleton priority passes quiescence advances without making them search decisions. */
+@Serializable
+enum class QuiescencePassRule {
+    /** Only a pass that is the complete legal menu. */
+    RULES_FORCED_V1,
+    /**
+     * Also a pass that is the complete action-space-profile menu, while the root player's position
+     * is volatile. A profile that omits standalone mana abilities otherwise leaves stack and combat
+     * resolution depending on untapped mana sources. Quiet positions are evaluated where they stand.
+     */
+    PROFILE_FORCED_WHILE_VOLATILE_V1,
+}
+
 @Serializable
 data class LeafEvaluationConfig(
     val stateSource: LeafStateSource,
     val cutoff: RolloutCutoff = RolloutCutoff.EVALUATE,
     val unresolved: UnresolvedLeafHandling = UnresolvedLeafHandling.EVALUATE,
+    /** Absent in earlier configurations, which keep the rules-forced rule and their identity. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val quiescencePasses: QuiescencePassRule = QuiescencePassRule.RULES_FORCED_V1,
 ) {
     init {
         require(cutoff == RolloutCutoff.EVALUATE || stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
             "A non-direct cutoff requires a bounded rollout"
+        }
+        require(quiescencePasses == QuiescencePassRule.RULES_FORCED_V1 ||
+            stateSource != LeafStateSource.BOUNDED_ROLLOUT || cutoff != RolloutCutoff.EVALUATE) {
+            "A quiescence pass rule requires a leaf that settles through quiescence"
         }
     }
 }
@@ -219,6 +240,9 @@ data class InformationSetSearchDiagnostics(
     /** One exact component attribution for every sampled opponent-seat rollout action. */
     val opponentRolloutPolicyDecisions: OpponentPolicyDecisionSummary = OpponentPolicyDecisionSummary(),
     val quiescenceForcedPasses: Int = 0,
+    /** The part of [quiescenceForcedPasses] forced only by the action-space profile. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val quiescenceProfileForcedPasses: Int = 0,
     val quiescenceStrategicDecisions: Int = 0,
     val quiescenceOverflows: Int = 0,
     val quiescenceFallbacks: Int = 0,

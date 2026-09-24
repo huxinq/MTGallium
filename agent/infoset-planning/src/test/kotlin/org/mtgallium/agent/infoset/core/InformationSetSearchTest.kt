@@ -1020,6 +1020,103 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `profile forced passes resolve a volatile quiescence leaf only under the declared rule`() {
+        fun search(rule: QuiescencePassRule): Pair<InformationSetSearchResult, QuiescenceProbe> {
+            val probe = QuiescenceProbe()
+            return coreSearch(
+                InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 1, leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT, RolloutCutoff.QUIESCENCE, quiescencePasses = rule)),
+                opponentPolicy = UniformOpponentPolicy,
+                valueSource = LeafValueSource.Information(recordingEvaluator(probe)),
+            ).search("p0", batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.FORCED_PASS,
+                profilePrunedPasses = true))), 113L) to probe
+        }
+
+        val (rules, rulesProbe) = search(QuiescencePassRule.RULES_FORCED_V1)
+        assertEquals(listOf(1, 1), rulesProbe.evaluatedStages)
+        assertEquals(0, rules.diagnostics.quiescenceForcedPasses)
+        assertEquals(2, rules.diagnostics.quiescenceFallbacks)
+
+        val (profile, profileProbe) = search(QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1)
+        assertEquals(listOf(2, 2), profileProbe.evaluatedStages)
+        assertEquals(2, profile.diagnostics.quiescenceForcedPasses)
+        assertEquals(2, profile.diagnostics.quiescenceProfileForcedPasses)
+        assertEquals(0, profile.diagnostics.quiescenceFallbacks)
+    }
+
+    @Test
+    fun `profile forced passes leave quiet positions where the exact rule already advances`() {
+        fun stages(profilePruned: Boolean, rule: QuiescencePassRule): List<Int> {
+            val probe = QuiescenceProbe()
+            coreSearch(
+                InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 1, leaf = LeafEvaluationConfig(
+                    LeafStateSource.CURRENT_INFORMATION_STATE, quiescencePasses = rule)),
+                opponentPolicy = UniformOpponentPolicy,
+                valueSource = LeafValueSource.Information(recordingEvaluator(probe)),
+            ).search("p0", batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.FORCED_PASS,
+                profilePrunedPasses = profilePruned, quiet = true))), 114L)
+            return probe.evaluatedStages
+        }
+        for (rule in QuiescencePassRule.entries) {
+            assertEquals(listOf(2, 2), stages(profilePruned = false, rule), rule.name)
+            assertEquals(listOf(1, 1), stages(profilePruned = true, rule), rule.name)
+        }
+    }
+
+    @Test
+    fun `the profile pass rule leaves rules forced quiescence unchanged`() {
+        fun search(rule: QuiescencePassRule): InformationSetSearchResult {
+            val probe = QuiescenceProbe()
+            val result = coreSearch(
+                InformationSetSearchConfig(simulations = 4, maxPolicyDecisions = 1, leaf = LeafEvaluationConfig(
+                    LeafStateSource.CURRENT_INFORMATION_STATE, quiescencePasses = rule)),
+                opponentPolicy = UniformOpponentPolicy,
+                valueSource = LeafValueSource.Information(recordingEvaluator(probe)),
+            ).search("p0", batch(List(2) { QuiescenceWorld(probe, QuiescenceBranch.FORCED_PASS) }), 101L)
+            return result.copy(diagnostics = result.diagnostics.copy(
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE), evaluatorNanos = 0))
+        }
+        val rules = search(QuiescencePassRule.RULES_FORCED_V1)
+        assertEquals(4, rules.diagnostics.quiescenceForcedPasses)
+        assertEquals(rules, search(QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1))
+    }
+
+    @Test
+    fun `quiescence pass rule keeps earlier leaf bytes and needs a settling leaf`() {
+        val earlier = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)
+        val encoded = PolicyJson.format.encodeToJsonElement(LeafEvaluationConfig.serializer(), earlier)
+            as kotlinx.serialization.json.JsonObject
+        assertEquals(setOf("stateSource", "cutoff", "unresolved"), encoded.keys)
+        val declared = earlier.copy(quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1)
+        assertTrue("quiescencePasses" in (PolicyJson.format.encodeToJsonElement(LeafEvaluationConfig.serializer(),
+            declared) as kotlinx.serialization.json.JsonObject))
+        assertFailsWith<IllegalArgumentException> {
+            LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+                quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1)
+        }
+    }
+
+    @Test
+    fun `widening stops at a profile exhaustive menu without changing search statistics`() {
+        fun search(profileExhaustive: Boolean): Pair<InformationSetSearchResult, List<Int>> {
+            val limits = mutableListOf<Int>()
+            val result = coreSearch(InformationSetSearchConfig(simulations = 70, maxPolicyDecisions = 1,
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
+                .search("p0", batch(listOf(OmittingProgressiveWorld(FakeWorld(), profileExhaustive, limits))), 115L)
+            return result to limits
+        }
+        val (profile, profileLimits) = search(profileExhaustive = true)
+        val (bounded, boundedLimits) = search(profileExhaustive = false)
+        assertEquals(0, profile.diagnostics.wideningEvents)
+        assertTrue(profileLimits.all { it <= 64 })
+        assertEquals(1, bounded.diagnostics.wideningEvents)
+        assertTrue(128 in boundedLimits)
+        assertEquals(bounded.chosen, profile.chosen)
+        assertEquals(bounded.candidates, profile.candidates)
+        assertEquals(bounded.rootValue, profile.rootValue)
+    }
+
+    @Test
     fun `unsettled leaf counter follows the actual evaluation position`() {
         fun search(cutoff: RolloutCutoff): InformationSetSearchResult {
             val probe = QuiescenceProbe()
@@ -1933,14 +2030,17 @@ private class QuiescenceWorld(
     private val terminalAtStage: Int? = null,
     private val volatileThroughStage: Int? = null,
     private val alternatingActors: Boolean = false,
+    /** A lone pass also has an untapped mana source that the action-space profile omits. */
+    private val profilePrunedPasses: Boolean = false,
+    private val quiet: Boolean = false,
 ) : SearchWorld {
     override fun decisionContext(view: DecisionView): DecisionSiteRequest = testDecisionContext(this, view)
     override fun actorToAct(): String = if (alternatingActors && stage % 2 == 1) "p1" else "p0"
 
     override fun informationState(viewer: String): InformationStateRepresentation {
         val expansion = expandChoices()
-        val volatile = stage == 1 || branch == QuiescenceBranch.ENDLESS_PASS && stage > 0 ||
-            volatileThroughStage?.let { stage in 1..it } == true
+        val volatile = !quiet && (stage == 1 || branch == QuiescenceBranch.ENDLESS_PASS && stage > 0 ||
+            volatileThroughStage?.let { stage in 1..it } == true)
         val observation = PlayerObservationSnapshot(
             perspectivePlayerId = viewer,
             turnNumber = stage,
@@ -1992,6 +2092,11 @@ private class QuiescenceWorld(
                 QuiescenceBranch.ENDLESS_PASS -> error("handled above")
             }
         }
+        if (profilePrunedPasses && candidates.singleOrNull()?.operationFamily == SemanticOperationFamily.PASS_PRIORITY) {
+            return PolicyExpansion(candidates, false, candidates.size.toLong(), "quiescence-v1", 1L,
+                isProfileExhaustive = true,
+                omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA))
+        }
         return PolicyExpansion(candidates, true, candidates.size.toLong(), "quiescence-v1", 1L)
     }
 
@@ -2007,6 +2112,7 @@ private class QuiescenceWorld(
 
     override fun fork(): SearchWorld = QuiescenceWorld(
         probe, branch, stage, rootChoice, rejectAtStage, terminalAtStage, volatileThroughStage, alternatingActors,
+        profilePrunedPasses, quiet,
     )
 
     override fun terminalPayoff(rootPlayer: String): Double? =
@@ -2199,6 +2305,25 @@ private class ProfilePrunedWorld(private val world: SearchWorld) : SearchWorld b
     override fun expandChoices(): PolicyExpansion = world.expandChoices().copy(
         isExhaustive = false, isProfileExhaustive = true,
         omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA))
+}
+
+/** Every menu omits something: intentionally under the profile, or because enumeration was bounded. */
+private class OmittingProgressiveWorld(
+    private val world: FakeWorld,
+    private val profileExhaustive: Boolean,
+    private val limits: MutableList<Int>,
+) : ProgressiveSearchWorld by world {
+    override fun decisionContext(view: DecisionView) = testDecisionContext(this, view)
+    override fun fork(): SearchWorld = OmittingProgressiveWorld(world.fork() as FakeWorld, profileExhaustive, limits)
+    override fun expandChoices(): PolicyExpansion = omitting(world.expandChoices())
+    override fun expandChoices(limit: Int): PolicyExpansion {
+        limits += limit
+        return omitting(world.expandChoices(limit))
+    }
+    private fun omitting(expansion: PolicyExpansion) = expansion.copy(isExhaustive = false,
+        isProfileExhaustive = profileExhaustive, omissionReasons = setOf(
+            if (profileExhaustive) PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA
+            else PolicyExpansionOmissionReason.SOURCE_NON_EXHAUSTIVE))
 }
 
 private fun testDecisionContext(world: SearchWorld, view: DecisionView): DecisionSiteRequest {

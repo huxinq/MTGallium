@@ -24,10 +24,13 @@ mode, opponent action distribution, and private-choice selector. Particle
 weights, order, RNG streams and policy identities belong to the belief state.
 
 For `POLICY_CONDITIONED_V1`, each hypothetical world advances through the
-observed action. The tracker weights each world by the action's likelihood, keeps
-descendants that agree with the viewer's newly observed
-`InformationStateRepresentation` and represented exact knowledge, normalizes the
-surviving weights, then resamples by copying. A private opponent response is
+observed action. The tracker weights each world by the action's likelihood under
+the opponent distribution, evaluated on the menu that distribution declares
+(admission and annotations), as in search. It keeps descendants that agree with
+the viewer's newly observed `InformationStateRepresentation` and represented exact
+knowledge, normalizes the surviving weights, then resamples by copying. A copied
+duplicate keeps its hidden state and draws a fresh future-chance stream, so
+duplicates do not replay the same draws and shuffles. A private opponent response is
 selected from that opponent's information; only its observable consequences
 condition the viewer's population.
 

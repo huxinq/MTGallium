@@ -58,6 +58,17 @@ bounded rollout. `unresolved` is explicit: `EVALUATE` evaluates an unresolved
 leaf and `BACK_UP_NEUTRAL` records a neutral settlement. The workbench defaults to
 `LeafEvaluationConfig(BOUNDED_ROLLOUT)`, with `EVALUATE` for both cutoff and unresolved handling.
 
+Quiescence passes a lone priority pass without making it a search decision.
+`quiescencePasses` selects which passes qualify. `RULES_FORCED_V1`, the default,
+passes only when the pass is the complete legal menu. An action-space profile that
+omits standalone mana abilities, such as the Mono-Red profile, makes a lone pass
+incomplete whenever the player has an untapped mana source; under this rule such
+a pass becomes a quiescence decision or a fallback. `PROFILE_FORCED_WHILE_VOLATILE_V1`
+also passes a lone pass that is the complete profile menu while the root player's
+position is volatile, and still evaluates quiet positions where they stand.
+`quiescenceProfileForcedPasses` counts those passes within `quiescenceForcedPasses`.
+The rule applies only to leaves that settle through quiescence.
+
 `RolloutTurnHorizon(completedTurns, maxPolicyDecisions = 512)` is available only
 with a bounded rollout and `EVALUATE` cutoff. It evaluates at the first player
 decision with `turnNumber >= rootTurnNumber + completedTurns`.

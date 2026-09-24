@@ -1065,8 +1065,9 @@ class ArgentumSearchWorld private constructor(
     ): ArgentumSearchWorld = withHypotheticalState(state, futureChanceStreamIdentity)
 
     /**
-     * Fork the complete authoritative position for a privileged offline search while replacing its
-     * future game-chance stream. The identity must come from declared experiment/search randomness;
+     * Fork this world's complete position while replacing its future game-chance stream: the
+     * authoritative position for a privileged offline search, or a hypothetical particle copied
+     * during belief resampling. The identity must come from declared experiment/search randomness;
      * this boundary deliberately never derives it from [GameState.rng] or the current state.
      */
     fun forkForHypotheticalSearch(futureChanceStreamIdentity: Long): ArgentumSearchWorld =

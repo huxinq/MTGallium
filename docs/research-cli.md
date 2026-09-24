@@ -39,7 +39,8 @@ Search settings:
 
 - `particles`, `simulations` and `explorationConstant` configure the search.
 - `searchDepth` bounds player decisions across the simulated tree and rollout.
-- `leaf` is a `LeafEvaluationConfig` (`stateSource`, `cutoff`, `unresolved`), and
+- `leaf` is a `LeafEvaluationConfig` (`stateSource`, `cutoff`, `unresolved`,
+  `quiescencePasses`), and
   `rolloutTurnHorizon` optionally stops rollouts after a number of turns. The
   default leaf is a bounded rollout that evaluates at its cutoff. See
   [search use](value-models.md#search-use) for all options.

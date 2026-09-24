@@ -282,7 +282,9 @@ class ParticleBelief private constructor(
                 is ExactObservedActionResolution.Unsupported -> { recordUnavailable(resolved.reason); continue }
                 is ExactObservedActionResolution.NativeRejected -> { rejected++; continue }
             }
-            val context = exact?.context ?: contextContaining(entry.world, observedSignature)
+            // The likelihood policy sees the admission and annotations it declares, as in search.
+            val context = exact?.context ?: contextContaining(entry.world, observedSignature,
+                conditioningPolicy?.decisionView() ?: DecisionView())
             if (exact != null) require(context.actor == actor) { "Observed-choice actor differs from the captured decision" }
             val candidates = context.expansion.candidates
             val observed = candidates.singleOrNull { it.signature == observedSignature }
@@ -397,12 +399,12 @@ class ParticleBelief private constructor(
         )
     }
 
-    private fun contextContaining(world: SearchWorld, signature: String): DecisionSiteRequest {
-        var context = world.decisionContext()
+    private fun contextContaining(world: SearchWorld, signature: String, view: DecisionView): DecisionSiteRequest {
+        var context = world.decisionContext(view)
         if (context.expansion.candidates.any { it.signature == signature } || context.expansion.isExhaustive) return context
         if (world !is ProgressiveSearchWorld) return context
         for (limit in OBSERVED_ACTION_EXPANSION_LIMITS) {
-            context = world.decisionContext(DecisionView(limit))
+            context = world.decisionContext(view.copy(limit = limit))
             if (context.expansion.candidates.any { it.signature == signature } || context.expansion.isExhaustive) break
         }
         return context

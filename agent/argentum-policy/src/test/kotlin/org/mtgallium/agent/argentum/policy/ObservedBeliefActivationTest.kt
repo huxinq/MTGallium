@@ -131,7 +131,7 @@ class ObservedBeliefActivationTest {
             put("opponentDistribution", PolicyJson.format.encodeToJsonElement(UniformOpponentPolicy.behaviorSpecification))
             put("privateChoiceSelector", PolicyJson.format.encodeToJsonElement(UniformOpponentPolicy.behaviorSpecification))
             if (includeSubmission) put("observedSubmission", world.observedActionBehaviorId())
-            put("maintenance", "descendant-information-knowledge-copying-resampling-v1")
+            put("maintenance", CONDITIONED_BELIEF_INFERENCE_MAINTENANCE)
         })
         val actual = preparation(world).beliefSnapshot().queries.binding.inferenceModelIdentity
         assertNotEquals(identity(includeSubmission = false), actual,

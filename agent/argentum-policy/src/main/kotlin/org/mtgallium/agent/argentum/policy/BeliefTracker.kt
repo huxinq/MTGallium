@@ -95,7 +95,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
             gameId, proposalAuditSink, null)
 
     private val rejuvenator: ParticleRejuvenator =
-        if (parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1) ParticleRejuvenator.FORK_ONLY
+        if (parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1) FRESH_CHANCE_COPY
         else ArgentumConditionalRejuvenator(
         knownDecks,
         viewer,
@@ -223,7 +223,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
             put("observedUpdate", QUALIFIED_OBSERVED_BELIEF_V1)
         }
         put("maintenance", if (parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1)
-            "descendant-information-knowledge-copying-resampling-v1" else "existing-consistency-rejuvenation-v1")
+            CONDITIONED_BELIEF_INFERENCE_MAINTENANCE else "existing-consistency-rejuvenation-v1")
     })
 
     override fun snapshot(): BeliefSnapshot {

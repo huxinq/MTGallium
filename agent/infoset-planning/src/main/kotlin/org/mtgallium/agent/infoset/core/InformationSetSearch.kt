@@ -257,6 +257,7 @@ class InformationSetSearch(
                 rootRolloutPolicyDecisions = rootPolicyDecisions,
                 opponentRolloutPolicyDecisions = opponentPolicyDecisions,
                 quiescenceForcedPasses = quiescenceAudit.forcedPasses,
+                quiescenceProfileForcedPasses = quiescenceAudit.profileForcedPasses,
                 quiescenceStrategicDecisions = quiescenceAudit.strategicDecisions,
                 quiescenceOverflows = quiescenceAudit.overflows,
                 quiescenceFallbacks = quiescenceAudit.fallbacks,
@@ -459,7 +460,8 @@ class InformationSetSearch(
             node.merge(widened)
         }
         val wideningIndex = config.wideningThresholds.indexOfLast { node.visits >= it }
-        if (wideningIndex >= 0 && !node.exhaustive && world is ProgressiveSearchWorld) {
+        // A profile-exhaustive menu is complete for this action space; a higher limit adds nothing.
+        if (wideningIndex >= 0 && !node.profileExhaustive && world is ProgressiveSearchWorld) {
             val desired = config.wideningLimits[wideningIndex]
             if (desired > node.expansionLimit) {
                 val widened = world.decisionContext(DecisionView(desired))
@@ -593,7 +595,9 @@ class InformationSetSearch(
     }
 
     /**
-     * Horizon quiescence may advance only an exact singleton priority pass. A quiet state is one
+     * Horizon quiescence advances an exact singleton priority pass and, under
+     * [QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1], a profile-exhaustive singleton pass in
+     * a volatile position. A quiet state is one
      * for which [isVolatile] is false: no stack, no combat except END_COMBAT, no pending Combat,
      * Damage, or Order decision, and no lethal-damage battlefield creature. It need not have no
      * candidates. Thus this method never consumes a genuine branching decision, a singleton mana
@@ -612,7 +616,12 @@ class InformationSetSearch(
                 return StaticLeafSettlement.Value(SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF))
             }
             val expansion = initialExpansion(world)
-            val pass = expansion.exactSingletonPassOrNull()
+            val profilePass = if (expansion.exactSingletonPassOrNull() == null &&
+                config.leaf.quiescencePasses == QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1) {
+                expansion.policySingletonPassOrNull()
+                    ?.takeIf { isVolatile(world.informationState(rootPlayer).observation) }
+            } else null
+            val pass = expansion.exactSingletonPassOrNull() ?: profilePass
             if (pass != null) {
                 if (forcedPasses >= maximumForcedPasses) {
                     audit.overflows++
@@ -629,6 +638,7 @@ class InformationSetSearch(
                 }
                 forcedPasses++
                 audit.forcedPasses++
+                if (profilePass != null) audit.profileForcedPasses++
                 continue
             }
             if (!isVolatile(world.informationState(rootPlayer).observation)) {
@@ -860,6 +870,7 @@ class InformationSetSearch(
 
     private class QuiescenceAudit {
         var forcedPasses = 0
+        var profileForcedPasses = 0
         var strategicDecisions = 0
         var overflows = 0
         var fallbacks = 0
@@ -1102,6 +1113,7 @@ class InformationSetSearch(
         val edges = linkedMapOf<String, SearchEdge>()
         var visits: Int = 0
         var exhaustive: Boolean = context.expansion.isExhaustive
+        var profileExhaustive: Boolean = context.expansion.isProfileExhaustive
         private val planning = PlanningDecisionContext(context)
         private var currentContext = context
         init { context.expansion.candidates.forEach { edges[it.signature] = SearchEdge(it) } }
@@ -1111,6 +1123,7 @@ class InformationSetSearch(
             val refinement = planning.refine(currentContext, context)
             refinement.addedChoices.forEach { edges.putIfAbsent(it.signature, SearchEdge(it)) }
             exhaustive = refinement.expansion.isExhaustive
+            profileExhaustive = refinement.expansion.isProfileExhaustive
             currentContext = context
         }
     }
