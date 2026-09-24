@@ -16,6 +16,20 @@ source. See [value models](../value-models.md#search-use).
 
 Native policy sessions observe accepted actions and own their particle beliefs.
 
+An optional `SearchPrior` replaces UCT with PUCT at searching-player nodes. It
+receives only the acting player's captured `DecisionSiteRequest`, scores up to
+its declared candidate limit, and retains the highest-prior initial expansion
+budget (ties use semantic signatures). Selection uses mean value plus
+`c * prior * sqrt(parent visits + 1) / (edge visits + 1)`; unvisited means are zero.
+This fixed prior-ranked expansion replaces progressive widening when enabled.
+The host admits the same wider candidate menu. Configuration and model identity
+belong in `configurationId`; absent priors retain the existing behavior and
+serialized identity. Root UCT guidance and PUCT are mutually exclusive.
+
+`RolloutPolicySchedule` can choose an action selector by zero-based step within
+each bounded rollout. The step resets for each continuation and spans both
+players. It does not apply to terminal diagnostic continuations or quiescence.
+
 ## Belief maintenance
 
 `ArgentumParticleBeliefBackend` in `agent/argentum-policy` maintains a player's

@@ -55,6 +55,7 @@ fun selectorPlayer(selector: ActionSelector): Player = Player(
 
 /** Keep the session accessible to the caller, including its explicit factual-continuation fork. */
 fun searchPlayer(world: ArgentumSearchWorld, session: SearchPolicySession): Player = Player(
+    view = session.decisionView,
     observe = { actor, choice, step, index ->
         session.observeAccepted(world, actor, choice, index, step.privateToActor)
     },

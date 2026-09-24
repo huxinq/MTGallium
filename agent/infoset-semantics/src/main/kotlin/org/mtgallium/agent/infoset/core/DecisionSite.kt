@@ -87,7 +87,14 @@ class DecisionSiteRequest private constructor(
     val sourceContractIdentity: String,
     private val actorValue: String,
     private val epistemicSource: () -> EpistemicState,
+    referenceGroups: () -> Map<String, List<String>>,
 ) {
+    /** Safe action-reference groups captured at this decision's revision and actor perspective. */
+    val semanticReferenceGroups: Map<String, List<String>> by lazy {
+        java.util.Collections.unmodifiableMap(referenceGroups().mapValues {
+            java.util.Collections.unmodifiableList(it.value.toList())
+        })
+    }
     private val admittedValue = lazy { DecisionSite.captured(epistemicSource(), actorValue, expansion) }
     private val admitted by admittedValue
     val informationDemanded: Boolean get() = admittedValue.isInitialized()
@@ -97,10 +104,11 @@ class DecisionSiteRequest private constructor(
 
     companion object {
         fun capture(actor: String, expansion: PolicyExpansion, epistemic: () -> EpistemicState,
-            view: DecisionView = DecisionView(), sourceContractIdentity: String = expansion.proposalVersion): DecisionSiteRequest {
+            view: DecisionView = DecisionView(), sourceContractIdentity: String = expansion.proposalVersion,
+            referenceGroups: () -> Map<String, List<String>> = { emptyMap() }): DecisionSiteRequest {
             require(actor.isNotBlank() && sourceContractIdentity.isNotBlank())
             val state by lazy { epistemic() }
-            return DecisionSiteRequest(expansion.semanticSnapshot(), view, sourceContractIdentity, actor, { state })
+            return DecisionSiteRequest(expansion.semanticSnapshot(), view, sourceContractIdentity, actor, { state }, referenceGroups)
         }
     }
 }
