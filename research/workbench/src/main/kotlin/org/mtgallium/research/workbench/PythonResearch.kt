@@ -66,7 +66,8 @@ class PythonGame internal constructor(
     }
 
     fun decision(view: DecisionView, kernel: Boolean = false, factual: Boolean = false,
-        fromEvent: Int = 0, schema: FactualTensorSchema = FactualTensorSchema()): JsonObject {
+        fromEvent: Int = 0, schema: FactualTensorSchema = FactualTensorSchema(),
+        includeEvents: Boolean = true): JsonObject {
         if (world.terminalPayoff(actors.first()) != null) return status()
         val request = context(view)
         val site = request.site()
@@ -82,11 +83,12 @@ class PythonGame internal constructor(
             if (factual) {
                 val projection = world.policyDecisionProjection(request.view)
                 val encoder = FactualPolicyEncoder(schema)
+                val eventsFrom = if (includeEvents) fromEvent else site.epistemic.history.size
                 put("factual", buildJsonObject {
                     put("schema", researchJson.encodeToJsonElement(schema))
                     put("input", researchJson.encodeToJsonElement(encoder.decision(projection.site, projection.semanticReferenceGroups)))
-                    put("events", researchJson.encodeToJsonElement(encoder.events(site.epistemic.history, site.actor, actors, fromEvent)))
-                    put("eventsFrom", fromEvent)
+                    put("events", researchJson.encodeToJsonElement(encoder.events(site.epistemic.history, site.actor, actors, eventsFrom)))
+                    put("eventsFrom", eventsFrom)
                     put("eventPosition", site.epistemic.history.size)
                 })
             }
@@ -247,7 +249,8 @@ class PythonResearchConnection {
                 request["kernel"]?.jsonPrimitive?.booleanOrNull ?: false,
                 request["factual"]?.jsonPrimitive?.booleanOrNull ?: false,
                 request["fromEvent"]?.jsonPrimitive?.intOrNull ?: 0,
-                request["schema"]?.let { researchJson.decodeFromJsonElement<FactualTensorSchema>(it) } ?: FactualTensorSchema())
+                request["schema"]?.let { researchJson.decodeFromJsonElement<FactualTensorSchema>(it) } ?: FactualTensorSchema(),
+                request["includeEvents"]?.jsonPrimitive?.booleanOrNull ?: true)
             "select" -> game().select(request.getValue("policy").jsonPrimitive.content, request["seed"]?.jsonPrimitive?.longOrNull)
             "step" -> game().step(request.getValue("index").jsonPrimitive.int,
                 decodeView(request.getValue("view").jsonObject), researchJson.decodeFromJsonElement(request.getValue("choice")),

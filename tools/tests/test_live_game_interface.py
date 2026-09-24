@@ -304,6 +304,33 @@ class LiveGameInterfaceTest(unittest.TestCase):
             self.assertEqual(decision.rules_exhaustive, value['input']['rulesExhaustive'])
             self.assertEqual(decision.profile_exhaustive, value['input']['profileExhaustive'])
 
+    def test_current_view_callback_omits_history_without_changing_same_seed_play(self):
+        schema = {'version': 'factual-policy-json-bytes-v1', 'maximumViewBytes': 65536,
+                  'maximumActionBytes': 16384, 'maximumEventBytes': 16384,
+                  'maximumCandidates': 256}
+        with self.game(starting_hand_size=3) as game:
+            game.step(0)
+            ordinary = game.decision(factual=True, schema=schema)
+            compact = game.decision(factual=True, schema=schema, include_events=False)
+            self.assertEqual(ordinary.factual['input'], compact.factual['input'])
+            self.assertEqual(ordinary.factual['schema'], compact.factual['schema'])
+            self.assertEqual(ordinary.factual['eventPosition'], compact.factual['eventPosition'])
+            self.assertGreater(compact.factual['eventPosition'], 0)
+            self.assertEqual([], compact.factual['events'])
+            self.assertEqual(compact.factual['eventPosition'], compact.factual['eventsFrom'])
+            with game.fork() as branch:
+                seen = []
+                def choose(decision):
+                    seen.append(decision.factual)
+                    return 0
+                game.play({'p0': choose, 'p1': choose}, decision_limit=3,
+                          factual=True, schema=schema, include_events=False)
+                branch.play({'p0': lambda _: 0, 'p1': lambda _: 0}, decision_limit=3,
+                            factual=True, schema=schema, include_events=True)
+                self.assertTrue(seen)
+                self.assertTrue(all(row['schema'] == schema and row['events'] == [] for row in seen))
+                self.assertEqual(game.state(), branch.state())
+
     def test_callback_choice_uses_the_same_menu_as_its_recorded_encodings(self):
         with self.game() as game:
             offered = game.decision(kernel=True)

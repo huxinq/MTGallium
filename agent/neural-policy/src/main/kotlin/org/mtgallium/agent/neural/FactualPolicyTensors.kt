@@ -190,7 +190,7 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
             when (value) {
                 is JsonObject -> value.forEach { (key, child) ->
                     if (key !in OMIT) {
-                        if (isReference(key) || HASH.matches(key) || ENTITY.matches(key)) bind(key, "")
+                        if (isReference(key)) bind(key, "")
                         collect(child, key, depth + 1)
                     }
                 }
@@ -205,11 +205,12 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
                     ?: "ref-${objects.size}"
             }
         }
-        private fun groupOccurrence(value: String, groups: Map<String, List<String>>): Pair<List<String>, Int>? {
-            val separator = value.lastIndexOf('#')
-            if (separator < 0) return null
-            val members = groups[value.substring(0, separator)] ?: return null
-            val ordinal = value.substring(separator + 1).toIntOrNull() ?: return null
+        private fun group(value: String, groups: Map<String, List<String>>): Pair<List<String>, Int?>? {
+            groups[value]?.let { return it to null }
+            val marker = value.lastIndexOf('#')
+            if (marker < 0) return null
+            val ordinal = value.substring(marker + 1).toIntOrNull() ?: return null
+            val members = groups[value.substring(0, marker)] ?: return null
             return if (ordinal in members.indices) members to ordinal else null
         }
         fun transform(value: JsonElement, field: String = "", groups: Map<String, List<String>> = emptyMap(), depth: Int = 0): JsonElement {
@@ -217,10 +218,10 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
             return when (value) {
                 is JsonObject -> {
                     val entries = value.filterKeys { it !in OMIT }.map { (key, child) ->
-                        val mapped = players[key] ?: objects[key] ?: groups[key]?.joinToString(prefix = "visibleGroup(", postfix = ")")
-                            ?: groupOccurrence(key, groups)?.let { (members, ordinal) ->
-                                members.joinToString(prefix = "visibleGroup(", postfix = ")#$ordinal")
-                            }
+                        val mapped = players[key] ?: objects[key] ?: group(key, groups)?.let { (members, ordinal) ->
+                            members.joinToString(prefix = "visibleGroup(", postfix = ")") +
+                                (ordinal?.let { "#$it" } ?: "")
+                        }
                             ?: key.also {
                                 if (isReference(it) || HASH.matches(it) || ENTITY.matches(it))
                                     throw FactualEncodingException("Unqualified reference used as a factual map key")
@@ -240,12 +241,11 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
                         val text = value.content
                         when {
                             text in players -> JsonPrimitive(players.getValue(text))
-                            text in groups -> buildJsonObject { put("visibleGroup", JsonArray(groups.getValue(text).map(::JsonPrimitive))) }
-                            groupOccurrence(text, groups) != null -> {
-                                val (members, ordinal) = requireNotNull(groupOccurrence(text, groups))
+                            group(text, groups) != null -> {
+                                val (members, ordinal) = requireNotNull(group(text, groups))
                                 buildJsonObject {
                                     put("visibleGroup", JsonArray(members.map(::JsonPrimitive)))
-                                    put("ordinal", ordinal)
+                                    ordinal?.let { put("ordinal", it) }
                                 }
                             }
                             text in objects -> JsonPrimitive(objects.getValue(text))

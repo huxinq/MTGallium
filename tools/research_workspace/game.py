@@ -192,8 +192,10 @@ class Game:
 
     def decision(self, *, kernel: bool = False, factual: bool = False,
                  from_event: int = 0, schema: Mapping | None = None,
-                 view: Mapping | None = None) -> Decision | None:
+                 view: Mapping | None = None, include_events: bool = True) -> Decision | None:
         arguments = dict(kernel=kernel, factual=factual, fromEvent=from_event)
+        if not include_events:
+            arguments['includeEvents'] = False
         if schema is not None:
             arguments['schema'] = dict(schema)
         if view is not None:
@@ -233,7 +235,8 @@ class Game:
     def play(self, policies: Sequence[str | Callable[[Decision], Action | int]] | Mapping | None = None,
              *, decision_limit: int | None = 2048, seconds: float | None = None,
              record: Callable[[dict], None] | None = None, kernel: bool = False,
-             factual: bool = False) -> dict:
+             factual: bool = False, schema: Mapping | None = None,
+             include_events: bool = True) -> dict:
         """Python callbacks receive a decision, never the game or referee state.
 
         Unrecorded native moves stay inside the JVM, including native opponents
@@ -279,9 +282,11 @@ class Game:
                 continue
             if isinstance(policy, str):
                 action = self.select(policy)
-                decision = self.decision(view=action.view, kernel=kernel, factual=factual)
+                decision = self.decision(view=action.view, kernel=kernel, factual=factual,
+                                         schema=schema, include_events=include_events)
             else:
-                decision = self.decision(kernel=kernel, factual=factual)
+                decision = self.decision(kernel=kernel, factual=factual,
+                                         schema=schema, include_events=include_events)
                 selected = policy(decision)
                 if type(selected) is int:
                     if selected < 0 or selected >= len(decision.actions):

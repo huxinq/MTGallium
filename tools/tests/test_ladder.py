@@ -57,6 +57,29 @@ class LadderSchedulingTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_factual_delivery_and_checkpoint_provenance_are_retained(self):
+        schema = {'version': 'factual-policy-json-bytes-v1', 'maximumCandidates': 256}
+        class Student:
+            provenance = {'sha256': 'checkpoint-hash', 'labels': 12500}
+            def __call__(self, decision):
+                return 0
+        seen = []
+        def fake_game(session, candidate, incumbent, opponent, decks, seed, seat, settings):
+            seen.append(settings)
+            return game(seed, seat, .5)
+        with patch('research_workspace.ladder.source_provenance', return_value={'commit': 'abc'}), \
+             patch('research_workspace.ladder.runtime'), \
+             patch('research_workspace.ladder.Session'), \
+             patch('research_workspace.ladder._game', side_effect=fake_game):
+            row = self.evaluate(candidate=Student(), name='student', setups=1, seeds=[7],
+                                threads=1, factual=True, schema=schema, include_events=False)
+            self.evaluate(setups=1, seeds=[8], threads=1)
+        self.assertEqual({'factual': True, 'schema': schema, 'include_events': False},
+                         seen[0]['_factual_delivery'])
+        self.assertNotIn('_factual_delivery', seen[-1])
+        self.assertEqual('checkpoint-hash', row['candidate']['provenance']['sha256'])
+        self.assertEqual(12500, row['candidate']['provenance']['labels'])
+
     @patch('research_workspace.ladder._git', side_effect=lambda *args:
            '160000 commit deadbeef\tthird_party/argentum-engine'
            if args[0] == 'ls-tree' else 'deadbeef')

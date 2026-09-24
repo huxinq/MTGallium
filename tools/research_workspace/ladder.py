@@ -51,6 +51,9 @@ def _descriptor(policy: Policy) -> dict[str, Any]:
         descriptor['source'] = inspect.getsource(policy)
     except (OSError, TypeError):
         descriptor['source'] = None
+    provenance = getattr(policy, 'provenance', None)
+    if provenance is not None:
+        descriptor['provenance'] = json.loads(json.dumps(provenance, allow_nan=False))
     return descriptor
 
 
@@ -89,6 +92,7 @@ def _game(session: Session, candidate: Policy, incumbent: Policy, opponent: Poli
     policies[candidate_seat] = candidate
     initial = tuple(policy if isinstance(policy, str) else 'random' for policy in policies)
     game_settings = copy.deepcopy(settings)
+    delivery = game_settings.pop('_factual_delivery', {})
     if isinstance(incumbent, str):
         shadows = list(game_settings.get('shadow_policies', ()))
         if incumbent not in shadows:
@@ -116,7 +120,9 @@ def _game(session: Session, candidate: Policy, incumbent: Policy, opponent: Poli
 
             played: list[Policy] = [opponent, opponent]
             played[candidate_seat] = compared
-            result = game.play(played, decision_limit=limit, seconds=settings.get('maximum_seconds', settings.get('maximumSeconds')))
+            result = game.play(played, decision_limit=limit,
+                               seconds=settings.get('maximum_seconds', settings.get('maximumSeconds')),
+                               **delivery)
     payoff = None if result['payoffs'] is None else (result['payoffs'][f'p{candidate_seat}'] + 1) / 2
     return {'seed': seed, 'candidate_seat': f'p{candidate_seat}', 'status': result['status'],
             'payoff': payoff, 'candidate_decisions': counts['candidate'],
@@ -207,7 +213,8 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
              seeds: Sequence[int] | None = None, threads: int | None = None,
              config: Mapping[str, Any] | None = None, output: str | Path | None = None,
              build: bool = True, java_options: Sequence[str] = JAVA_OPTIONS,
-             phase: str = 'exploration') -> dict:
+             phase: str = 'exploration', factual: bool = False,
+             schema: Mapping | None = None, include_events: bool = True) -> dict:
     """Evaluate one candidate against fixed named opponents using paired seat swaps."""
     candidate_name = _name(candidate, name, 'candidate')
     incumbent_name = _name(incumbent, incumbent_name, 'incumbent')
@@ -236,6 +243,13 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
         _name(opponent, opponent_name, 'opponent')
 
     settings = copy.deepcopy(dict(config or {}))
+    if '_factual_delivery' in settings:
+        raise ValueError('Pass factual delivery options through evaluate, not config')
+    if schema is not None and not factual:
+        raise ValueError('A factual schema requires factual=True')
+    if factual:
+        settings['_factual_delivery'] = dict(factual=True, schema=copy.deepcopy(schema),
+                                             include_events=include_events)
     if {'seed', 'policies', 'decks', 'games', 'threads'} & settings.keys():
         raise ValueError('Pass seeds, policies, decks and threads through evaluate, not config')
     model_files = {}

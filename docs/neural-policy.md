@@ -64,6 +64,12 @@ correlated when they occupy different rows.
 
 ## Collect data and run a Python policy
 
+Current-view callbacks can request `include_events=False` with `factual=True`
+and a `schema` in `game.play()` or `research_workspace.evaluate()`. The factual
+view and candidate order are unchanged; the event list is empty and `eventsFrom`
+equals `eventPosition`. Ladder rows retain a callback's JSON `provenance` when
+provided.
+
 The [live game interface](research-workbench.md#learning-inputs) supplies the
 native factual encoding through `game.decision(factual=True)`: current view and
 action tensors, the acting player's encoded events so far, and its event
