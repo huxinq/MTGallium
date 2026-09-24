@@ -267,6 +267,9 @@ class ArgentumSearchWorld private constructor(
         val expected = try { informationState(viewer) } catch (_: UnsupportedInformationStateException) {
             return HiddenTruthPermutation(null, "UNSUPPORTED_SOURCE_INFORMATION", 0)
         }
+        if (knowledgeConsistencyFailure(viewer, expected) != null) {
+            return HiddenTruthPermutation(null, "SOURCE_KNOWLEDGE_INCONSISTENT", 0)
+        }
         val viewerId = rawPlayer(viewer)
         val remembered = rememberedKnowledgeObjectIds(viewer, expected)
         val state = environment.state
@@ -315,9 +318,9 @@ class ArgentumSearchWorld private constructor(
         val reason = when {
             actual.informationStateDigest != expected.informationStateDigest -> "INFORMATION_DIFFERS"
             actual.knowledge.knowledgeDigest != expected.knowledge.knowledgeDigest -> "KNOWLEDGE_DIFFERS"
-            knowledgeConsistencyFailure(viewer, expected) != null -> "SOURCE_KNOWLEDGE_INCONSISTENT"
             child.knowledgeConsistencyFailure(viewer, expected) != null -> "KNOWLEDGE_INCONSISTENT"
-            actorToAct() == viewer && expandChoices() != child.expandChoices() -> "MENU_DIFFERS"
+            actorToAct() == viewer && (expandChoices() != child.expandChoices() ||
+                expandChoicesForPolicyAdmission() != child.expandChoicesForPolicyAdmission()) -> "MENU_DIFFERS"
             else -> null
         }
         return HiddenTruthPermutation(child.takeIf { reason == null }, reason, changedObjects)

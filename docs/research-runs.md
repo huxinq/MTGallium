@@ -188,8 +188,11 @@ supports test controls. Each permutation assigns card identities among unknown
 slots within the same owner's hand/library, including the viewer's unknown
 library. The engine rebuilds printed card components coherently and shuffles unknown library slots.
 Visible and remembered objects stay fixed, as do engine RNG and history.
-Information and knowledge digests, knowledge consistency, and admitted menus
-must agree. No-op and incompatible proposals are counted as rejections.
+Information and knowledge digests, knowledge consistency, and the candidate and
+admitted menus must agree. No-op and incompatible proposals are counted as
+rejections. The menu is part of each policy's input, so `MENU_DIFFERS` or
+`POLICY_MENU_DIFFERS` rejections mean the adapter's menu depends on hidden truth:
+investigate them rather than reading them as reduced coverage.
 
 The output includes the plan, corpus coordinates, execution context, one
 `policy-N.json` per policy, and a summary. Each finding retains game seed, game

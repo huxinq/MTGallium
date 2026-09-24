@@ -157,10 +157,10 @@ fun checkHiddenInformation(
                     is NativePolicy.Search -> {
                         val specification = policy.session.behaviorSpecification
                         require(specification.search.wallClockBudgetMillis == null) { "Wall-clock search is not conformable" }
+                        val menu = world.decisionContext().expansion.candidates.map { it.signature }
                         val selection = policy.session.select(world, position.actor, seed)
                         val result = (selection as? RootActionSelection.Searched)?.search
-                        ConformanceSelection(selection.choice.signature,
-                            world.decisionContext().expansion.candidates.map { it.signature },
+                        ConformanceSelection(selection.choice.signature, menu,
                             result?.candidates?.map { ConformanceCandidate(it.choice.signature, it.visits,
                                 it.meanValue, result.settlementCountsFor(it.choice)) },
                             result?.diagnostics?.simulations, ConformanceBudget(specification.search.simulations,
