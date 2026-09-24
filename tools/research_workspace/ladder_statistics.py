@@ -137,7 +137,7 @@ def _load_pools(directory):
     return document, ledger
 
 
-def allocate(root, kind, count, claim=None, start=None, declaration=None):
+def allocate(root, kind, count, claim=None, start=None, declaration=None, resume=False):
     """Allocate a frozen contiguous slice; confirmation is locked and append-only.
 
     root must be an existing evidence directory. Development defaults to offset
@@ -147,6 +147,8 @@ def allocate(root, kind, count, claim=None, start=None, declaration=None):
     cannot overlap ANY prior reservation, even under another claim. Store model,
     opponent, hypothesis and sample-size commitments in declaration before play.
     declaration is an optional JSON object, durably stored beside the claim.
+    resume=True can recover the same reservation only when the declaration
+    contains the original checkpoint_id and all committed fields match.
     POSIX advisory locks require a filesystem providing coherent flock semantics.
     """
     if kind not in POOL_SIZES:
@@ -190,12 +192,24 @@ def allocate(root, kind, count, claim=None, start=None, declaration=None):
                     raise ValueError('reused confirmation in ledger')
                 reservations.append(row)
                 previous = digest
+        recovered = None
+        if kind == 'confirmation' and resume:
+            for row in reservations:
+                if row['claim'] == claim:
+                    if (not declaration or not declaration.get('checkpoint_id') or
+                            row['declaration'] != declaration or row['stop'] - row['start'] != count or
+                            (start is not None and start != row['start'])):
+                        raise ValueError('confirmation checkpoint reservation mismatch')
+                    recovered = dict(row, sha256=_sha(row))
+                    start = row['start']
         if start is None:
             start = max((r['stop'] for r in reservations), default=0) if kind == 'confirmation' else 0
         stop = start + count
         if stop > POOL_SIZES[kind]:
             raise ValueError('seed pool exhausted')
-        if kind == 'confirmation':
+        if recovered is not None:
+            record = recovered
+        elif kind == 'confirmation':
             for row in reservations:
                 if row['claim'] == claim:
                     raise ValueError('claim already reserved; use explicit seeds for reproduction')

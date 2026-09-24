@@ -29,6 +29,7 @@ from typing import Any
 from . import REPO, research_build, runtime
 from .game import Action, Decision, ResearchError, Session
 from .ladder_stream import stream_pairs
+from .ladder_checkpoint import checkpointed
 
 Policy = str | Callable[[Decision], Action | int]
 
@@ -234,6 +235,7 @@ def _append(path: Path, row: dict) -> None:
         fcntl.flock(stream, fcntl.LOCK_UN)
 
 
+@checkpointed
 def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[str, Policy],
              incumbent: Policy, incumbent_name: str | None = None,
              decks: Sequence[Mapping[str, int]], setups: int | None = None,
@@ -245,8 +247,9 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
              claim: str | None = None, pool_start: int | None = None,
              evidence_root: str | Path | None = None,
              luck_correction: Mapping[str, Any] | None = None, factual: bool = False,
-             schema: Mapping | None = None, include_events: bool = True) -> dict:
-    """Evaluate one candidate against fixed named opponents using paired seat swaps."""
+             schema: Mapping | None = None, include_events: bool = True,
+             checkpoint: str | Path | None = None) -> dict:
+    """Evaluate paired seat swaps; checkpoint enables durable native-policy recovery."""
     if luck_correction is not None and any(
             (config or {}).get(key) is not None for key in ('maximum_seconds', 'maximumSeconds')):
         raise ValueError('Luck correction does not support time limits; use maximum_decisions')
@@ -334,7 +337,31 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
     candidate_descriptor = {'name': candidate_name, **_descriptor(candidate)}
     incumbent_descriptor = {'name': incumbent_name, **_descriptor(incumbent)}
     opponent_descriptors = {key: _descriptor(value) for key, value in opponents.items()}
-    if seed_pool is not None:
+    if output is None:
+        output = root / 'ladder/ladder.jsonl'
+    saved_plan = None
+    if checkpoint is not None:
+        if not all(isinstance(policy, str) for policy in (candidate, incumbent, *opponents.values())):
+            raise ValueError('Resumable comparisons currently require native policies')
+        checkpoint.prepare(dict(candidate=candidate_descriptor, incumbent=incumbent_descriptor,
+            opponents=opponent_descriptors, opponent_order=list(opponents), decks=deck_snapshot,
+            settings=settings, models=model_files, source=source, setups=setups, threads=threads,
+            seeds=list(seeds) if seeds is not None else None, seed_pool=seed_pool,
+            sequential=sequential, max_pairs=max_pairs, claim=claim, pool_start=pool_start,
+            phase=phase, java_options=list(java_options), java_opts=os.environ.get('JAVA_OPTS', ''),
+            evidence_root=str(root.resolve()), output=str(Path(output).resolve())))
+        retained = checkpoint.read('result.json')
+        if retained is not None:
+            retained = checkpoint.publish(output, retained)
+            if retained['state'] == 'failed':
+                raise ResearchError('Checkpoint retains a failed comparison; refusing to replay outcomes')
+            return retained
+        saved_plan = checkpoint.read('plan.json')
+    if saved_plan is not None:
+        pool_metadata = saved_plan['pool_metadata']
+        seeds = saved_plan['seeds']
+        started_at = saved_plan['started_at']
+    elif seed_pool is not None:
         if seeds is not None:
             raise ValueError('Use either explicit seeds or a seed pool')
         from .ladder_statistics import allocate
@@ -345,8 +372,10 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
                            'opponents': opponent_descriptors, 'decks': list(deck_snapshot),
                            'settings': settings, 'model_files': model_files, 'source': source,
                            'setups': setups, 'planning_design': planning_design()}
+            if checkpoint is not None:
+                declaration['checkpoint_id'] = checkpoint.id
         pool_metadata = allocate(root, seed_pool, setups, claim=claim, start=pool_start,
-                                 declaration=declaration)
+                                 declaration=declaration, resume=checkpoint is not None)
         seeds = pool_metadata['seeds']
     elif pool_start is not None:
         raise ValueError('pool_start requires a seed pool')
@@ -362,6 +391,9 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
             raise ValueError('seeds must contain one unique seed per setup')
         if any(type(seed) is not int or not 0 <= seed < 2**63 for seed in seed_values):
             raise ValueError('seeds must be 63-bit nonnegative integers')
+    if checkpoint is not None and saved_plan is None:
+        checkpoint.write('plan.json', dict(seeds=seed_values, pool_metadata=pool_metadata,
+                                          started_at=started_at))
     build_started = total_started
     runtime(build=build)  # Resolve/build once, before any worker starts a JVM.
     build_elapsed = time.monotonic() - build_started
@@ -409,7 +441,7 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
         return rows
 
     stream_errors = []
-    if tests is None:
+    if tests is None and checkpoint is None:
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             completed = [item for batch in executor.map(run_batch, batches) for item in batch]
     else:
@@ -424,7 +456,7 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
             return pair
         completed, stream_errors = stream_pairs(
             opponents, setups, worker_count,
-            lambda: Session(build=False, java_options=java_options), play_pair, tests)
+            lambda: Session(build=False, java_options=java_options), play_pair, tests, checkpoint)
     elapsed = time.monotonic() - started
     grouped = {opponent_name: [] for opponent_name in opponents}
     for opponent_name, game in completed:
@@ -473,9 +505,11 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
         from .luck_statistics import summarize_luck
         for summary in row['opponents']:
             summary['luck_pilot'] = summarize_luck(summary['raw_games'])
-    if output is None:
-        output = root / 'ladder/ladder.jsonl'
-    _append(Path(output), row)
+    if checkpoint is None:
+        _append(Path(output), row)
+    else:
+        row['timings']['scope'] = 'current invocation only; outcomes include checkpoint recovery'
+        row = checkpoint.publish(output, row)
     if failed:
         raise ResearchError(f'Ladder evaluation failed; reproducible failure row retained at {output}')
     return row

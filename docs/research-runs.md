@@ -57,6 +57,32 @@ row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
                decks=[deck, deck], sequential="improvement")
 ```
 
+For long comparisons, supply `checkpoint=evidence / "runs/my-comparison"`.
+This supports native policies with either fixed or sequential comparisons.
+Re-run the same invocation and checkpoint directory after interruption: completed
+pairs are reused, unfinished assigned pairs are replayed with their original
+seeds, and the sequential test is reconstructed in original pair order. A crash
+can lose the current pair, but not an already committed pair. Assignments already
+in flight when the test stops remain part of the retained result.
+
+The directory is exclusively locked while running. Configuration, model hashes,
+source provenance, worker count and output path must match on resume; retained
+game errors are not silently retried. Keep the original source snapshot for
+recovery. A confirmation resumes its original reservation and claim, never a
+fresh seed slice. Repeating a completed invocation returns the saved result
+without appending a duplicate ladder row.
+
+Read `json.loads((checkpoint / "progress.json").read_text())["value"]` for each
+opponent's completed-game count, partial score, ordered-pair count and sequential
+test state. It updates after each pair; its timestamp can be stale after a crash.
+Partial scores are descriptive and include completed in-flight pairs; they are
+not final strength claims. Checkpoint files use atomic replacement, checksums,
+and file/directory fsync; use storage with coherent POSIX locking and durability.
+Timing in a resumed result covers only the latest invocation, not total run cost.
+If a crash tears the final shared ladder append, publication refuses that damaged
+ledger; the complete result remains in `result.json` for repair without replay.
+Existing calls without `checkpoint` retain their in-memory behavior.
+
 The first pool allocation freezes 8,192 development seeds and 32,768 disjoint
 confirmation seeds from OS randomness in `ladder/seed-pools.json` under the
 evidence root. Development runs start at position zero, so candidates share
