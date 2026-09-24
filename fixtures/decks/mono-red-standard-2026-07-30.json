@@ -1,0 +1,36 @@
+{
+  "id": "mono-red-standard-2026-07-30",
+  "name": "Mono-Red Aggro",
+  "format": "Standard",
+  "publishedDate": "2026-07-30",
+  "source": "https://magic.gg/news/metagame-mentor-the-top-standard-decks-of-july-2026",
+  "mainDeck": {
+    "Mountain": 19,
+    "Hired Claw": 4,
+    "Burst Lightning": 4,
+    "Burnout Bashtronaut": 4,
+    "Hexing Squelcher": 4,
+    "Razorkin Needlehead": 4,
+    "Magebane Lizard": 3,
+    "Nova Hellkite": 3,
+    "Howlsquad Heavy": 3,
+    "Soulstone Sanctuary": 2,
+    "Sunspine Lynx": 2,
+    "Shock": 2,
+    "Lightning Strike": 2,
+    "Rockface Village": 2,
+    "Ojer Axonil, Deepest Might": 2
+  },
+  "sideboard": {
+    "Sear": 3,
+    "Sunspine Lynx": 2,
+    "Ghost Vacuum": 2,
+    "Scorching Shot": 2,
+    "Magebane Lizard": 1,
+    "Soulstone Sanctuary": 1,
+    "Broadside Barrage": 1,
+    "Nova Hellkite": 1,
+    "Zhao, the Moon Slayer": 1,
+    "Slickshot Show-Off": 1
+  }
+}
