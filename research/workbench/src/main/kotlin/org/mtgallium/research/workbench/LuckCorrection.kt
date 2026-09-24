@@ -1,6 +1,7 @@
 package org.mtgallium.research.workbench
 
-import com.wingedsheep.engine.core.CardsDrawnEvent
+import com.wingedsheep.engine.core.*
+import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.engine.state.components.identity.CardComponent
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
@@ -149,6 +150,7 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
         attempt(index, "draw", null) {
             require(draws.size == 1 && draws.single().cardIds.size == 1) { "NOT_SINGLE_DRAW" }
             val draw = draws.single()
+            requirePureDraw(before, actual, trace, draw)
             val seat = before.luckPlayerIdsForHost().entries.single { it.value == draw.playerId }.key
             val state = before.authoritativeStateForHost()
             val library = state.getLibrary(draw.playerId)
@@ -171,12 +173,45 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
                 require(drawShape(replay) == drawShape(trace)) { "DIFFERENT_DRAWS" }
                 val alternate = replay.rawTransitions.flatMap { it.events }.filterIsInstance<CardsDrawnEvent>().single()
                 require(alternate.cardIds.single() == library.first()) { "DIFFERENT_DRAW_SOURCE" }
+                requirePureDraw(before, child, replay, alternate)
                 values(child).forEach { (name, value) ->
                     mean[name] = mean.getValue(name) + value * ids.size / library.size
                 }
             }
             retain(index, "draw", seat, values(actual), mean, groups.size)
         }
+    }
+
+    /**
+     * The same pure-draw predicate is required for the factual outcome and every name branch.
+     * No branch is dropped from the expectation. Keeping every other library slot untouched
+     * excludes draw+mill and other transitions that can expose the swapped remainder to V.
+     */
+    private fun requirePureDraw(before: ArgentumSearchWorld, after: ArgentumSearchWorld,
+        trace: ArgentumReplayStep, draw: CardsDrawnEvent) {
+        require(trace.rawTransitions.size == 1) { "NOT_SINGLE_RAW_TRANSITION" }
+        val pre = before.authoritativeStateForHost()
+        val post = after.authoritativeStateForHost()
+        val transition = trace.rawTransitions.single()
+        for (owner in before.luckPlayerIdsForHost().values) {
+            val library = pre.getLibrary(owner)
+            val expected = if (owner == draw.playerId) library.drop(1) else library
+            require(post.getLibrary(owner) == expected &&
+                transition.beforeState.getLibrary(owner) == library &&
+                transition.afterState.getLibrary(owner) == expected) { "NOT_PURE_LIBRARY_DRAW" }
+        }
+        val events = transition.events
+        require(events.none { it is LibraryShuffledEvent || it is LibraryReorderedEvent || it is LibrarySearchedEvent }) {
+            "OTHER_LIBRARY_OPERATION"
+        }
+        val moves = events.filterIsInstance<ZoneChangeEvent>().filter {
+            it.fromZone == Zone.LIBRARY || it.toZone == Zone.LIBRARY
+        }
+        // At most one recorded library move; some engine draw paths use CardsDrawnEvent alone.
+        require(moves.size <= 1 && moves.all {
+            it.ownerId == draw.playerId && it.entityId == draw.cardIds.single() &&
+                it.fromZone == Zone.LIBRARY && it.toZone == Zone.HAND
+        }) { "OTHER_LIBRARY_MOVE" }
     }
 
     private fun drawShape(trace: ArgentumReplayStep) = trace.rawTransitions.flatMap { it.events }

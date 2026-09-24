@@ -3,8 +3,19 @@ package org.mtgallium.research.workbench
 import com.wingedsheep.engine.core.*
 import com.wingedsheep.engine.state.components.identity.CardComponent
 import com.wingedsheep.sdk.model.Deck
+import com.wingedsheep.sdk.core.Zone
+import com.wingedsheep.sdk.core.Phase
+import com.wingedsheep.sdk.core.Step
+import com.wingedsheep.gym.GameEnvironment
+import com.wingedsheep.gym.ExactlyOneSubmissionResult
+import com.wingedsheep.engine.state.ZoneKey
+import com.wingedsheep.engine.state.components.stack.SpellOnStackComponent
+import com.wingedsheep.engine.state.components.stack.TargetsComponent
+import com.wingedsheep.engine.state.components.stack.ChosenTarget
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
+import org.mtgallium.agent.infoset.argentum.ArgentumReplayStep
+import org.mtgallium.agent.infoset.argentum.ArgentumRawTransition
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.monored.*
 import kotlin.test.*
@@ -76,6 +87,66 @@ class LuckCorrectionTest {
             found = true
         }
         assertTrue(found, "No actual draw encountered")
+    }
+
+    @Test fun `Sokkas Haiku draw plus mill retains no luck correction`() {
+        val deck = mapOf("Mountain" to 8, "Lightning Bolt" to 1, "Sokka's Haiku" to 1)
+        val environment = GameEnvironment.create(registry)
+        environment.reset(GameConfig(players = listOf(
+            PlayerConfig("A", Deck.of(*deck.map { it.key to it.value }.toTypedArray())),
+            PlayerConfig("B", Deck.of(*deck.map { it.key to it.value }.toTypedArray()))),
+            startingHandSize = 0, skipMulligans = true, useHandSmoother = false,
+            startingPlayerIndex = 0, seed = 11))
+        val owner = environment.playerIds.first()
+        var state = environment.state
+        fun card(name: String) = state.getLibrary(owner).first {
+            state.getEntity(it)?.get<CardComponent>()?.name == name
+        }
+        val bolt = card("Lightning Bolt")
+        val haiku = card("Sokka's Haiku")
+        val land = card("Mountain")
+        state = state.removeFromZone(ZoneKey(owner, Zone.LIBRARY), land)
+            .addToZone(ZoneKey(owner, Zone.BATTLEFIELD), land)
+        state = state.removeFromZone(ZoneKey(owner, Zone.LIBRARY), bolt).pushToStack(bolt)
+            .updateEntity(bolt) { it.with(SpellOnStackComponent(owner)) }
+        state = state.removeFromZone(ZoneKey(owner, Zone.LIBRARY), haiku).pushToStack(haiku)
+            .updateEntity(haiku) { it.with(SpellOnStackComponent(owner)).with(TargetsComponent(
+                listOf(ChosenTarget.Spell(bolt), ChosenTarget.Permanent(land)))) }
+        state = state.copy(activePlayerId = owner, priorityPlayerId = owner,
+            phase = Phase.PRECOMBAT_MAIN, step = Step.PRECOMBAT_MAIN,
+            priorityPassedBy = emptySet(), continuationStack = emptyList())
+        environment.restore(state, environment.playerIds, environment.stepCount)
+        fun snapshot() = ArgentumSearchWorld.create(environment.fork(), "haiku-luck-regression", 11, 11,
+            knownDecks = mapOf("p0" to deck, "p1" to deck))
+        val correction = LuckCorrection(LuckCorrectionConfig(opening = false), "p0")
+        var sawDrawAndMill = false
+        repeat(4) {
+            if (sawDrawAndMill) return@repeat
+            val before = requireNotNull(correction.before(snapshot()))
+            val choice = pass(before)
+            val nativeBefore = environment.state
+            val action = PassPriority(requireNotNull(nativeBefore.priorityPlayerId))
+            // Mill leaves selective-reveal metadata unsupported by the policy adapter. Exercise
+            // the host rejection gate with the real native trace, without projecting that state
+            // or stripping the metadata to make an unsupported world appear admissible.
+            assertIs<ExactlyOneSubmissionResult.Applied>(environment.stepExactlyOne(action))
+            val world = snapshot()
+            val trace = ArgentumReplayStep(SearchStepResult(accepted = true), listOf(
+                ArgentumRawTransition(action, nativeBefore, environment.state, environment.lastStepEvents, null)))
+            val draws = trace.rawTransitions.flatMap { it.events }.filterIsInstance<CardsDrawnEvent>()
+            if (draws.isNotEmpty()) {
+                assertEquals(1, draws.single().cardIds.size)
+                assertEquals(before.authoritativeStateForHost().getLibrary(owner).size - 4,
+                    world.authoritativeStateForHost().getLibrary(owner).size)
+                correction.after(before, choice, world, trace)
+                assertEquals("skipped:NOT_PURE_LIBRARY_DRAW", correction.events.single().status)
+                assertTrue(correction.events.none { it.status == "retained" })
+                assertEquals(0.0, correction.result(null)["models"]!!.jsonObject["v2"]!!
+                    .jsonObject["sum"]!!.jsonPrimitive.double)
+                sawDrawAndMill = true
+            }
+        }
+        assertTrue(sawDrawAndMill, "Sokka's Haiku did not resolve its draw and mill")
     }
 
     @Test fun `library order cannot enter snapshot linear features`() {

@@ -108,7 +108,7 @@ estimate and ordinary fixed-sample interval.
 default and never feeds a stopping decision. The host JVM combines evaluators on
 each player's own information into a candidate win probability; library order
 is excluded. The pilot compares the public V2 evaluator and optional supplied
-linear weights, retaining model hashes. For eligible single-card draws it
+linear weights, retaining model hashes. For eligible pure single-card draws it
 replays each distinct remaining name, weighted by copies. Opening hands and
 mulligan redraws use independent uniform re-permutations. Other randomness and
 failed counterfactuals are skipped and counted. Event sampling is chosen before
@@ -124,10 +124,14 @@ Retained terms are unweighted: skipped events contribute zero. The default
 enabled rate is 1; measure overhead before choosing a rate for compute runs.
 The pilot V uses current own-perspective snapshots without history features,
 and maps values as `0.5 + (candidate_value - opponent_value) / 4`. Known library
-order is unsupported, and hand smoothing is rejected because its opening
+order and transitions that also mill, shuffle, search or reorder a library are
+skipped. The pure-draw guard applies to the actual step and every counterfactual.
+Hand smoothing is rejected because its opening
 distribution is not uniform. A deterministic mirror may have zero raw pair
 variance; its paired ratio is then undefined, and the additional game-level
 ratio uses setup-pair cluster resampling.
+Wall-clock game limits are rejected with correction enabled, so instrumentation
+cannot turn an otherwise completed game into a timeout loss; use decision limits.
 
 Rows retain seeds, config, source provenance, model hashes, individual outcomes,
 and changed-decision counts. At every candidate decision the incumbent chooses
