@@ -1,8 +1,8 @@
 # MTGallium glossary
 
 Definitions used by the [API map](terminology.md), [architecture](architecture.md),
-and [formal model](whitepapers/README.md). Usage and commands belong in the
-[research guide](research-workbench.md).
+and [white paper](whitepapers/README.md). Usage and commands belong in the
+[research guides](README.md#run-research).
 
 ## Information and knowledge
 
@@ -37,7 +37,7 @@ snapshot. See [fields][policy-contract].
 
 ### Information-state representation
 
-`InformationStateRepresentation` combines a snapshot, safe event history,
+`InformationStateRepresentation` combines a snapshot, player-visible event history,
 represented exact knowledge, and candidate choices. Its digest includes the
 candidate expansion. `BoundedPolicyInput` further limits the representation for
 neural policies. See [fields][policy-contract].
@@ -68,7 +68,7 @@ full engine state. See [information boundaries](architecture/information-and-dec
 
 ### Represented knowledge
 
-Exact facts recoverable from declared known decks and the player's safe history
+Exact facts recoverable from declared known decks and the player's visible history
 (`PolicyKnowledgeState`), including remembered card identities and library
 positions. Tracking can be explicitly incomplete after a visible transition the
 adapter cannot represent exactly. See [the knowledge contract][knowledge-contract].
@@ -83,7 +83,8 @@ A posterior incorporates observed evidence under the configured inference model.
 
 A backend maintains the belief and publishes a snapshot with aggregate queries
 and independent weighted worlds for continuation. Both capabilities refer to the
-same perspective, epistemic state, inference model, and runtime token.
+same perspective, epistemic state, inference model, and snapshot token (an
+opaque identity for one snapshot).
 
 ### Belief queries
 
@@ -111,13 +112,8 @@ objects and zones, and remembered library prefix checked by
 
 Discard hypothetical descendants that cannot explain newly observed information
 and renormalize the remainder. The conditioned tracker combines this test with
-action likelihood before resampling. See [belief maintenance](belief-maintenance.md).
-
-### Particle update ancestry
-
-An output-to-input parent record from a particle update. Parent indices refer to
-the population before filtering; repeated copies can share a parent. See
-[particle maintenance](architecture/policies-and-beliefs.md).
+action likelihood before resampling. See
+[belief maintenance](architecture/policies-and-beliefs.md#belief-maintenance).
 
 ## Actions and decisions
 
@@ -131,13 +127,14 @@ details; routing names the current objects needed for execution.
 
 An exact declaration retains the native action and occurrence-specific routing.
 A search group collects declarations under a planning abstraction. See
-[action correspondence](action-correspondence.md).
+[exact actions](architecture/information-and-decisions.md#exact-actions-and-search-groups).
 
 ### Qualified observed-object correspondence
 
 A cross-world join using the observing player's acquired object handles and
 checked incarnation continuity. This permits matching an actor's choice to
-objects the observer remembers. See [the adapter boundary](action-correspondence.md).
+objects the observer remembers. See
+[cross-world correspondence](architecture/information-and-decisions.md#cross-world-action-correspondence).
 
 ### Conditional member probability
 
@@ -190,13 +187,21 @@ and `payoffs=None`.
 ### Snapshot locator
 
 A reference to one entry in a current observation. Remembered object references
-instead link occurrences across observations. See [history references](history-event-equivalence.md).
+instead link occurrences across observations. See
+[history references](architecture/information-and-decisions.md#remembered-battlefield-references).
+
+### Incarnation
+
+One engine object's identity from one zone entry to the next; under the MTG
+rules, an object that changes zones becomes a new object. Incarnations stay
+inside the trusted adapter, which checks remembered handles against them so a
+handle never follows a card into a later incarnation.
 
 ### Qualified resolution source
 
 A reference to an observed stack spell, matched to a native stack-to-battlefield
 incarnation transition. It names the spell before resolution. See
-[history references](history-event-equivalence.md).
+[history references](architecture/information-and-decisions.md#remembered-battlefield-references).
 
 ## Search and learning
 
@@ -237,7 +242,9 @@ See the counterexample in [the formal model](whitepapers/README.md).
 
 A continuation from a captured actual game position. Its return is conditional
 on that hidden world and the continuation policies. Forking copies game and
-native search state; copy Python policy state separately.
+native search state; copy Python policy state separately. "Factual" here means
+the actual game; the [factual policy tensors](#factual-policy-tensors) use the
+word differently.
 
 ### Visits and backups
 
@@ -265,7 +272,8 @@ the settlements backed to a node or branch under its actual adaptive sampling.
 | Sampled-world evaluation | A score computed using a complete hypothetical world. |
 | Bounded-rollout settlement | A value supplied by the configured rule at a continuation limit. |
 
-`SearchSettlementOrigin` records which route supplied a backed value.
+A settlement is the value one simulation backs up into the tree, supplied by one
+of these routes. `SearchSettlementOrigin` records which route supplied it.
 
 ### Features, model, fit, and checkpoint
 
@@ -276,7 +284,7 @@ by the [linear and residual evaluators](value-models.md).
 
 ### Learned policy memory
 
-Numeric model state computed from a player's delivered information prefix.
+Numeric model state computed from the events delivered to a player so far.
 Each game, player, and branch owns separate memory. Observation updates advance
 its history cursor; repeated scoring does not. See [neural policies](neural-policy.md).
 
@@ -290,7 +298,7 @@ See [the tensor contract](neural-policy.md).
 
 A test that changes a declared irrelevant input and checks that the relevant
 output remains unchanged. Pair it with a case that must produce a different
-output. See [history normalization tests](history-event-equivalence.md).
+output. See [history event order](architecture/information-and-decisions.md#history-event-order).
 
 ## Experiments and evidence
 
@@ -298,12 +306,6 @@ output. See [history normalization tests](history-event-equivalence.md).
 
 The treatment is the candidate configuration; the control is its comparison.
 The intervention is the changed component or behavior.
-
-### Provenance
-
-The material source, engine revision, configuration, and inputs that produced a
-result. Include relevant dirty changes when a commit alone does not describe the
-executed source. See [historical source](history.md).
 
 ### Statistical grouping
 
@@ -315,7 +317,7 @@ retain their shared game group.
 
 A referee replay contains full engine state and stays private. Decision records
 contain the acting player's information and accepted choice. The current replay
-reader supplies state playback. See [recording](research-workbench.md#games).
+reader supplies state playback. See [output files](research-cli.md#output-and-limits).
 
 ### Population and seed group
 

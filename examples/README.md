@@ -1,17 +1,17 @@
 # Research examples
 
-The current direct research CLI has three public examples:
+Small public fixtures and scripts for the research tools. They are not private
+research evidence or a playing-strength benchmark.
 
-- `research-games.json` and `research-kernel-rows.json` exercise its JSON
-  commands with synthetic fixtures. They are not private research evidence or a
-  playing-strength benchmark. See the [runnable commands](../docs/research-workbench.md#runnable-public-examples).
+- `research-games.json` and `research-kernel-rows.json` exercise the `games`,
+  `fit` and `predict` commands with synthetic data. See the
+  [runnable commands](../docs/research-workbench.md#runnable-public-examples).
 - `python-game-learning.py` creates and branches live games through one JVM,
-  collects native factual tensors, and can train the ordinary PyTorch learner for
-  use as a live Python policy. See [the live-interface guide](../docs/research-workbench.md#live-games-from-python).
-
-## Python-authored research
-
-`python-game-learning.py` creates and branches live games, collects factual
-tensors, and optionally trains a PyTorch model and runs it as a Python policy.
-Run it with a fresh output directory and `--train --epochs 2` for the complete
-technical journey. Its short-deck imitation task does not measure playing strength.
+  collects factual tensors, and with `--train --epochs 2` trains a PyTorch model
+  and plays with it as a Python policy. Give it a fresh output directory. See
+  [learning inputs](../docs/research-workbench.md#learning-inputs).
+- `python-value-search.py` compares hand-written value weights at search
+  horizons of 2 and 8 decisions. See [value models](../docs/value-models.md).
+- `python-game-throughput.py` compares native, mixed Python/native, and recorded
+  play on matched burn and creature games; `--traffic` adds response bytes and
+  counts. See [game-loop measurement](../docs/research-workbench.md#measure-the-game-loop).

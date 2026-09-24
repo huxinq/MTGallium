@@ -4,17 +4,16 @@ Use the current public checkout for source development. Preserve unrelated work,
 private research data and the Argentum pin. Trace a change through its callers;
 update the affected tests, examples and documentation. Prefer names from MTG and
 ordinary research; the [glossary](docs/glossary.md) and [API map](docs/terminology.md)
-locate existing meanings.
+record existing meanings.
 
 ## Behavior changes
 
 For changes to player information, actions, simulation, value interpretation or
 the Argentum revision, read the affected architecture and trace the owning code.
-Use a small case that distinguishes the intended behavior from a plausible error.
-Get an independent [semantic review](.agents/roles/semantic-reviewer.md) of the
-actual diff and relevant checks; repair material findings. Report unavailable
-review and continue independent implementation and verification. Routine renames
-and prose edits use ordinary checks.
+Add a small test that distinguishes the intended behavior from a plausible error.
+Where it applies, add a same-seed test showing unrelated decisions are unchanged.
+The owner or a reviewing agent reviews the diff and relevant checks. Routine
+renames and prose edits use ordinary checks.
 
 Feature retirement can remove obsolete tests and interfaces. Resolve only
 unsettled changes to the research objective, game model or interpretation with
@@ -34,8 +33,7 @@ before adding variants. A scripted edit should check its expected matches.
 
 Describe the resulting behavior and relevant checks in the pull request. Write
 commit subjects for the resulting state; explain non-obvious mathematical or
-compatibility changes in the body. Use the [research-record guide](docs/research-records.md)
-for work requiring persistent notes.
+compatibility changes in the body.
 
 ## Agent guidance
 
@@ -53,5 +51,5 @@ public issues and pull requests. Use independently reviewable public fixtures.
 Contributions are submitted under the project MIT License (inbound=outbound).
 Use a Developer Certificate of Origin sign-off on every commit, for example
 `git commit -s`. By contributing, you certify that you have the right to submit
-the change under those terms. No CLA is currently required. Do not submit
+the change under those terms. No CLA is required. Do not submit
 material whose redistribution terms are unclear.

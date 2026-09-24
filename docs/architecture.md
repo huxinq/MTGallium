@@ -1,11 +1,8 @@
 # MTGallium architecture
 
-MTGallium supplies perspective-safe policy information over a pinned Argentum
-engine, information-set planning, a narrow Mono-Red model runtime, and direct
-research tools.
-
-The [terminology guide](terminology.md) maps concepts to APIs; the
-[glossary](glossary.md) defines them and links to the [white paper](whitepapers/README.md).
+MTGallium gives each policy only the information its player could legitimately
+know, plans over the possible hidden states (information-set search) on a pinned
+Argentum engine, and provides Mono-Red value models and research tools.
 
 ## Primary dataflow
 
@@ -18,21 +15,19 @@ Argentum state → trusted adapter → captured player information + admitted me
                                       ↓
                   represented history / belief update → next decision
 
-private execution → ordinary decision and replay records
-                                         ↓
-                            numerical core → study readouts
+private runs → decision and replay records → kernel fitting / neural training → study results
 ```
 
 The adapter projects engine state into player information and captures it with
-the available menu. It rebinds the chosen semantic action before asking the engine
-to apply it. Simulation stops at termination, the next player decision, or a typed
-execution failure. Responses, targets, ordering and mulligans require decisions.
+the available menu. It rebinds the chosen semantic action to the current engine
+objects before asking the engine to apply it. Simulation advances to the next
+player decision; see [simulation](architecture/information-and-decisions.md#live-selection).
 
 ## Module responsibilities
 
 | Location | Responsibility |
 | --- | --- |
-| `agent/infoset-semantics` | Player information, history, semantic actions, and safe contracts. |
+| `agent/infoset-semantics` | Player information, history, semantic actions, and the contracts policies see. |
 | `agent/infoset-planning` | Planning algorithms and root selection. |
 | `agent/infoset-argentum` | Trusted Argentum projections, engine-backed worlds, and transitions. |
 | `agent/mono-red-models` | Mono-Red features and value evaluators. |
@@ -47,23 +42,13 @@ execution failure. Responses, targets, ordering and mulligans require decisions.
 transitively. Semantics, planning and models stay isolated from the engine and
 application layers; agent and integration modules cannot depend on evaluation.
 
-## Information and action boundaries
+## Detailed contracts
 
-The [information and decision reference](architecture/information-and-decisions.md)
-describes captured views, action identity, and deferred information projection.
-The [history-equivalence guide](history-event-equivalence.md) covers opt-in history
-normalization.
-
-Policy role composition, belief snapshots and terminal continuation contracts
-live in the [policy and belief reference](architecture/policies-and-beliefs.md).
-The [belief-maintenance guide](belief-maintenance.md) owns conditioned particle
-maintenance details. [Value models](value-models.md) documents scalar features and
-search cutoffs; [neural policy](neural-policy.md) covers tensors, player memory,
-training and ONNX sessions.
-
-## Evidence and dependencies
-
-The [research guide](research-workbench.md) covers live Python sessions, Kotlin
-entry points, numerical routines and output files. The
-[evidence reference](architecture/evidence-and-research.md) describes record
-contents, partial output and source metadata.
+- [Information and decisions](architecture/information-and-decisions.md): player
+  views, live selection, action identity across worlds, and history event order.
+- [Policies and beliefs](architecture/policies-and-beliefs.md): search
+  composition, belief maintenance and snapshots, and continuations.
+- [Value models](value-models.md): value features, linear evaluators and search
+  leaves.
+- [Neural policy training](neural-policy.md): tensors, player memory, training
+  and ONNX sessions.

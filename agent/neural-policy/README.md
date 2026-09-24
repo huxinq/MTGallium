@@ -9,5 +9,5 @@ schema, and history commitment; forking copies memory at the player's prefix.
 
 The runtime supports current-view, GRU, and bounded-attention ONNX graphs on CPU.
 Python training and inference use the same tensor schema. See
-[neural policies](../../docs/neural-policy.md) for tensor limits, graph roles,
+[neural policy training](../../docs/neural-policy.md) for tensor limits, graph roles,
 session ownership, training, and export.

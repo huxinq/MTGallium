@@ -1,37 +1,32 @@
 # MTGallium
 
-MTGallium is an independently developed research codebase for information-safe
-planning and learning in Magic: The Gathering. Current experiments use a narrow
-Mono-Red scope.
+MTGallium is an independently developed research codebase for planning and
+learning in Magic: The Gathering where each policy acts only on information its
+player could legitimately know. It searches over the possible hidden states
+(information-set search) on a pinned
+[Argentum](https://github.com/wingedsheep/argentum-engine) engine. Current
+experiments use a narrow Mono-Red scope.
 
-The native policy uses information-set search over a pinned Argentum engine.
+## Try it
 
-For research, use the [direct library and CLI](docs/research-workbench.md):
-normal `build`, `games`, `fit`, `predict`, `encode`, and `show` commands, or an
-ordinary Kotlin main or Python program. Dirty-source builds and caller-chosen
-resource settings are supported.
-
-The [neural learner](docs/neural-policy.md) runs directly with PyTorch and ordinary
-JSON, with optional production-format ONNX export.
-
-Start with the [documentation task guide](docs/README.md) to understand the system,
-run or read an experiment, or implement a change. The [architecture](docs/architecture.md)
-introduces the modules and boundaries. Use the [white paper](docs/whitepapers/README.md)
-for the mathematical model and the [glossary](docs/glossary.md) for shared definitions.
-
-## Build and test
-
-Install Git with submodules, JDK 21, and `just`, then run:
+Install Git, JDK 21, Python 3 and `just`, then:
 
 ```bash
 git submodule update --init --recursive
-just check
+work=$(mktemp -d)
+python3 tools/mtgallium-research games examples/research-games.json "$work/game"
+python3 tools/mtgallium-research show "$work/game/results.json"
 ```
 
-The Argentum gitlink pins the engine revision. See its
+The [research quick start](docs/research-workbench.md) continues with live games
+from Python. The [documentation index](docs/README.md) lists the rest by task.
+
+## Build and test
+
+`just check` runs the public tests. `just architecture-check` checks module
+dependency boundaries; `just policy-check` runs the policy and research tests
+only. The Argentum gitlink pins the engine revision; see its
 [integration record](docs/history/argentum-performance-integration.md).
-`just architecture-check` checks dependency boundaries; `just policy-check`
-runs policy and research tests.
 
 Keep private replays and research results outside the checkout.
 
@@ -43,5 +38,5 @@ Coast / Magic: The Gathering material, remain subject to their own rights and
 licenses and are not granted under the MTGallium MIT license. MTGallium is
 unofficial and is not affiliated with or endorsed by Wizards of the Coast.
 
-Contributions are under MIT inbound=outbound terms and require DCO sign-off; no
-CLA is currently required. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are under MIT inbound=outbound terms with DCO sign-off. See
+[CONTRIBUTING.md](CONTRIBUTING.md).

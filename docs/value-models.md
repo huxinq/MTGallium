@@ -31,8 +31,9 @@ key are summed before applying `sign(x) * log(1 + abs(x))`; zero entries are
 omitted. The emission code in `ValueFeatures.kt` defines the feature vocabulary.
 
 `LinearValueEvaluator` accumulates `bias + sum(weight * feature)` in JVM string
-key order, then clips to `[-1, 1]`. `evaluateDetailed` returns both the raw score
-and clipped value.
+key order, then clips to `[-1, 1]` by default. Pass `LinearValueLink.TANH` to use
+`tanh(score)` for logistic-outcome deployments. `evaluateDetailed` returns both
+the raw score and deployed value.
 
 `ResidualValueEvaluator` adds its linear score to `MonoRedInformationEvaluator`
 before clipping. Residual coefficients accumulate in UTF-8 byte order. An
@@ -62,8 +63,15 @@ with a bounded rollout and `EVALUATE` cutoff. It evaluates at the first player
 decision with `turnNumber >= rootTurnNumber + completedTurns`.
 `maxPolicyDecisions` is a safety limit for reaching that boundary.
 
-The workbench uses `MonoRedInformationEvaluator` when `valueWeights` is absent;
-supplying `LinearWeights` selects `LinearValueEvaluator` instead. See the
+Search diagnostics count `unsettledLeafEvaluations`: evaluator calls where
+`isVolatile` finds a volatile position, meaning a nonempty stack, active combat,
+a pending combat, damage or ordering decision, or lethal creature damage.
+Terminal payoffs and neutral settlements are not counted. "Unsettled" here means
+the position, not the backed-up value.
+
+A [games plan](research-cli.md#games-plan) uses `MonoRedInformationEvaluator`
+when `valueWeights` is absent; supplying `LinearWeights` selects
+`LinearValueEvaluator` instead. See the
 [value-search example](../examples/python-value-search.py) for a small live
 comparison using hand weights and rollout horizons.
 

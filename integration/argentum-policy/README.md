@@ -1,6 +1,7 @@
 # Argentum policy integration
 
-Configure `game.ai.search-teacher.known-decks` with exactly the replay seats `p0` and `p1`.
+Configure `game.ai.search-teacher.known-decks` (`search-teacher` is the historical
+name of the search policy) with exactly the replay seats `p0` and `p1`.
 Each declaration is an open-deck card-count map and must match that seat's actual game deck;
 the controller rejects a replay whose initial deck multiset differs. Declarations may differ
 between seats and have any positive size supported by the game setup.

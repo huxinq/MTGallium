@@ -18,7 +18,7 @@ Build from the repository root with a recent TeX Live installation containing
 LuaLaTeX, the LaTeX tagging packages, TeX Gyre fonts, and the standard recommended
 and extra packages. The delivered build was checked with TeX Live 2026:
 
-```sh
+```bash
 mkdir -p build/whitepaper output/pdf
 latexmk -lualatex -interaction=nonstopmode -halt-on-error \
   -outdir=build/whitepaper docs/whitepapers/information-and-search.tex
@@ -35,13 +35,6 @@ The PDF includes English-language metadata, document structure tags, table
 header cells, diagram alternative descriptions, bookmarks, and associated
 MathML for its tagged formulas. This follows the
 [LaTeX tagging project's build guidance](https://tagging-project.latex-project.org/documentation/usage-instructions).
-The final artifact was checked for these structures and visually inspected.
-Full screen-reader testing, mathematical speech review, and PDF/UA conformance
-validation have not been performed; the edition does not claim that certification.
-
-Version 1.4 completes the limited copyedit: evaluator and node introductions
-explain their purpose, execution and record-update prose describes the required
-agreement before its equation, and the application-scope paragraph is shorter.
-The visitation example is identified as a variant, exercise headings are more
-neutral, and the role-exchange detail appears with symmetry. Structure, formal
-results, calculations, orange/blue coding, and the source revision are preserved.
+The PDF was checked for these structures and inspected visually. It has not
+been screen-reader tested, reviewed for mathematical speech, or validated
+against PDF/UA.

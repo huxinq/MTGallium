@@ -17,6 +17,6 @@ git show f839521:docs/research-workflow.md
 git show f839521:docs/protocols/factual-residual.md
 ```
 
-Current experiments use the [research library and CLI](research-workbench.md).
+Current experiments use the [research quick start](research-workbench.md).
 The [Argentum integration record](history/argentum-performance-integration.md)
 describes the upstream contributions included in the pinned engine.

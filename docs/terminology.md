@@ -1,4 +1,4 @@
-# Concepts and APIs
+# API map
 
 The [white paper](whitepapers/README.md) defines the mathematical model; the
 [glossary](glossary.md) defines recurring terms.
@@ -6,7 +6,7 @@ The [white paper](whitepapers/README.md) defines the mathematical model; the
 | Concept | Current API |
 | --- | --- |
 | Current player view | `PlayerObservationSnapshot` |
-| Snapshot, safe history, exact knowledge, and candidates | `InformationStateRepresentation` |
+| Snapshot, visible history, exact knowledge, and candidates | `InformationStateRepresentation` |
 | Candidate-free represented information | `EpistemicState` |
 | Captured information and ordered action menu | `DecisionSite` |
 | Remembered facts | `PolicyKnowledgeState` |

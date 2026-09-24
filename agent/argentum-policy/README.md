@@ -9,9 +9,9 @@ a factual continuation copies that state alongside the world. Each search starts
 with a fresh tree.
 
 `ArgentumParticleBeliefBackend` publishes a `BeliefSnapshot` with aggregate
-queries and independently materialized weighted worlds. See [conditioned
-maintenance](../../docs/belief-maintenance.md).
+queries and independently materialized weighted worlds. See [belief
+maintenance](../../docs/architecture/policies-and-beliefs.md#belief-maintenance).
 
 Exact observed-action execution checks the child against the resolved world
 revision, including history-reference state, before accepting the transition.
-See [action correspondence](../../docs/action-correspondence.md).
+See [exact actions](../../docs/architecture/information-and-decisions.md#exact-actions-and-search-groups).

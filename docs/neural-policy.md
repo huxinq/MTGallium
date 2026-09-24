@@ -1,4 +1,4 @@
-# Direct neural research
+# Neural policy training
 
 `tools/neural_policy` provides PyTorch models over factual byte inputs,
 whole-sequence training, checkpoints, and optional ONNX export. The provided
@@ -53,8 +53,8 @@ input encoding, not an approved experiment profile. Targets are candidate-aligne
 probability vectors. Context-only decisions have no target and zero loss weight.
 
 `data.pack` creates tensors and masks without passing episode identities, targets,
-or group labels to the predictive model. Sequence scores use only the delivered
-prefix at the decision position. `reduced_loss` takes a weighted eligible-decision
+or group labels to the predictive model. Sequence scores use only the events
+delivered before the decision. `reduced_loss` takes a weighted eligible-decision
 mean within each source group, then an equal mean over groups. Empty weighted
 groups raise an error. Future observations and padding stay unavailable at earlier
 decisions.
@@ -64,17 +64,17 @@ correlated when they occupy different rows.
 
 ## Collect data and run a Python policy
 
-The [live game interface](research-workbench.md#live-games-from-python) supplies
-the existing native factual encoding through `game.decision(factual=True)`. Its
-result contains current view/action tensors, the acting player's encoded event
-prefix, and its event position. The Python experiment assigns target, group, split
+The [live game interface](research-workbench.md#learning-inputs) supplies the
+native factual encoding through `game.decision(factual=True)`: current view and
+action tensors, the acting player's encoded events so far, and its event
+position. The Python experiment assigns target, group, split
 and weight; game outcomes are not automatically joined as action labels.
 
 [`examples/python-game-learning.py`](../examples/python-game-learning.py) demonstrates
 collection, a factual branch, explicit imitation-label construction, training, and
 live action selection by the trained PyTorch model in one Python program. Run it
 with `--train --epochs 2` in a PyTorch environment. The live example recomputes
-the model from each player's delivered prefix; a stateful Python policy manages
+the model from the events delivered to each player; a stateful Python policy manages
 and forks its own memory.
 
 ## Save, continue, or change treatment
@@ -94,8 +94,8 @@ Each fresh output directory contains `context.json`, `checkpoint.pt`, and
 `training.json` after training completes. The final `result.json` records the new
 epochs and their losses separately from previous checkpoint metadata. A requested
 optional readout or export may fail after useful training has completed; the
-checkpoint and training receipt remain available, but there is no final success
-receipt for the failed request. Output directories are not implicitly overwritten.
+checkpoint and `training.json` remain available, but no `result.json` is
+written for the failed request. Output directories are not implicitly overwritten.
 
 ## Optional production-format export
 
