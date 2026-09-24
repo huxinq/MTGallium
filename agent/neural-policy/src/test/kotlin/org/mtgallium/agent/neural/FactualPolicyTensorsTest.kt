@@ -75,6 +75,27 @@ class FactualPolicyTensorsTest {
         assertTrue(first.view.all { it != 0 } && first.actions.flatten().all { it != 0 })
     }
 
+    @Test fun `ordinal blocker references use a visible group without exposing semantic identity`() {
+        fun encode(prefix: String): FactualDecisionTensors {
+            val members = listOf("zone:p0:BATTLEFIELD:$prefix:0", "zone:p0:BATTLEFIELD:$prefix:1")
+            val group = "object:p0:BATTLEFIELD:$prefix"
+            val state = NeuralFixtures.state(cards = members.map(NeuralFixtures::card))
+            val choice = SemanticChoice.create(kind = SemanticChoiceKind.ACTION,
+                operationFamily = SemanticOperationFamily.DECLARE_BLOCKERS,
+                display = SemanticChoiceDisplay("block"), canonicalPayload = buildJsonObject {
+                    put("blockers", buildJsonObject {
+                        put("$group#0", buildJsonArray { add("$group#1") })
+                    })
+                })
+            return encoder.decision(NeuralFixtures.site(state, listOf(choice)), mapOf(group to members))
+        }
+        val first = encode("a".repeat(64))
+        val renamed = encode("b".repeat(64))
+        assertEquals(first, renamed)
+        assertContains(text(first.actions.single()), "visibleGroup")
+        assertFalse(text(first.actions.single()).contains("a".repeat(64)))
+    }
+
     @Test fun `event ordinal is not a feature and private entitlement is checked`() {
         val event = NeuralFixtures.event(0, 1)
         assertEquals(encoder.event(event, "p0", listOf("p0", "p1")),
@@ -86,6 +107,17 @@ class FactualPolicyTensorsTest {
                 "p0", listOf("p0", "p1"))
         }
         assertFailsWith<FactualEncodingException> { encoder.event(event.copy(detail = null), "p0", listOf("p0", "p1")) }
+    }
+
+    @Test fun `opaque combat map keys are qualified within the delivered event`() {
+        fun event(key: String) = NeuralFixtures.event(0).copy(kind = PolicyHistoryEventKind.COMBAT_DECLARATION,
+            detail = PerspectiveEventDetail.Combat(declaration = "blockers", actorId = "p0",
+                assignments = mapOf(key to listOf(key))))
+        val first = encoder.event(event("a".repeat(64)), "p0", listOf("p0", "p1"))
+        val renamed = encoder.event(event("b".repeat(64)), "p0", listOf("p0", "p1"))
+        assertEquals(first, renamed)
+        assertContains(text(first), "ref-0")
+        assertFalse(text(first).contains("a".repeat(64)))
     }
 
     @Test fun `input limits refuse instead of truncating and captured bytes are detached`() {
