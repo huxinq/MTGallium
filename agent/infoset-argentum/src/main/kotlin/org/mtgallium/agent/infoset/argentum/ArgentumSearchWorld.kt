@@ -262,6 +262,67 @@ class ArgentumSearchWorld private constructor(
         return HiddenTruthConformanceProbe(informationEqual, inputEqual, expansionEqual, null)
     }
 
+    /** Trusted diagnostic only: alter unknown identities without advancing game chance or history. */
+    fun permuteHiddenTruthForHost(viewer: String, seed: Long): HiddenTruthPermutation {
+        val expected = try { informationState(viewer) } catch (_: UnsupportedInformationStateException) {
+            return HiddenTruthPermutation(null, "UNSUPPORTED_SOURCE_INFORMATION", 0)
+        }
+        val viewerId = rawPlayer(viewer)
+        val remembered = rememberedKnowledgeObjectIds(viewer, expected)
+        val state = environment.state
+        val assignments = linkedMapOf<EntityId, com.wingedsheep.sdk.model.CardDefinition>()
+        val visibility = com.wingedsheep.engine.view.Visibility(cardRegistry())
+        val random = kotlin.random.Random(seed)
+        var changed = state
+        var changedObjects = 0
+        // Separate owners preserve each known deck; known library positions stay fixed.
+        for (owner in environment.playerIds) {
+            val slots = listOf(Zone.HAND, Zone.LIBRARY).flatMap { zone ->
+                val ids = if (zone == Zone.HAND) state.getHand(owner) else state.getLibrary(owner)
+                ids.filter { id -> id !in remembered &&
+                    !visibility.isCardIdentityVisibleTo(state, ZoneKey(owner, zone), id, viewerId) &&
+                    state.getEntity(id)?.get<CardComponent>() != null }
+            }
+            val cards = slots.map { state.getEntity(it)!!.get<CardComponent>()!! }
+            val shuffled = cards.shuffled(random)
+            slots.forEachIndexed { index, id ->
+                if (cards[index].name != shuffled[index].name) changedObjects++
+                assignments[id] = requireNotNull(cardRegistry().getCard(shuffled[index].name))
+            }
+            val libraryKey = ZoneKey(owner, Zone.LIBRARY)
+            val library = state.getLibrary(owner)
+            val unknown = slots.toSet()
+            val shuffledIds = library.filter { it in unknown }.shuffled(random).iterator()
+            changed = changed.copy(zones = changed.zones + (libraryKey to library.map {
+                if (it in unknown) shuffledIds.next() else it
+            }))
+        }
+        if (changedObjects == 0) return HiddenTruthPermutation(null, "NO_CHANGED_IDENTITIES", 0)
+        // Rebuild all printed-definition components, not just CardComponent: otherwise cards
+        // with activated/triggered abilities would become incoherent false-positive worlds.
+        val coherent = when (val result = com.wingedsheep.engine.hidden.HiddenWorldMaterializer(cardRegistry()).materialize(
+            changed, com.wingedsheep.engine.hidden.HiddenWorldMaterializationRequest(assignments, state.rng))) {
+            is com.wingedsheep.engine.hidden.HiddenWorldMaterializationResult.Materialized -> result.state
+            is com.wingedsheep.engine.hidden.HiddenWorldMaterializationResult.Unsupported ->
+                return HiddenTruthPermutation(null, "ENGINE_${result.reason.kind.name}", changedObjects)
+        }
+        val childEnvironment = environment.fork().also {
+            it.restore(coherent, environment.playerIds, environment.stepCount)
+        }
+        val child = derivedWorld(childEnvironment, history.fork())
+        check(child.authoritativeState().rng == state.rng)
+        val actual = child.informationState(viewer)
+        val reason = when {
+            actual.informationStateDigest != expected.informationStateDigest -> "INFORMATION_DIFFERS"
+            actual.knowledge.knowledgeDigest != expected.knowledge.knowledgeDigest -> "KNOWLEDGE_DIFFERS"
+            knowledgeConsistencyFailure(viewer, expected) != null -> "SOURCE_KNOWLEDGE_INCONSISTENT"
+            child.knowledgeConsistencyFailure(viewer, expected) != null -> "KNOWLEDGE_INCONSISTENT"
+            actorToAct() == viewer && expandChoices() != child.expandChoices() -> "MENU_DIFFERS"
+            else -> null
+        }
+        return HiddenTruthPermutation(child.takeIf { reason == null }, reason, changedObjects)
+    }
+
     fun persistentHistoryForkSharesPrefix(viewer: String): Boolean =
         history.sharesLedgerPrefixWith(history.fork(), rawPlayer(viewer))
 

@@ -163,3 +163,55 @@ unless `MTG_REMOTE_HOST` is set), saves the commit and diff beside it, and start
 the command there under the [durable runner](workbench/durable-runs.md). Check it
 with `tools/remote status <id>` or `tools/remote logs <id>`. Each run keeps its
 own copy, so later edits never change a running job.
+
+## Hidden-information conformance
+
+`hidden-information` compares fresh native policies on factual positions and
+same-information hidden-truth permutations. The default policy list includes
+all built-ins and ServiceLoader providers. It does not change their interface.
+The public example uses the Mono-Red fixture, heuristic/production play over four
+seeds, and a deterministic reservoir of two positions per seat and category
+(main phases, attacks, blocks, stack responses, mulligans and other steps).
+Coverage counts show which categories actually occurred; missing categories are
+not evidence of invariance. The corpus stops at 512 decisions per game.
+
+Run the realistic check separately from `just check`, on a Linux research host:
+
+```bash
+tools/remote hidden-information -- python3 tools/mtgallium-research hidden-information \
+  examples/research-hidden-information.json ../hidden-information
+```
+
+The Kotlin API is `hiddenInformationCorpus`, `checkHiddenInformation`, and
+`runHiddenInformationCheck` in `research/workbench`. An explicit provider list
+supports test controls. Each permutation assigns card identities among unknown
+slots within the same owner's hand/library, including the viewer's unknown
+library. The engine rebuilds printed card components coherently and shuffles unknown library slots.
+Visible and remembered objects stay fixed, as do engine RNG and history.
+Information and knowledge digests, knowledge consistency, and admitted menus
+must agree. No-op and incompatible proposals are counted as rejections.
+
+The output includes the plan, corpus coordinates, execution context, one
+`policy-N.json` per policy, and a summary. Each finding retains game seed, game
+ID, decision index, actor, permutation seed, original/permuted signatures and
+candidate visits, means and settlement counts. Reproduce with the saved plan
+and source, or select that coordinate from `hiddenInformationCorpus` and pass
+it alone to `checkHiddenInformation`. Remote runs retain the source revision
+and diff. The example requests 64 simulations, eight particles and depth 32;
+reports record providers' actual configured budgets and completed simulations
+in findings. Providers with a wall-clock search budget are refused. An unchanged
+world is evaluated twice first; disagreement is `NONDETERMINISTIC`, not a leak.
+
+`DECISION_DIFFERS` identifies changed selections; `STATISTICS_DIFFER` identifies
+weaker dependence even when the selected action agrees. Errors and zero checked
+positions cannot pass. The CLI writes reports before returning failure. A low
+acceptance rate means weak coverage, even if accepted comparisons agree.
+Do not silently repair a flagged sampler or policy: preserve a same-seed
+reproduction and assess the dependency before changing policy identity.
+
+This is evidence, not proof. It tests only sampled positions, permutations and
+seeds, with fresh sessions at each position. It does not test accumulated policy
+memory, every hidden zone, native-ID renaming, arbitrary malicious providers,
+or dependencies that leave these selections and statistics unchanged. Tiny
+public tests include a true-hand leaking provider and privileged-world search
+as positive controls; neither is installed in production.

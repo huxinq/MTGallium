@@ -1,0 +1,56 @@
+{
+  "game": {
+    "decks": [
+      {
+        "Mountain": 19,
+        "Hired Claw": 4,
+        "Burst Lightning": 4,
+        "Burnout Bashtronaut": 4,
+        "Hexing Squelcher": 4,
+        "Razorkin Needlehead": 4,
+        "Magebane Lizard": 3,
+        "Nova Hellkite": 3,
+        "Howlsquad Heavy": 3,
+        "Soulstone Sanctuary": 2,
+        "Sunspine Lynx": 2,
+        "Shock": 2,
+        "Lightning Strike": 2,
+        "Rockface Village": 2,
+        "Ojer Axonil, Deepest Might": 2
+      },
+      {
+        "Mountain": 19,
+        "Hired Claw": 4,
+        "Burst Lightning": 4,
+        "Burnout Bashtronaut": 4,
+        "Hexing Squelcher": 4,
+        "Razorkin Needlehead": 4,
+        "Magebane Lizard": 3,
+        "Nova Hellkite": 3,
+        "Howlsquad Heavy": 3,
+        "Soulstone Sanctuary": 2,
+        "Sunspine Lynx": 2,
+        "Shock": 2,
+        "Lightning Strike": 2,
+        "Rockface Village": 2,
+        "Ojer Axonil, Deepest Might": 2
+      }
+    ],
+    "policies": [
+      "heuristic",
+      "production"
+    ],
+    "simulations": 64,
+    "particles": 8,
+    "searchDepth": 32
+  },
+  "seeds": [
+    101,
+    102,
+    103,
+    104
+  ],
+  "permutations": 4,
+  "positionsPerCategory": 2,
+  "maximumCorpusDecisions": 512
+}

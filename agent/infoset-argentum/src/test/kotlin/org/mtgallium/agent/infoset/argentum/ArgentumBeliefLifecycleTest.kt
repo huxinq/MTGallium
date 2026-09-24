@@ -249,6 +249,13 @@ class ArgentumBeliefLifecycleTest {
             )
             assertEquals("LIBRARY_ORDER_MISMATCH", contradictory.knowledgeConsistencyFailure("p0", expected))
         }
+        repeat(4) { trial ->
+            val permutation = world.permuteHiddenTruthForHost("p0", trial.toLong())
+            val child = assertNotNull(permutation.world, permutation.rejection)
+            assertEquals(knownTop, child.authoritativeState().getLibrary(viewer).take(3))
+            knownTop.forEach { assertEquals(state.getEntity(it), child.authoritativeState().getEntity(it)) }
+            assertNull(child.knowledgeConsistencyFailure("p0", expected))
+        }
         verifyRebuildAndRefresh(world, fixture.registry, "p0", "library-order reveal")
     }
 
@@ -441,6 +448,57 @@ class ArgentumBeliefLifecycleTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun `hidden permutations preserve remembered hand identities visible cards and engine chance`() {
+        val fixture = fixture(seed = 1107L)
+        val environment = fixture.environment
+        val viewer = environment.playerIds[0]
+        val opponent = environment.playerIds[1]
+        val hand = environment.state.getHand(opponent)
+        val remembered = hand.take(2)
+        val state = environment.state
+        val history = PerspectiveHistory(environment.playerIds)
+        history.recordEngineEvents(
+            engineEvents = listOf(HandLookedAtEvent(viewer, opponent, remembered)),
+            actorViewer = viewer, beforeState = state, afterState = state,
+            before = projections(state, environment.playerIds, fixture.registry),
+            after = projections(state, environment.playerIds, fixture.registry))
+        val world = ArgentumSearchWorld.create(environment, "permutation", 1107L,
+            effectiveSetupSeed = 1107L, knownDecks = knownDecks).withRememberedHistoryForVerification(history)
+        val expected = world.informationState("p0")
+        assertTrue(expected.knowledge.knownObjects.isNotEmpty())
+        val pinned = remembered + state.getHand(viewer)
+        var accepted = 0
+        repeat(8) { trial ->
+            val proposal = world.permuteHiddenTruthForHost("p0", trial.toLong())
+            val child = assertNotNull(proposal.world, proposal.rejection)
+            accepted++
+            assertTrue(proposal.changedObjects > 0)
+            assertEquals(state.rng, child.authoritativeState().rng)
+            assertEquals(expected.informationStateDigest, child.informationState("p0").informationStateDigest)
+            pinned.forEach { assertEquals(state.getEntity(it), child.authoritativeState().getEntity(it)) }
+            assertEquals(child.authoritativeState(), world.permuteHiddenTruthForHost("p0", trial.toLong()).world!!.authoritativeState())
+        }
+        assertEquals(8, accepted)
+        assertEquals(state, world.authoritativeState())
+    }
+
+    @Test
+    fun `selectively revealed source is refused without moving any card`() {
+        val fixture = fixture(seed = 1107L)
+        val environment = fixture.environment
+        val viewer = environment.playerIds[0]
+        val revealed = environment.state.getHand(environment.playerIds[1]).first()
+        val state = environment.state.updateEntity(revealed) { it.with(RevealedToComponent.to(viewer)) }
+        environment.restore(state, environment.playerIds, environment.stepCount)
+        val world = ArgentumSearchWorld.create(environment, "revealed-permutation", 1107L,
+            effectiveSetupSeed = 1107L, knownDecks = knownDecks)
+        val proposal = world.permuteHiddenTruthForHost("p0", 1L)
+        assertNull(proposal.world)
+        assertEquals("UNSUPPORTED_SOURCE_INFORMATION", proposal.rejection)
+        assertEquals(state, world.authoritativeState())
     }
 
     private fun fixture(seed: Long, skipMulligans: Boolean = true): Fixture {

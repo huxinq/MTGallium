@@ -115,6 +115,7 @@ fun main(args: Array<String>) {
     fun path(index: Int): Path = Path.of(args[index])
     when (args.firstOrNull()) {
         null, "help", "--help", "-h" -> println("""
+            hidden-information PLAN.json OUTPUT_DIRECTORY
             games PLAN.json OUTPUT_DIRECTORY
             fit ROOTS.json MODEL.json [RIDGE]
             predict MODEL.json MENUS.json OUTPUT.json
@@ -123,6 +124,12 @@ fun main(args: Array<String>) {
 
             These functions use ordinary files. Use your own main for other experiments.
         """.trimIndent())
+        "hidden-information" -> {
+            arity(3, "hidden-information PLAN.json OUTPUT_DIRECTORY")
+            val reports = runHiddenInformationCheck(readJson(path(1)), path(2))
+            println(reports.joinToString("\n") { "${it.policy}: ${if (it.passed) "PASS" else "FAIL"}; ${it.positionsChecked} positions, ${it.findings.size} findings" })
+            check(reports.all { it.passed }) { "Hidden-information conformance failed; see reports" }
+        }
         "games" -> {
             arity(3, "games PLAN.json OUTPUT_DIRECTORY")
             println(researchJson.encodeToString(runGames(decodeGamesPlan(readJson(path(1))), path(2))))
