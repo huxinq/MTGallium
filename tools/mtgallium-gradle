@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [[ $(uname -s) == Linux ]] && command -v flock >/dev/null 2>&1; then
+    exec python3 tools/gradle_lock.py third_party/argentum-engine/gradlew --project-dir . "$@"
+fi
 exec third_party/argentum-engine/gradlew --project-dir . "$@"

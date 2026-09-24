@@ -5,6 +5,7 @@ import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.sdk.model.Deck
 import kotlinx.serialization.json.*
+import org.mtgallium.agent.infoset.argentum.ARGENTUM_HEURISTIC_CHOICE_TAG_V1
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.neural.FactualPolicyEncoder
@@ -13,13 +14,15 @@ import org.mtgallium.agent.argentum.policy.*
 import org.mtgallium.agent.monored.LinearValueEvaluator
 import org.mtgallium.agent.monored.MonoRedInformationEvaluator
 import org.mtgallium.agent.monored.ValueFeatures
+import org.mtgallium.agent.monored.LinearValueLink
+import org.mtgallium.agent.monored.LinearWeights
 
 /** Live world and native policy state. */
 internal class PythonGame(
     val plan: GamesPlan,
     val world: ArgentumSearchWorld,
     private val gameId: String,
-    private val sessions: MutableMap<String, SearchPolicySession> = linkedMapOf(),
+    private val sessions: MutableMap<Pair<String, String>, SearchPolicySession> = linkedMapOf(),
 ) {
     private val knownDecks = plan.decks.mapIndexed { index, deck -> "p$index" to deck }.toMap()
     private val actors = knownDecks.keys.toList()
@@ -31,6 +34,26 @@ internal class PythonGame(
         put("actor", world.actorToAct()?.let(::JsonPrimitive) ?: JsonNull)
         put("payoffs", if (terminal) researchJson.encodeToJsonElement(
             actors.associateWith { requireNotNull(world.terminalPayoff(it)) }) else JsonNull)
+    }
+
+    fun valueSnapshot(): JsonObject = buildJsonObject {
+        actors.forEach { player ->
+            val information = world.informationState(player)
+            put(player, buildJsonObject {
+                put("features", researchJson.encodeToJsonElement(ValueFeatures.compile(information, player).values))
+                put("v2", MonoRedInformationEvaluator.evaluate(information, player))
+                put("turn", information.observation.turnNumber)
+            })
+        }
+    }
+
+    fun valueScore(player: String, weights: LinearWeights, link: LinearValueLink): JsonObject {
+        require(player in actors) { "Unknown player '$player'" }
+        val estimate = LinearValueEvaluator(weights, link).evaluateDetailed(world.informationState(player), player)
+        return buildJsonObject {
+            put("rawScore", estimate.rawScore)
+            put("deployedValue", estimate.deployedValue)
+        }
     }
 
     private fun context(view: DecisionView): DecisionSiteRequest {
@@ -69,23 +92,28 @@ internal class PythonGame(
         }
     }
 
-    private fun searchSession(actor: String): SearchPolicySession = sessions.getOrPut(actor) {
+    private fun searchSession(actor: String): SearchPolicySession = sessions.getOrPut(actor to "search") {
         SearchPolicySession(world, actor, knownDecks,
             SearchPolicyConfig(plan.particles, plan.simulations, plan.searchDepth, plan.explorationConstant,
-                plan.leaf, plan.actionProfile, baseSeed = plan.seed, rolloutTurnHorizon = plan.rolloutTurnHorizon),
+                plan.leaf, plan.actionProfile, baseSeed = plan.seed,
+                rolloutTurnHorizon = plan.rolloutTurnHorizon),
             when (plan.opponentModel) {
                 "mixture" -> defaultMonoRedOpponentPolicy()
                 "heuristic" -> DeterminizedArgentumHeuristicOpponentPolicy()
                 "random" -> UniformOpponentPolicy
                 else -> error("Unknown opponent model '${plan.opponentModel}'")
             }, gameId,
+            rolloutPolicy = PolicyDefaults.rootRolloutPolicy(),
+            rolloutOpponentPolicy = PolicyDefaults.opponentRolloutPolicy(),
             valueSource = LeafValueSource.Information(
-                plan.valueWeights?.let(::LinearValueEvaluator) ?: MonoRedInformationEvaluator))
+                plan.valueWeights?.let { LinearValueEvaluator(it, plan.valueLink ?: LinearValueLink.CLIP) }
+                    ?: MonoRedInformationEvaluator))
     }
 
     private fun nativePlayer(name: String, actor: String): Player = when (name) {
         "random" -> selectorPlayer(UniformOpponentPolicy)
         "heuristic" -> selectorPlayer(DeterminizedArgentumHeuristicOpponentPolicy())
+        "production" -> Player(DecisionView(admission = DecisionAdmission.PRODUCTION, annotations = true)) { context, _ -> productionChoice(context) }
         "search" -> searchPlayer(world, searchSession(actor))
         else -> error("Unknown native policy '$name'; Python policies supply their selected action directly")
     }
@@ -97,12 +125,17 @@ internal class PythonGame(
 
     fun initializePolicies() {
         plan.policies.forEachIndexed { index, name -> if (name == "search") nativePlayer(name, actors[index]) }
+        plan.shadowPolicies.filter { it == "search" }.forEach { name ->
+            actors.forEach { actor -> nativePlayer(name, actor) }
+        }
     }
 
     /** Advance each existing native memory once, even when Python overrides the selected action. */
     private fun observedPlayer(actor: String, player: Player): Player = Player(player.view,
         observe = { acting, choice, step, index ->
-            sessions[actor]?.observeAccepted(world, acting, choice, index, step.privateToActor)
+            sessions.filterKeys { it.first == actor }.values.forEach {
+                it.observeAccepted(world, acting, choice, index, step.privateToActor)
+            }
         }, choose = player.choose)
 
     fun select(name: String, seed: Long?): JsonObject {
@@ -124,14 +157,15 @@ internal class PythonGame(
         }
     }
 
-    fun step(index: Int, view: DecisionView, choice: SemanticChoice): JsonObject {
+    fun step(index: Int, view: DecisionView, choice: SemanticChoice, record: Boolean = true): JsonObject {
         check(index == world.acceptedDecisionCountForHost) { "Action belongs to an earlier decision; inspect the current game" }
         check(world.terminalPayoff(actors.first()) == null) { "Cannot step a terminal game" }
         val players = actors.associateWith { actor -> observedPlayer(actor, Player(view) { _, _ -> choice }) }
-        var record: GameDecision? = null
-        playGame(world, players, plan.seed, maximumDecisions = 1, record = { record = it })
+        var decision: GameDecision? = null
+        playGame(world, players, plan.seed, maximumDecisions = 1,
+            record = if (record) ({ decision = it }) else null)
         return buildJsonObject {
-            put("decision", researchJson.encodeToJsonElement(requireNotNull(record)))
+            if (record) put("decision", researchJson.encodeToJsonElement(requireNotNull(decision)))
             put("status", status())
         }
     }
@@ -140,6 +174,29 @@ internal class PythonGame(
         require(names.size == actors.size)
         val players = actors.mapIndexed { i, actor -> actor to observedPlayer(actor, nativePlayer(names[i], actor)) }.toMap()
         return playGame(world, players, plan.seed, maximumDecisions, maximumSeconds)
+    }
+
+    /** Shadow choices consume the candidate's actual history but are never applied. */
+    fun compare(candidateSeat: String, incumbent: String, maximumDecisions: Int?, maximumSeconds: Double?): JsonObject {
+        require(candidateSeat in actors)
+        val baseline = nativePlayer(incumbent, candidateSeat)
+        var decisions = 0
+        var changed = 0
+        val compared = players.toMutableMap()
+        val candidate = compared.getValue(candidateSeat)
+        compared[candidateSeat] = Player(candidate.view, candidate.observe) { request, seed ->
+            val expected = baseline.choose(context(baseline.view), seed)
+            val selected = candidate.choose(request, seed)
+            decisions++
+            if (expected.signature != selected.signature) changed++
+            selected
+        }
+        val result = playGame(world, compared, plan.seed, maximumDecisions, maximumSeconds)
+        return buildJsonObject {
+            put("result", researchJson.encodeToJsonElement(result))
+            put("candidateDecisions", decisions)
+            put("changedDecisions", changed)
+        }
     }
 
     fun fork(): PythonGame {
@@ -188,7 +245,11 @@ internal class PythonResearchConnection {
             return buildJsonObject { put("game", id); put("status", game.status()) }
         }
         return when (request.getValue("command").jsonPrimitive.content) {
-            "create" -> remember(PythonGame.create(researchJson.decodeFromJsonElement(request.getValue("plan")), registry, "python-game-$nextId"))
+            "create" -> {
+                val plan = researchJson.decodeFromJsonElement<GamesPlan>(request.getValue("plan"))
+                // Search RNG identity must not depend on which worker/session happened to run a setup.
+                remember(PythonGame.create(plan, registry, "python-game-${plan.seed}"))
+            }
             "fork" -> remember(game().fork())
             "close" -> { games.remove(request.getValue("game").jsonPrimitive.int); JsonNull }
             "status" -> game().status()
@@ -199,17 +260,31 @@ internal class PythonResearchConnection {
                 request["schema"]?.let { researchJson.decodeFromJsonElement<FactualTensorSchema>(it) } ?: FactualTensorSchema())
             "select" -> game().select(request.getValue("policy").jsonPrimitive.content, request["seed"]?.jsonPrimitive?.longOrNull)
             "step" -> game().step(request.getValue("index").jsonPrimitive.int,
-                decodeView(request.getValue("view").jsonObject), researchJson.decodeFromJsonElement(request.getValue("choice")))
-            "play" -> researchJson.encodeToJsonElement(game().play(
-                researchJson.decodeFromJsonElement(request.getValue("policies")),
+                decodeView(request.getValue("view").jsonObject), researchJson.decodeFromJsonElement(request.getValue("choice")),
+                request["record"]?.jsonPrimitive?.boolean ?: true)
+            "play" -> {
+                val game = game()
+                val result = game.play(researchJson.decodeFromJsonElement(request.getValue("policies")),
+                    request["maximumDecisions"]?.jsonPrimitive?.intOrNull,
+                    request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull)
+                // The resulting position saves a status request between Python-driven native moves.
+                JsonObject(researchJson.encodeToJsonElement(result).jsonObject + ("position" to game.status()))
+            }
+            "compare" -> game().compare(request.getValue("candidateSeat").jsonPrimitive.content,
+                request.getValue("incumbent").jsonPrimitive.content,
                 request["maximumDecisions"]?.jsonPrimitive?.intOrNull,
-                request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull))
+                request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull)
             "information" -> researchJson.encodeToJsonElement(game().world.informationState(request.getValue("player").jsonPrimitive.content))
             "value-features" -> {
                 val world = game().world
                 val player = request["player"]?.jsonPrimitive?.content ?: requireNotNull(world.actorToAct())
                 researchJson.encodeToJsonElement(ValueFeatures.compile(world.informationState(player), player).values)
             }
+            "value-snapshot" -> game().valueSnapshot()
+            "value-score" -> game().valueScore(
+                request.getValue("player").jsonPrimitive.content,
+                researchJson.decodeFromJsonElement(request.getValue("weights")),
+                request["link"]?.let { researchJson.decodeFromJsonElement(it) } ?: LinearValueLink.CLIP)
             "state" -> researchJson.encodeToJsonElement(game().world.authoritativeStateForHost())
             "fit" -> researchJson.encodeToJsonElement(fitRootActionKernel(
                 researchJson.decodeFromJsonElement(request.getValue("roots")),
@@ -237,6 +312,7 @@ object PythonResearch {
                     val value = connection.request(researchJson.parseToJsonElement(line).jsonObject)
                     buildJsonObject { put("value", value) }
                 } catch (failure: Exception) {
+                    failure.printStackTrace(System.err)
                     buildJsonObject {
                         put("error", failure.javaClass.name)
                         put("message", failure.message ?: failure.javaClass.simpleName)
@@ -248,3 +324,7 @@ object PythonResearch {
         }
     }
 }
+
+/** The action Argentum's determinized heuristic marks in the menu; a missing mark stops the game. */
+internal fun productionChoice(context: DecisionSiteRequest): SemanticChoice =
+    context.expansion.candidates.single { ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags }

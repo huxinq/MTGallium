@@ -1,5 +1,6 @@
 """Real public-fixture journeys through Python, its pipe, and the current game engine."""
 import copy
+from itertools import product
 import math
 from dataclasses import replace
 from pathlib import Path
@@ -129,6 +130,96 @@ class LiveGameInterfaceTest(unittest.TestCase):
             self.assertEqual('TERMINAL', native['status'])
             self.assertEqual(game.state(), branch.state())
             self.assertEqual(interactive['decisions'], len(rows))
+
+    def test_unrecorded_mixed_play_exports_only_python_seat_decisions(self):
+        for seat in ('p0', 'p1'):
+            with self.subTest(seat=seat), self.game(starting_hand_size=2) as game:
+                exported, chosen = [], []
+                call = game._call
+                def inspect(command, **arguments):
+                    result = call(command, **arguments)
+                    if command == 'decision':
+                        exported.append(result['actor'])
+                    return result
+                def choose(decision):
+                    chosen.append(decision.index)
+                    return 0
+                with patch.object(game, '_call', side_effect=inspect):
+                    result = game.play({seat: choose}, decision_limit=16)
+                self.assertEqual(16, result['decisions'])
+                self.assertTrue(chosen)
+                self.assertLess(len(chosen), result['decisions'])
+                self.assertEqual([seat] * len(chosen), exported)
+
+    def test_unrecorded_python_play_does_not_return_duplicate_decision_rows(self):
+        with self.game() as game:
+            replies = []
+            call = game._call
+            def inspect(command, **arguments):
+                result = call(command, **arguments)
+                if command == 'step':
+                    replies.append(result)
+                return result
+            with patch.object(game, '_call', side_effect=inspect):
+                game.play([lambda decision: 0] * 2, decision_limit=4)
+            self.assertTrue(replies)
+            self.assertTrue(all('decision' not in reply for reply in replies))
+
+    def test_step_can_omit_its_record_without_changing_the_game(self):
+        with self.game() as game, game.fork() as branch:
+            action = game.decision().actions[0]
+            recorded = game.step(action)
+            lean = branch.step(action, record=False)
+            self.assertTrue(recorded['decision']['accepted'])
+            self.assertEqual({'status': recorded['status']}, lean)
+            self.assertEqual(game.state(), branch.state())
+            for player in ('p0', 'p1'):
+                self.assertEqual(game.information(player), branch.information(player))
+            with self.assertRaises(ResearchError):
+                branch.step(action, record=False)
+            self.assertEqual(game.state(), branch.state())
+
+    def test_mixed_play_matches_recorded_actions_and_native_search_memory(self):
+        # A limit of None plays the seven-card decks to completion.
+        for native, seat, limit in product(('random', 'heuristic', 'search'), ('p0', 'p1'), (16, None)):
+            with self.subTest(native=native, seat=seat, limit=limit), self.game(
+                    starting_hand_size=2, policies=(native, native),
+                    particles=1, simulations=2, search_depth=2) as game, game.fork() as branch:
+                seen, rows = [], []
+                def choose(decision):
+                    seen.append((decision.index, decision.information, decision.actions[0].choice))
+                    return 0
+                result = game.play({seat: choose}, decision_limit=limit)
+                expected_seen = list(seen)
+                seen.clear()
+                recorded = branch.play({seat: choose}, decision_limit=limit, record=rows.append)
+                self.assertEqual(result, recorded)
+                self.assertEqual('DECISION_LIMIT' if limit else 'TERMINAL', result['status'])
+                self.assertEqual(expected_seen, seen)
+                self.assertTrue(all(row['accepted'] for row in rows))
+                self.assertEqual(list(range(result['decisions'])), [row['index'] for row in rows])
+                self.assertEqual(game.state(), branch.state())
+                for player in ('p0', 'p1'):
+                    self.assertEqual(game.information(player), branch.information(player))
+                if native == 'search' and limit:
+                    for _ in range(2):
+                        left, right = game.select('search'), branch.select('search')
+                        self.assertEqual(left.choice, right.choice)
+                        if left.search is not None:
+                            self.assertEqual(left.search['candidates'], right.search['candidates'])
+                        game.step(left)
+                        branch.step(right)
+                    self.assertEqual(game.state(), branch.state())
+
+    def test_mixed_play_checks_its_deadline_after_one_native_move(self):
+        with self.game() as game:
+            chosen = []
+            with patch('research_workspace.game.time.monotonic', side_effect=[0., .25, 2.]):
+                result = game.play({'p1': lambda decision: chosen.append(decision.index) or 0},
+                                   decision_limit=None, seconds=1.)
+            self.assertEqual(dict(status='TIME_LIMIT', decisions=1, payoffs=None), result)
+            self.assertEqual([], chosen)
+            self.assertEqual(1, game.status()['index'])
 
     def test_native_search_state_forks_after_accepted_history(self):
         with self.game(policies=('search', 'random'), particles=1, simulations=1, search_depth=1) as game:

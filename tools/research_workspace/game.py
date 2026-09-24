@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
+import os
+from pathlib import Path
 import subprocess
 import threading
 import time
@@ -66,6 +68,12 @@ class Session:
     @property
     def pid(self) -> int:
         return self._process.pid
+
+    def cpu_seconds(self) -> float:
+        """Linux JVM user + system CPU across all threads; read before close()."""
+        stat = Path(f'/proc/{self.pid}/stat').read_text()
+        fields = stat[stat.rfind(')') + 2:].split()
+        return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
 
     def _call(self, command: str, **arguments: Any) -> Any:
         message = json.dumps(dict(command=command, **arguments), allow_nan=False, separators=(',', ':'))
@@ -170,6 +178,14 @@ class Game:
         """Sparse linear-value features, from the named player's or acting player's view."""
         return self._call('value-features', **({} if player is None else {'player': player}))
 
+    def value_snapshot(self) -> dict[str, dict]:
+        """Value features, V2 and turn for both player perspectives at this position."""
+        return self._call('value-snapshot')
+
+    def value_score(self, player: str, weights: Mapping, *, link: str = 'clip') -> dict[str, float]:
+        """Score the named player's current information with the JVM linear evaluator."""
+        return self._call('value-score', player=player, weights=dict(weights), link=link)
+
     def state(self) -> dict:
         """Privileged referee snapshot for research inspection, not a policy input."""
         return self._call('state')
@@ -196,7 +212,8 @@ class Game:
         value = self._call('select', policy=policy, seed=seed)
         return Action(value['index'], value['view'], value['choice'], value.get('search'))
 
-    def step(self, action: Action | int) -> dict:
+    def step(self, action: Action | int, *, record: bool = True) -> dict:
+        """Apply one action. Set record=False to return only the resulting status."""
         if type(action) is int:
             decision = self.decision()
             if decision is None:
@@ -206,7 +223,7 @@ class Game:
             action = decision.actions[action]
         if not isinstance(action, Action):
             raise TypeError('step takes an Action or an index in the current menu')
-        return self._call('step', index=action.index, view=action.view, choice=action.choice)
+        return self._call('step', index=action.index, view=action.view, choice=action.choice, record=record)
 
     def fork(self) -> Game:
         """Copy the factual world and native search memory, not external Python policy state."""
@@ -219,9 +236,9 @@ class Game:
              factual: bool = False) -> dict:
         """Python callbacks receive a decision, never the game or referee state.
 
-        All-native play without recording stays inside the JVM. Supplying Python
-        callbacks or a record sink uses explicit decision/step calls. Exceptions
-        propagate and accepted transitions are not rolled back or retried.
+        Unrecorded native moves stay inside the JVM, including native opponents
+        of Python policies. A record sink receives every move's decision record.
+        Exceptions propagate; accepted transitions are not rolled back or retried.
         """
         policies = self._policies if policies is None else policies
         if isinstance(policies, Mapping):
@@ -238,7 +255,9 @@ class Game:
         if seconds is not None and not (0 < seconds < float('inf')):
             raise ValueError('seconds must be positive and finite or None')
         if record is None and all(isinstance(policy, str) for policy in policies):
-            return self._call('play', policies=list(policies), maximumDecisions=decision_limit, maximumSeconds=seconds)
+            result = self._call('play', policies=list(policies), maximumDecisions=decision_limit, maximumSeconds=seconds)
+            del result['position']
+            return result
         start = time.monotonic()
         status = self.status()
         first = status['index']
@@ -250,7 +269,14 @@ class Game:
                 return dict(status='DECISION_LIMIT', decisions=count, payoffs=None)
             if seconds is not None and time.monotonic() - start >= seconds:
                 return dict(status='TIME_LIMIT', decisions=count, payoffs=None)
-            policy = policies[int(status['actor'][1:])]
+            actor = int(status['actor'][1:])
+            policy = policies[actor]
+            if isinstance(policy, str) and record is None:
+                # Only the acting seat selects in this one-move call. Stateless placeholders
+                # avoid creating other search sessions; existing sessions still observe it.
+                native = [policy if i == actor else 'random' for i in range(len(policies))]
+                status = self._call('play', policies=native, maximumDecisions=1)['position']
+                continue
             if isinstance(policy, str):
                 action = self.select(policy)
                 decision = self.decision(view=action.view, kernel=kernel, factual=factual)
@@ -270,7 +296,7 @@ class Game:
             action = next((candidate for candidate in decision.actions if candidate.choice == action.choice), None)
             if action is None:
                 raise ValueError('Policy action is absent from the supplied decision menu')
-            result = self.step(action)
+            result = self.step(action, record=record is not None)
             status = result['status']
             if record is not None:
                 row = result['decision']

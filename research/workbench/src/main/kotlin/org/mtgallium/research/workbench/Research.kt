@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.argentum.policy.*
+import org.mtgallium.agent.monored.LinearValueLink
 import org.mtgallium.agent.monored.LinearWeights
 
 /** Game setup and native search settings shared by the CLI and Python session. */
@@ -20,7 +21,7 @@ data class GamesPlan(
     val policies: List<String> = listOf("heuristic", "heuristic"),
     val seed: Long = 1,
     val games: Int = 1,
-    val threads: Int = 1,
+    val threads: Int = (Runtime.getRuntime().availableProcessors() - 2).coerceAtLeast(1),
     val startingLife: Int = 20,
     val startingHandSize: Int = 7,
     val startingPlayerIndex: Int = 0,
@@ -33,8 +34,11 @@ data class GamesPlan(
     val explorationConstant: Double = 1.4,
     val leaf: LeafEvaluationConfig = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
     val valueWeights: LinearWeights? = null,
+    val valueLink: LinearValueLink? = null,
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
     val opponentModel: String = "mixture",
+    /** Initialize shadow search memory before the first move, then observe actual accepted moves. */
+    val shadowPolicies: List<String> = emptyList(),
     val maximumDecisions: Int? = 2048,
     val maximumSeconds: Double? = null,
     val recordDecisions: Boolean = false,
