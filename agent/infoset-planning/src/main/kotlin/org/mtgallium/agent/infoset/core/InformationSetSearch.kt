@@ -138,6 +138,7 @@ class InformationSetSearch(
         // Snapshot the caller's map so one immutable preference set owns the entire search.
         val guidance = rootSelectionGuidance?.copy(scores = rootSelectionGuidance.scores.toMap())
         require(searchPrior == null || guidance == null) { "PUCT and root UCT guidance are mutually exclusive" }
+        require(searchPrior == null || rootActionSignature == null) { "Conditioned root search does not support prior-ranked pruning" }
         guidance?.let {
             require(rootActionSignature == null)
             val representative = belief.particles.first().value
@@ -352,7 +353,10 @@ class InformationSetSearch(
             return value
         }
 
-        val initialContext = world.actorToAct()?.let { initialDecision(world) }
+        val initialContext = world.actorToAct()?.let {
+            if (it == rootPlayer) initialDecision(world)
+            else world.decisionContext(DecisionView(config.initialExpansionLimit))
+        }
         var expansion = initialContext?.expansion ?: initialExpansion(world)
         if (expansion.candidates.isEmpty()) {
             transitionCache?.retainDerived(transitionNode, world, DERIVED_BASE)
@@ -1086,8 +1090,7 @@ class InformationSetSearch(
             admission = searchPrior?.admission ?: DecisionAdmission.SEMANTIC))
 
     private fun initialExpansion(world: SearchWorld): PolicyExpansion =
-        if (searchPrior == null) world.initialPolicyChoices(config.initialExpansionLimit)
-        else initialDecision(world).expansion
+        world.initialPolicyChoices(config.initialExpansionLimit)
 
     private fun initialPolicyContext(world: SearchWorld, policy: PolicyComponent, workAudit: SearchWorkAudit): DecisionSiteRequest {
         if (world is PolicyAnnotatedSearchWorld && policy.requiresPolicyAnnotations) workAudit.policyAnnotatedExpansions++

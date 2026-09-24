@@ -9,6 +9,29 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 
 class InformationSetSearchTest {
+    @Test fun `wider prior menu does not widen ordinary rollout requests`() {
+        val limits = mutableListOf<Int?>()
+        class Traced(private val world: SearchWorld) : SearchWorld by world {
+            override fun fork(): SearchWorld = Traced(world.fork())
+            override fun decisionContext(view: DecisionView): DecisionSiteRequest {
+                limits += view.limit
+                return world.decisionContext(view)
+            }
+        }
+        val prior = object : SearchPrior {
+            override val configurationId = "tree-only"
+            override val candidateLimit = 256
+            override val explorationConstant = 1.0
+            override fun probabilities(context: DecisionSiteRequest): Map<String, Double> = error("No tree prior in a rollout")
+        }
+        val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 4,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy,
+            UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.SampledWorld("argentum-board-v1"), prior)
+        search.settleFirstUnvisitedEdge(Traced(FakeWorld(depth = 1, terminalAtDepth = 5)), "p0", 71L, 0)
+        assertTrue(limits.isNotEmpty())
+        assertTrue(limits.all { it == 64 }, limits.toString())
+    }
+
     @Test fun `PUCT skips low prior first tries and ranks beyond the original cap`() {
         val seen = mutableListOf<Int>()
         val prior = object : SearchPrior {
