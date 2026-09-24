@@ -427,7 +427,10 @@ class ArgentumSearchWorld private constructor(
     }
 
     /** Resolve only through qualified observer-local handles, then let native legality decide. */
-    fun correspondObservedActionForHost(capture: ArgentumObservedActionCapture): ArgentumActionCorrespondence {
+    fun correspondObservedActionForHost(
+        capture: ArgentumObservedActionCapture,
+        conditioningView: DecisionView = capture.view,
+    ): ArgentumActionCorrespondence {
         fun refuse(reason: ArgentumCorrespondenceRefusal) = ArgentumActionCorrespondence.Unsupported(reason)
         if (decisionIndex != capture.decisionIndex || actorToAct() != capture.actingSite.actor ||
             historyEventOrder != capture.eventOrder || historyObjectReference != capture.objectReference)
@@ -448,7 +451,7 @@ class ArgentumSearchWorld private constructor(
         val mapped = requireNotNull(sourceAction.transportObservedObjects { id ->
             players[id] ?: requireNotNull(objects).getValue(id)
         })
-        val context = decisionContext(capture.view)
+        val context = decisionContext(conditioningView)
         val group = context.expansion.candidates.singleOrNull { it.signature == capture.searchGroup.signature }
             ?: return refuse(ArgentumCorrespondenceRefusal.UNAVAILABLE_GROUP)
         val encoded = exactObservedActionExpander.encodePreparedChoice(ArgentumEngineChoice.Action(mapped),

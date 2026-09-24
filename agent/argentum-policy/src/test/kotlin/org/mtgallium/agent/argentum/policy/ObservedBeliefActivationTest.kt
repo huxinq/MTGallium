@@ -52,6 +52,30 @@ class ObservedBeliefActivationTest {
         world, "p0", decks, BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1),
         UniformOpponentPolicy, "observed-live-test")
 
+    @Test fun `exact opponent updates use the conditioning model view instead of the host capture view`() {
+        val world = world(qualified)
+        val actor = requireNotNull(world.actorToAct())
+        val viewer = if (actor == "p0") "p1" else "p0"
+        val views = mutableListOf<DecisionView>()
+        val model = object : ActionDistributionModel {
+            override val id = "exact-conditioning-view-test"
+            override val requiresPolicyAnnotations = true
+            override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
+                views += context.view
+                return ProbabilityDistribution.uniform(context.expansion.candidates)
+            }
+        }
+        val preparation = BeliefPreparation(world, viewer, decks,
+            BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1), model, UniformOpponentPolicy,
+            "exact-conditioning-view-test")
+        val observed = world.applyObservedAction(pass(world))
+        assertTrue(observed.result.accepted)
+        preparation.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor)
+        assertEquals(ObservedBeliefUpdateRoute.QUALIFIED_EXACT_MEMBER_V1, preparation.lastObservedUpdate?.route)
+        assertEquals(8, views.size)
+        assertTrue(views.all { it.admission == DecisionAdmission.PRODUCTION && it.annotations })
+    }
+
     @Test fun `conditioning can be declared independently of representation without changing legacy bytes`() {
         val config = BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1)
         val encoded = PolicyJson.format.encodeToJsonElement(BeliefConfig.serializer(), config).jsonObject

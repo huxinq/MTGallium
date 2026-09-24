@@ -45,11 +45,14 @@ class ArgentumObservedActionCapture internal constructor(
     private val retainedBindings = bindings.toList()
     val bindings: List<ArgentumObservedObjectBinding> get() = retainedBindings.toList()
 
-    /** Explicit exact-member conditioning; legacy signature-only updates remain a separate route. */
-    fun particleAction(): ExactObservedAction = ExactObservedAction { world ->
+    /**
+     * Resolve the member and its likelihood menu in the particle using the conditioning model's
+     * view. Unconditioned callers retain the host capture's view.
+     */
+    fun particleAction(conditioningView: DecisionView = view): ExactObservedAction = ExactObservedAction { world ->
         val adapter = world as? ArgentumSearchWorld
         if (adapter == null) ExactObservedActionResolution.Unsupported("WORLD_TYPE")
-        else when (val result = adapter.correspondObservedActionForHost(this)) {
+        else when (val result = adapter.correspondObservedActionForHost(this, conditioningView)) {
             is ArgentumActionCorrespondence.Unsupported -> if (result.reason == ArgentumCorrespondenceRefusal.NATIVE_REJECTED)
                 ExactObservedActionResolution.NativeRejected(result.reason.name)
                 else ExactObservedActionResolution.Unsupported(result.reason.name)
@@ -57,7 +60,7 @@ class ArgentumObservedActionCapture internal constructor(
                 val revisionKey = adapter.exactRevision()
                 ExactObservedActionResolution.Matched(
                     result.searchGroup.signature, result.memberProbability, result.memberSelectionBehaviorId,
-                    adapter.decisionContext(view),
+                    adapter.decisionContext(conditioningView),
                 ) { child ->
                     require(child is ArgentumSearchWorld)
                     require(child.exactRevision() == revisionKey) {

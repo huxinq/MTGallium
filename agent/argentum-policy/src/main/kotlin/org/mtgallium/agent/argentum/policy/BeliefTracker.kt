@@ -29,6 +29,7 @@ import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.Weighted
+import org.mtgallium.agent.infoset.core.decisionView
 
 /** Immutable, read-only counters for one production belief lifecycle. */
 data class BeliefUpdateDiagnostics(
@@ -411,7 +412,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
                     updateSeed = seed,
                     rejuvenator = rejuvenator,
                     observation = observation,
-                    exactAction = exactCapture?.particleAction(),
+                    exactAction = exactCapture?.particleAction(opponentDistribution.decisionView()),
                     signatureStep = signatureStep,
                 )
                 else -> belief.advance(

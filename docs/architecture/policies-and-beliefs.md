@@ -26,7 +26,9 @@ weights, order, RNG streams and policy identities belong to the belief state.
 For `POLICY_CONDITIONED_V1`, each hypothetical world advances through the
 observed action. The tracker weights each world by the action's likelihood under
 the opponent distribution, evaluated on the menu that distribution declares
-(admission and annotations), as in search. It keeps descendants that agree with
+(admission and annotations), as in search. Exact-member updates resolve both the
+member probability and group likelihood on that particle-local menu, rather than
+inheriting the host capture's view. It keeps descendants that agree with
 the viewer's newly observed `InformationStateRepresentation` and represented exact
 knowledge, normalizes the surviving weights, then resamples by copying. A copied
 duplicate keeps its hidden state and draws a fresh future-chance stream, so
