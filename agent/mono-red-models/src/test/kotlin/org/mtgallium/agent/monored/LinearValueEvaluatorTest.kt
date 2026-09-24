@@ -3,6 +3,7 @@ package org.mtgallium.agent.monored
 import org.mtgallium.agent.monored.ValueEvaluationStop
 import java.util.Base64
 import kotlin.math.ln1p
+import kotlin.math.tanh
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -19,6 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
+import org.mtgallium.agent.infoset.core.PERSPECTIVE_EVENT_SCHEMA_V2
 import org.mtgallium.agent.infoset.core.PolicyAudience
 import org.mtgallium.agent.infoset.core.PolicyAudienceScope
 import org.mtgallium.agent.infoset.core.PolicyCardView
@@ -176,6 +178,14 @@ class LinearValueEvaluatorTest {
             Case("transformed object state", PolicyHistoryEventKind.OBJECT_STATE, PerspectiveEventDetail.ObjectState(
                 objectRef = "opaque-ref", objectName = "Werewolf", change = "TRANSFORMED", value = "true",
             )),
+            Case("current transformed object state", PolicyHistoryEventKind.OBJECT_STATE, PerspectiveEventDetail.ObjectState(
+                schemaVersion = PERSPECTIVE_EVENT_SCHEMA_V2,
+                objectRef = "opaque-ref",
+                objectName = "Werewolf",
+                change = "TRANSFORMED",
+                value = "true",
+                knowledgeObjectKey = "remembered-object",
+            )),
             Case("controller object state", PolicyHistoryEventKind.OBJECT_STATE, PerspectiveEventDetail.ObjectState(
                 objectRef = "opaque-ref", objectName = "Creature", change = "CONTROLLER_CHANGED", value = "p1",
             )),
@@ -255,6 +265,12 @@ class LinearValueEvaluatorTest {
             )),
             Case("transformed false boolean", PolicyHistoryEventKind.OBJECT_STATE, PerspectiveEventDetail.ObjectState(
                 objectRef = "opaque", objectName = "Werewolf", change = "TRANSFORMED", value = "TRUE",
+            )),
+            Case("schema v2 non-transform", PolicyHistoryEventKind.OBJECT_STATE, PerspectiveEventDetail.ObjectState(
+                schemaVersion = PERSPECTIVE_EVENT_SCHEMA_V2,
+                objectRef = "opaque",
+                objectName = "Mountain",
+                change = "UNTAPPED",
             )),
             Case(
                 "controller raw reference",
@@ -466,6 +482,20 @@ class LinearValueEvaluatorTest {
             evaluator(weights = mapOf(key to 0.5 / feature.values.getValue(key))).evaluate(feature),
             1e-12,
         )
+    }
+
+    @Test
+    fun `tanh link maps the raw score without changing the default clipped model`() {
+        val payload = LinearWeights(bias = 2.0, weights = emptyMap())
+        val clipped = LinearValueEvaluator(payload)
+        val linked = LinearValueEvaluator(payload, LinearValueLink.TANH)
+        val features = ValueFeatureVector(emptyMap())
+
+        assertEquals(LinearValueEstimate(2.0, 1.0), clipped.evaluateDetailed(features))
+        val actual = linked.evaluateDetailed(features)
+        assertEquals(2.0, actual.rawScore)
+        assertEquals(tanh(2.0), actual.deployedValue, 1e-12)
+        assertNotEquals(clipped.configurationId, linked.configurationId)
     }
 
     @Test

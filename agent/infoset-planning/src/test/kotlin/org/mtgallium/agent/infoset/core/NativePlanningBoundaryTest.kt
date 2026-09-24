@@ -4,6 +4,19 @@ import kotlin.test.*
 import kotlinx.serialization.json.*
 
 class NativePlanningBoundaryTest {
+    @Test fun `sampled nonterminal leaf records volatility without information projection`() {
+        val world = NativeWorld()
+        val search = InformationSetSearch(InformationSetSearchConfig(
+            simulations = 1, maxPolicyDecisions = 1,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)),
+            NativePolicy, NativePolicy, NativePolicy,
+            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"))
+
+        val result = search.search("p0", batch(world), 84L)
+        assertEquals(1, result.diagnostics.evaluatorCalls)
+        assertEquals(0, result.diagnostics.unsettledLeafEvaluations)
+    }
+
     @Test fun `tree opponent and bounded continuation use native contexts with widening preserving visits`() {
         val world = NativeWorld()
         val leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)

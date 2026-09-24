@@ -238,6 +238,8 @@ data class InformationSetSearchDiagnostics(
     val evaluatorId: String = "unknown",
     val evaluatorConfigurationId: String = evaluatorId,
     val evaluatorCalls: Int = 0,
+    /** Evaluator calls at positions with pending stack, combat, damage, order, or lethal damage. */
+    val unsettledLeafEvaluations: Int = 0,
     val evaluatorNanos: Long = 0,
     val evaluatorOutputChecksum: String = "0000000000000000",
     /** Unresolved horizon fallbacks backed up as neutral instead of evaluated. */

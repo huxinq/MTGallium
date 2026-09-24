@@ -1,6 +1,9 @@
 package org.mtgallium.agent.monored
 
 import java.util.Collections
+import kotlin.math.tanh
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import org.mtgallium.agent.infoset.core.ConfiguredInformationStateEvaluator
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.PolicyJson
@@ -8,7 +11,13 @@ import org.mtgallium.agent.infoset.core.SearchSettlementOrigin
 
 internal const val MONO_RED_LEARNED_OUTCOME_VALUE_V1_EVALUATOR_ID = "mono-red-learned-outcome-value-v1"
 
-/** Linear score and its value clipped to [-1, 1]. */
+@Serializable
+enum class LinearValueLink {
+    @SerialName("clip") CLIP,
+    @SerialName("tanh") TANH,
+}
+
+/** Linear score and its deployed value in [-1, 1]. */
 data class LinearValueEstimate(
     val rawScore: Double,
     val deployedValue: Double,
@@ -16,16 +25,19 @@ data class LinearValueEstimate(
     init {
         require(rawScore.isFinite())
         require(deployedValue.isFinite() && deployedValue in -1.0..1.0)
-        require(deployedValue == rawScore.coerceIn(-1.0, 1.0))
     }
 }
 
-/** bias + sum(weight * feature), clipped to [-1, 1]. */
-class LinearValueEvaluator(model: LinearWeights) : ConfiguredInformationStateEvaluator {
+/** bias + sum(weight * feature), mapped to [-1, 1] by [link]. */
+class LinearValueEvaluator(
+    model: LinearWeights,
+    val link: LinearValueLink = LinearValueLink.CLIP,
+) : ConfiguredInformationStateEvaluator {
     val model: LinearWeights = model.copy(weights = Collections.unmodifiableMap(model.weights.toSortedMap()))
     override val id: String = MONO_RED_LEARNED_OUTCOME_VALUE_V1_EVALUATOR_ID
     override val configurationId: String = "linear-value-sha256:" + PolicyJson.sha256(
-        "$id:$VALUE_FEATURE_SCHEMA:$VALUE_FEATURE_SCALING:${this.model.toJson()}")
+        "$id:$VALUE_FEATURE_SCHEMA:$VALUE_FEATURE_SCALING:${this.model.toJson()}" +
+            if (link == LinearValueLink.CLIP) "" else ":link=${link.name.lowercase()}")
     override val settlementOrigin: SearchSettlementOrigin = SearchSettlementOrigin.LEARNED_OUTCOME_ESTIMATE
 
     override fun evaluate(information: InformationStateRepresentation, rootPlayer: String): Double =
@@ -57,12 +69,18 @@ class LinearValueEvaluator(model: LinearWeights) : ConfiguredInformationStateEva
         }
         if (!score.isFinite()) failValueEvaluation(ValueInputError.INFERENCE_NONFINITE,
             "Linear value score is non-finite")
-        val deployed = score.coerceIn(-1.0, 1.0)
+        val deployed = when (link) {
+            LinearValueLink.CLIP -> score.coerceIn(-1.0, 1.0)
+            LinearValueLink.TANH -> tanh(score)
+        }
         return LinearValueEstimate(rawScore = score, deployedValue = deployed)
     }
 
     companion object {
-        fun load(text: String): LinearValueEvaluator = LinearValueEvaluator(LinearWeights.load(text))
+        fun load(
+            text: String,
+            link: LinearValueLink = LinearValueLink.CLIP,
+        ): LinearValueEvaluator = LinearValueEvaluator(LinearWeights.load(text), link)
     }
 }
 

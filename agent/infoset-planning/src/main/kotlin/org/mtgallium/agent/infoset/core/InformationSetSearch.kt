@@ -277,6 +277,7 @@ class InformationSetSearch(
                 evaluatorId = invokedEvaluatorId,
                 evaluatorConfigurationId = invokedEvaluatorConfigurationId,
                 evaluatorCalls = workAudit.evaluatorCalls,
+                unsettledLeafEvaluations = workAudit.unsettledLeafEvaluations,
                 evaluatorNanos = workAudit.evaluatorNanos,
                 evaluatorOutputChecksum = workAudit.evaluatorOutputChecksum(),
                 quiescenceUnresolvedBackups = quiescenceAudit.unresolvedBackups,
@@ -630,7 +631,7 @@ class InformationSetSearch(
                 audit.forcedPasses++
                 continue
             }
-            if (!isVolatile(world.informationState(rootPlayer))) {
+            if (!isVolatile(world.informationState(rootPlayer).observation)) {
                 return StaticLeafSettlement.Value(staticLeafValue(world, rootPlayer, workAudit))
             }
             return if (expansion.candidates.isNotEmpty() && world.actorToAct() != null) {
@@ -664,9 +665,10 @@ class InformationSetSearch(
             return SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF)
         }
         val started = System.nanoTime()
+        val information = if (valueSource is LeafValueSource.Information) world.informationState(rootPlayer) else null
         val (rawValue, origin) = when (val source = valueSource) {
             is LeafValueSource.Information -> source.evaluator.evaluate(
-                world.informationState(rootPlayer),
+                requireNotNull(information),
                 rootPlayer,
             ) to source.evaluator.settlementOrigin
             is LeafValueSource.SampledWorld -> world.sampledWorldLeafValue(
@@ -676,12 +678,13 @@ class InformationSetSearch(
         }
         require(rawValue.isFinite()) { "Leaf evaluator returned a non-finite score: $rawValue" }
         val value = rawValue.coerceIn(-1.0, 1.0)
-        workAudit.recordEvaluator(value, System.nanoTime() - started)
+        val elapsed = System.nanoTime() - started
+        workAudit.recordEvaluator(value, elapsed,
+            isVolatile(information?.observation ?: world.epistemicState(rootPlayer).observation))
         return SearchSettlement(value, origin)
     }
 
-    private fun isVolatile(information: InformationStateRepresentation): Boolean {
-        val observation = information.observation
+    private fun isVolatile(observation: PlayerObservationSnapshot): Boolean {
         if (observation.stack.isNotEmpty()) return true
         if (observation.phase == "COMBAT" && observation.step != "END_COMBAT") return true
         val pendingKind = observation.pendingDecision?.decisionKind.orEmpty()
@@ -889,11 +892,13 @@ class InformationSetSearch(
         var opponentDistributionCacheMisses = 0
         var rejectedTransitions = 0
         var evaluatorCalls = 0
+        var unsettledLeafEvaluations = 0
         var evaluatorNanos = 0L
         private var evaluatorChecksum = 1_125_899_906_842_597L
 
-        fun recordEvaluator(value: Double, elapsedNanos: Long) {
+        fun recordEvaluator(value: Double, elapsedNanos: Long, unsettled: Boolean) {
             evaluatorCalls++
+            if (unsettled) unsettledLeafEvaluations++
             evaluatorNanos += elapsedNanos.coerceAtLeast(0L)
             evaluatorChecksum = evaluatorChecksum * 31L + value.toBits()
         }

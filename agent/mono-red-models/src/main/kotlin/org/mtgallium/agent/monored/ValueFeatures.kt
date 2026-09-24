@@ -578,7 +578,20 @@ object ValueFeatures {
             is PerspectiveEventDetail.CounterChange ->
                 requireContract(PERSPECTIVE_EVENT_SCHEMA_V1, PolicyHistoryEventKind.COUNTER_CHANGE)
             is PerspectiveEventDetail.ObjectState -> {
-                requireContract(PERSPECTIVE_EVENT_SCHEMA_V1, PolicyHistoryEventKind.OBJECT_STATE)
+                val supportedSchema = detail.schemaVersion == PERSPECTIVE_EVENT_SCHEMA_V1 ||
+                    (detail.schemaVersion == PERSPECTIVE_EVENT_SCHEMA_V2 && detail.change == "TRANSFORMED")
+                if (!supportedSchema) {
+                    failValueEvaluation(
+                        ValueInputError.INPUT_HISTORY_INVALID,
+                        "History event ${event.eventId} has unsupported ${detail::class.simpleName} schema ${detail.schemaVersion}",
+                    )
+                }
+                if (event.kind != PolicyHistoryEventKind.OBJECT_STATE) {
+                    failValueEvaluation(
+                        ValueInputError.INPUT_HISTORY_INVALID,
+                        "History event ${event.eventId} kind ${event.kind} is incompatible with ${detail::class.simpleName}",
+                    )
+                }
                 validateObjectState(detail, event.eventId, roles)
             }
             is PerspectiveEventDetail.Causal ->

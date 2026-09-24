@@ -1020,6 +1020,29 @@ class InformationSetSearchTest {
     }
 
     @Test
+    fun `unsettled leaf counter follows the actual evaluation position`() {
+        fun search(cutoff: RolloutCutoff): InformationSetSearchResult {
+            val probe = QuiescenceProbe()
+            return coreSearch(
+                policyQuiescenceConfig().copy(leaf = LeafEvaluationConfig(
+                    LeafStateSource.BOUNDED_ROLLOUT, cutoff)),
+                opponentPolicy = UniformOpponentPolicy,
+                valueSource = LeafValueSource.Information(recordingEvaluator(probe)),
+            ).search("p0", batch(listOf(QuiescenceWorld(
+                probe, QuiescenceBranch.REAL_BRANCH, volatileThroughStage = 1,
+            ))), 107L)
+        }
+
+        val direct = search(RolloutCutoff.EVALUATE)
+        val settled = search(RolloutCutoff.POLICY_QUIESCENCE)
+        assertEquals(2, direct.diagnostics.evaluatorCalls)
+        assertEquals(2, direct.diagnostics.unsettledLeafEvaluations)
+        assertEquals(2, settled.diagnostics.evaluatorCalls)
+        assertEquals(0, settled.diagnostics.unsettledLeafEvaluations)
+        assertTrue(settled.diagnostics.quiescenceStrategicDecisions > 0)
+    }
+
+    @Test
     fun `policy quiescence selects and accounts for both actors before evaluating a quiet leaf`() {
         val probe = QuiescenceProbe()
         val root = RecordingPolicy("quiescence-root")
@@ -1060,6 +1083,7 @@ class InformationSetSearchTest {
         assertEquals(2, result.diagnostics.quiescenceStrategicDecisions)
         assertEquals(2, result.diagnostics.quiescenceOverflows)
         assertEquals(2, result.diagnostics.quiescenceFallbacks)
+        assertEquals(2, result.diagnostics.unsettledLeafEvaluations)
         assertEquals(0, result.candidateSettlementCounts.values.sumOf { it.terminalPayoffBackups })
     }
 
@@ -1076,6 +1100,7 @@ class InformationSetSearchTest {
         ))), 109L)
         assertEquals(1.0, terminal.rootValue)
         assertEquals(0, terminal.diagnostics.evaluatorCalls)
+        assertEquals(0, terminal.diagnostics.unsettledLeafEvaluations)
         assertEquals(2, terminal.candidateSettlementCounts.values.sumOf { it.terminalPayoffBackups })
         assertFailsWith<RejectedSearchTransitionException> {
             search.search("p0", batch(listOf(QuiescenceWorld(
