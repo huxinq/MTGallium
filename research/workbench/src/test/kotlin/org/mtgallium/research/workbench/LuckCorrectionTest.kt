@@ -21,6 +21,15 @@ import org.mtgallium.agent.monored.*
 import kotlin.test.*
 
 class LuckCorrectionTest {
+    @Test fun `native value configuration is opt in and rejects ambiguous models`() {
+        val encoded = researchJson.encodeToJsonElement(LuckModelConfig.serializer(), LuckModelConfig()).jsonObject
+        assertFalse("provider" in encoded)
+        assertFalse("settings" in encoded)
+        assertFailsWith<IllegalArgumentException> { LuckModelConfig(provider = " ") }
+        assertFailsWith<IllegalArgumentException> { LuckModelConfig(provider = "test", weights = LinearWeights(0.0, emptyMap())) }
+        assertFailsWith<IllegalArgumentException> { nativeValue("unregistered-test-value", JsonObject(emptyMap())) }
+    }
+
     companion object { private val registry by lazy(::buildRegistry) }
     private fun world(hand: Int = 0, mulligans: Boolean = false): ArgentumSearchWorld {
         val deck = mapOf("Mountain" to 3, "Lightning Bolt" to 1)

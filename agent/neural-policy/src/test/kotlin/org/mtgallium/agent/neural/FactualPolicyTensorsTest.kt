@@ -7,6 +7,14 @@ import kotlin.test.*
 class FactualPolicyTensorsTest {
     private val encoder = FactualPolicyEncoder()
 
+    @Test fun `leaf view matches decision bytes and permits a nonacting perspective`() {
+        val site = NeuralFixtures.site()
+        val information = site.information()
+        assertEquals(encoder.decision(site).view, encoder.view(information))
+        assertEquals(encoder.view(information), encoder.view(information.copy(actingPlayerId = "p1")))
+        assertFailsWith<IllegalArgumentException> { encoder.view(information.copy(terminated = true)) }
+    }
+
     @Test fun `unavailable deck knowledge differs from known empty without requiring a sampler`() {
         val unknown = NeuralFixtures.state()
         val empty = NeuralFixtures.state(knowledge = unknown.knowledge.copy(deckCardCounts = mapOf("p1" to emptyMap())))

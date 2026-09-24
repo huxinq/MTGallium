@@ -4,6 +4,8 @@ import com.wingedsheep.engine.core.*
 import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.engine.state.components.identity.CardComponent
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumReplayStep
@@ -29,8 +31,16 @@ data class LuckCorrectionConfig(
 }
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class LuckModelConfig(val name: String = "v2", val weights: LinearWeights? = null,
-    val link: LinearValueLink = LinearValueLink.CLIP)
+    val link: LinearValueLink = LinearValueLink.CLIP,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val provider: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val settings: JsonObject = JsonObject(emptyMap())) {
+    init {
+        require(provider == null || (provider.isNotBlank() && weights == null && link == LinearValueLink.CLIP))
+        require(provider != null || settings.isEmpty())
+    }
+}
 
 @Serializable
 data class LuckEvent(val index: Int, val kind: String, val player: String?, val status: String,
@@ -71,7 +81,8 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
     private var calls = 0
     private var selected = 0
     private val evaluators = config.models.associate { it.name to
-        (it.weights?.let { weights -> LinearValueEvaluator(weights, it.link) } ?: MonoRedInformationEvaluator) }
+        (it.provider?.let { name -> nativeValue(name, it.settings) }
+            ?: it.weights?.let { weights -> LinearValueEvaluator(weights, it.link) } ?: MonoRedInformationEvaluator) }
 
     private inline fun <T> timed(block: () -> T): T {
         val start = System.nanoTime()
@@ -265,12 +276,15 @@ class LuckCorrection(private val config: LuckCorrectionConfig, private val candi
         put("events", researchJson.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(LuckEvent.serializer()), events))
         put("models", buildJsonObject {
             config.models.forEach { model -> put(model.name, buildJsonObject {
-                val bytes = (model.weights?.toJson() ?: MonoRedVisibleEvaluatorConfig().configurationId) + ":" + model.link.name
-                put("hashFormat", JsonPrimitive("sha256-canonical-weights-json-or-v2-config-colon-link-utf8"))
+                val bytes = if (model.provider == null)
+                    (model.weights?.toJson() ?: MonoRedVisibleEvaluatorConfig().configurationId) + ":" + model.link.name
+                    else evaluators.getValue(model.name).id
+                put("hashFormat", JsonPrimitive(if (model.provider == null)
+                    "sha256-canonical-weights-json-or-v2-config-colon-link-utf8" else "sha256-native-evaluator-id-utf8"))
                 put("sha256", JsonPrimitive(MessageDigest.getInstance("SHA-256")
                     .digest(bytes.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }))
                 put("link", JsonPrimitive(model.link.name))
-                put("kind", JsonPrimitive(if (model.weights == null) "v2" else "linear"))
+                put("kind", JsonPrimitive(model.provider ?: if (model.weights == null) "v2" else "linear"))
                 put("events", buildJsonObject {
                     for (kind in listOf("opening", "mulligan", "draw")) {
                         val rows = events.filter { it.kind == kind }

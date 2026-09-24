@@ -50,6 +50,33 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
     fun decision(site: DecisionSite, referenceGroups: Map<String, List<String>> = emptyMap()): FactualDecisionTensors {
         val state = site.epistemic
         require(site.actor == state.perspectivePlayerId && !state.terminated)
+        val (rawView, scope) = scopedView(state)
+        val groups = referenceGroups.mapValues { (name, members) ->
+            require(members.isNotEmpty() && members.distinct().size == members.size) { "Malformed visible-reference group: $name" }
+            members.map { scope.existing(it) }.sorted()
+        }
+        val view = bytes(scope.transform(rawView), schema.maximumViewBytes, "current view")
+        val actions = site.expansion.candidates.map { action ->
+            val raw = buildJsonObject {
+                put("kind", action.kind.name); put("operationFamily", action.operationFamily.name)
+                put("intent", PolicyJson.format.encodeToJsonElement(action.actionIntent))
+                put("payload", action.canonicalPayload)
+            }
+            bytes(scope.transform(raw, groups = groups), schema.maximumActionBytes, "candidate action")
+        }
+        return FactualDecisionTensors(view, frozen(actions), site.expansion.isExhaustive,
+            site.expansion.isProfileExhaustive).also { it.validate(schema) }
+    }
+
+    /** The same factual view at a leaf, including when another player is acting. */
+    fun view(information: InformationStateRepresentation): List<Int> {
+        val state = EpistemicState.capture(information)
+        require(!state.terminated)
+        val (rawView, scope) = scopedView(state)
+        return bytes(scope.transform(rawView), schema.maximumViewBytes, "current view")
+    }
+
+    private fun scopedView(state: EpistemicState): Pair<JsonObject, References> {
         val observation = PolicyJson.format.encodeToJsonElement(state.observation).jsonObject.toMutableMap()
         // Player names and card-definition keys are presentation/registry identifiers, not inputs.
         observation["players"] = JsonArray(state.observation.players.map { player ->
@@ -71,21 +98,7 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
         }
         val scope = References(state.perspectivePlayerId, state.observation.players.map { it.playerId }, rememberedAt(state.history))
         scope.collect(rawView)
-        val groups = referenceGroups.mapValues { (name, members) ->
-            require(members.isNotEmpty() && members.distinct().size == members.size) { "Malformed visible-reference group: $name" }
-            members.map { scope.existing(it) }.sorted()
-        }
-        val view = bytes(scope.transform(rawView), schema.maximumViewBytes, "current view")
-        val actions = site.expansion.candidates.map { action ->
-            val raw = buildJsonObject {
-                put("kind", action.kind.name); put("operationFamily", action.operationFamily.name)
-                put("intent", PolicyJson.format.encodeToJsonElement(action.actionIntent))
-                put("payload", action.canonicalPayload)
-            }
-            bytes(scope.transform(raw, groups = groups), schema.maximumActionBytes, "candidate action")
-        }
-        return FactualDecisionTensors(view, frozen(actions), site.expansion.isExhaustive,
-            site.expansion.isProfileExhaustive).also { it.validate(schema) }
+        return rawView to scope
     }
 
     /** Isolated-event convenience. Stateful consumers use [events] to retain qualified continuity. */
