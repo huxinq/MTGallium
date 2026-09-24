@@ -33,7 +33,7 @@ player decision; see [simulation](architecture/information-and-decisions.md#live
 | `agent/mono-red-models` | Mono-Red features and value evaluators. |
 | `agent/neural-policy` | Factual tensor encoding and ONNX runtime loading. |
 | `agent/argentum-policy` | Argentum policy lifecycle, defaults, and search/leaf composition. |
-| `research/workbench` | Direct games, Python bridge, feature/kernel routines, and CLI entry points. |
+| `research/workbench` | Direct games, Python bridge, native policies and the provider hook for other builds, feature/kernel routines, and CLI entry points. |
 | `integration/argentum-policy` | Argentum application integration. |
 | `evaluation/argentum` | Engine-policy evaluation and probes. |
 | `tools/research_workspace` | Python session and game handles. |

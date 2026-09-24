@@ -32,6 +32,18 @@ class DirectResearchTests(unittest.TestCase):
         self.assertIn(':research:workbench:researchClasspath', execute.call_args.args[0])
         self.assertTrue(execute.call_args.kwargs['check'])
 
+    def test_an_added_build_supplies_its_own_classpath(self):
+        build = self.root / 'private'
+        (build / 'build/research').mkdir(parents=True)
+        (build / 'build/research/runtime.json').write_text(json.dumps(self.paths))
+        with patch.dict(os.environ, {'MTGALLIUM_RESEARCH_BUILD': str(build)}), \
+             patch.object(research, 'RUNTIME', self.root / 'missing.json'), \
+             patch.object(research.subprocess, 'run') as execute:
+            self.assertEqual(research.runtime(), self.paths)
+        self.assertIn(':researchClasspath', execute.call_args.args[0])
+        self.assertNotIn(':research:workbench:researchClasspath', execute.call_args.args[0])
+        self.assertEqual(str(build.resolve()), execute.call_args.kwargs['env']['MTGALLIUM_GRADLE_PROJECT'])
+
     def test_no_build_is_an_explicit_reuse_of_compiled_paths(self):
         with patch.object(research, 'RUNTIME', self.runtime_file), patch.object(research.subprocess, 'run') as execute:
             self.assertEqual(research.runtime(build=False), self.paths)

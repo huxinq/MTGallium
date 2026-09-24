@@ -55,6 +55,27 @@ Search settings:
 Argentum heuristic marks in the menu and stops if no action is marked. `search`
 runs information-set search with the plan's search settings.
 
+### Added policies
+
+A separate Gradle build can add native policies without editing this checkout.
+It includes this build with `includeBuild`, depends on `:research:workbench`, and
+names its `NativePolicyProvider` implementation in
+`META-INF/services/org.mtgallium.research.workbench.NativePolicyProvider`. A
+provider lists its policy names and the plan settings it reads. Those settings
+sit beside the plan fields (`myModel` in JSON, `my_model` from Python);
+`GamesPlan` keeps them in `extensions`, and the provider decodes them with
+`NativePolicyContext.settings`. Game creation rejects an unknown policy name,
+including a shadow, and any setting no provider claims.
+
+A provider returns `NativePolicy.Direct` for a player without memory, or
+`NativePolicy.Search` for a `SearchPolicySession`. The game creates a search
+session once per player, feeds it accepted moves, forks it with the game and
+reports its search as it does for `search`.
+
+Set `MTGALLIUM_RESEARCH_BUILD` to that build's root to use it from Python. Its root
+project provides a `researchClasspath` task that writes
+`build/research/runtime.json` as this module's task does.
+
 ## Output and limits
 
 A new output directory contains the plan and execution context, per-game results,

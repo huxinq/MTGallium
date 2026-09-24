@@ -50,7 +50,9 @@ row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
 A setup is two games with the same seed and swapped policy/deck seats. New seeds
 come from the operating system; pass `seeds=[...]` with the matching `setups` to
 reproduce a run. Rows keep seeds, config, commit, uncommitted diff, engine pin,
-model file hashes, individual outcomes, and per-game counts of changed decisions.
+hashes of model files (settings named `*_model` other than `opponent_model`),
+individual outcomes, and per-game counts of changed decisions. With
+`MTGALLIUM_RESEARCH_BUILD` set, they also keep that build's commit and diff.
 
 At every candidate decision, the incumbent also chooses a move on the same
 history without playing it (a *shadow* choice); the row counts where the two

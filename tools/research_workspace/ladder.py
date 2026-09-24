@@ -26,11 +26,10 @@ import threading
 import time
 from typing import Any
 
-from . import REPO, runtime
+from . import REPO, research_build, runtime
 from .game import Action, Decision, ResearchError, Session
 
 Policy = str | Callable[[Decision], Action | int]
-_STATEFUL_NATIVE_POLICIES = {'search'}
 
 
 def _name(policy: Policy, supplied: str | None, role: str) -> str:
@@ -83,14 +82,14 @@ def _select(game: Any, policy: Policy, decision: Decision, role: str) -> Action:
 
 def _game(session: Session, candidate: Policy, incumbent: Policy, opponent: Policy,
           decks: tuple[dict, dict], seed: int, candidate_seat: int, settings: dict) -> dict:
-    # Each game owns fresh callback objects. Stateful native policies are installed or
-    # shadowed at creation so their memory sees actions selected by Python.
+    # Each game owns fresh callback objects. A named incumbent is shadowed at creation so
+    # search memory sees actions selected by Python; memoryless shadows cost nothing.
     candidate, incumbent, opponent = map(copy.deepcopy, (candidate, incumbent, opponent))
     policies: list[Policy] = [opponent, opponent]
     policies[candidate_seat] = candidate
     initial = tuple(policy if isinstance(policy, str) else 'random' for policy in policies)
     game_settings = copy.deepcopy(settings)
-    if isinstance(incumbent, str) and incumbent in _STATEFUL_NATIVE_POLICIES:
+    if isinstance(incumbent, str):
         shadows = list(game_settings.get('shadow_policies', ()))
         if incumbent not in shadows:
             shadows.append(incumbent)
@@ -166,8 +165,8 @@ def _summarize(name: str, games: list[dict], setup_count: int) -> dict:
             'raw_games': sorted(games, key=lambda game: (game['seed'], game['candidate_seat']))}
 
 
-def _git(*arguments: str) -> str:
-    return subprocess.run(['git', '-C', str(REPO), *arguments], check=True,
+def _git(*arguments: str, cwd: Path = REPO) -> str:
+    return subprocess.run(['git', '-C', str(cwd), *arguments], check=True,
                           text=True, stdout=subprocess.PIPE).stdout.rstrip('\n')
 
 
@@ -178,11 +177,17 @@ def source_provenance(engine: Path | None = None) -> dict:
     if recorded:
         return json.loads(Path(recorded).read_text())
     engine = engine or REPO / 'third_party/argentum-engine'
-    return {'commit': _git('rev-parse', 'HEAD'), 'diff': _git('diff', 'HEAD', '--binary'),
-            'status': _git('status', '--porcelain=v1'),
-            'engine_head': subprocess.run(['git', '-C', str(engine), 'rev-parse', 'HEAD'], check=True,
-                                          text=True, stdout=subprocess.PIPE).stdout.strip(),
-            'engine_pin': _git('ls-tree', 'HEAD', 'third_party/argentum-engine').split()[2]}
+    result = {'commit': _git('rev-parse', 'HEAD'), 'diff': _git('diff', 'HEAD', '--binary'),
+              'status': _git('status', '--porcelain=v1'),
+              'engine_head': subprocess.run(['git', '-C', str(engine), 'rev-parse', 'HEAD'], check=True,
+                                            text=True, stdout=subprocess.PIPE).stdout.strip(),
+              'engine_pin': _git('ls-tree', 'HEAD', 'third_party/argentum-engine').split()[2]}
+    build = research_build()
+    if build is not None:
+        result['research_build'] = {'path': str(build), 'commit': _git('rev-parse', 'HEAD', cwd=build),
+                                    'diff': _git('diff', 'HEAD', '--binary', cwd=build),
+                                    'status': _git('status', '--porcelain=v1', cwd=build)}
+    return result
 
 
 def _append(path: Path, row: dict) -> None:
@@ -235,7 +240,8 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
         raise ValueError('Pass seeds, policies, decks and threads through evaluate, not config')
     model_files = {}
     for key in sorted(settings):
-        if key.endswith('_model') and settings[key] is not None:
+        # Settings named *_model are model files, except the opponent model's name.
+        if key.endswith('_model') and key != 'opponent_model' and settings[key] is not None:
             path = Path(settings[key]).resolve()
             settings[key] = str(path)
             with path.open('rb') as stream:

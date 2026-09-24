@@ -151,6 +151,47 @@ class LadderSchedulingTest(unittest.TestCase):
         self.assertEqual('RuntimeError', failure['error']['type'])
 
 
+class LadderSettingsTest(unittest.TestCase):
+    def test_a_named_incumbent_is_shadowed_and_a_callback_is_not(self):
+        created = []
+        result = {'status': 'TERMINAL', 'payoffs': {'p0': 1, 'p1': -1}}
+        class FakeGame:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def _call(self, command, **_):
+                return {'result': result, 'candidateDecisions': 1, 'changedDecisions': 0}
+            def play(self, *_, **__): return result
+        class FakeSession:
+            def game(self, decks, **settings):
+                created.append(settings)
+                return FakeGame()
+        for incumbent in ('added-policy', lambda decision: 0):
+            ladder._game(FakeSession(), 'random', incumbent, 'random', ({}, {}), 1, 0,
+                         {'shadow_policies': ['search']})
+        self.assertEqual(['search', 'added-policy'], created[0]['shadow_policies'])
+        self.assertEqual(['search'], created[1]['shadow_policies'])
+
+    @patch('research_workspace.ladder.source_provenance', return_value={})
+    @patch('research_workspace.ladder.runtime')
+    @patch('research_workspace.ladder._game', side_effect=lambda s, c, i, o, d, seed, seat, settings:
+           game(seed, seat, .5))
+    @patch('research_workspace.ladder.Session')
+    def test_model_files_are_hashed_but_not_the_opponent_model(self, session_type, play, runtime, source):
+        session_type.return_value.__enter__.return_value = object()
+        with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / 'model.json'
+            model.write_bytes(b'{}')
+            row = evaluate('heuristic', opponents={'random': 'random'}, incumbent='random',
+                           decks=[{'Mountain': 7}] * 2, setups=1, seeds=[3], threads=1, build=False,
+                           config={'policy_model': str(model), 'opponent_model': 'heuristic'},
+                           output=Path(directory) / 'ladder.jsonl')
+        files = row['config']['model_files']
+        self.assertEqual(['policy_model'], list(files))
+        self.assertEqual('44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
+                         files['policy_model']['sha256'])
+        self.assertEqual('heuristic', row['config']['settings']['opponent_model'])
+
+
 class LadderLiveTest(unittest.TestCase):
     def test_two_workers_python_candidate_against_native_policies(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -180,3 +221,21 @@ class SourceProvenanceTest(unittest.TestCase):
             with patch.dict(os.environ, {'MTG_SOURCE_JSON': str(path)}), \
                  patch('research_workspace.ladder._git', side_effect=AssertionError('git called')):
                 self.assertEqual(source_provenance(), recorded)
+
+    def test_an_added_build_records_its_own_checkout(self):
+        from research_workspace.ladder import source_provenance
+        def git(*arguments, cwd=None):
+            if arguments[0] == 'ls-tree':
+                return '160000 commit e\tthird_party/argentum-engine'
+            return f'{arguments[0]}@{"added" if cwd is not None and cwd.name == "private" else "public"}'
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory) / 'private'
+            environment = {'MTGALLIUM_RESEARCH_BUILD': str(build)}
+            with patch.dict(os.environ, environment), patch.dict(os.environ, {'MTG_SOURCE_JSON': ''}), \
+                 patch('research_workspace.ladder._git', side_effect=git), \
+                 patch('research_workspace.ladder.subprocess.run') as process:
+                process.return_value.stdout = 'e\n'
+                provenance = source_provenance()
+        self.assertEqual('rev-parse@public', provenance['commit'])
+        self.assertEqual({'path': str(build.resolve()), 'commit': 'rev-parse@added',
+                          'diff': 'diff@added', 'status': 'status@added'}, provenance['research_build'])

@@ -316,6 +316,11 @@ private sealed interface VisibleReference {
     data object AuthorizedChoice : VisibleReference
 }
 
+/** The visible card an action payload's semantic object key names, as the acting player sees it. */
+fun visibleCard(information: InformationStateRepresentation, reference: String): PolicyCardView? =
+    (VisibleSemanticContext(information.observation, information.actingPlayerId)
+        .resolveReference(reference, JsonFeatureMode.CANDIDATE) as? VisibleReference.Card)?.card
+
 /** Reconstructs the adapter's raw-ID-free semantic object keys solely to join them to visible data. */
 private class VisibleSemanticContext(
     observation: PlayerObservationSnapshot,

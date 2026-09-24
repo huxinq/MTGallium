@@ -14,16 +14,28 @@ MAIN = 'org.mtgallium.research.workbench.ResearchKt'
 RUNTIME = REPO / 'research/workbench/build/research/runtime.json'
 
 
+def research_build() -> Path | None:
+    """A Gradle build that includes this checkout and adds native policies, named by
+    MTGALLIUM_RESEARCH_BUILD. Its root `researchClasspath` task writes build/research/runtime.json."""
+    root = os.environ.get('MTGALLIUM_RESEARCH_BUILD')
+    return Path(root).resolve() if root else None
+
+
 def runtime(*, build: bool = True) -> dict[str, str]:
     """Gradle owns dependency invalidation, including ordinary uncommitted edits."""
+    root = research_build()
+    task, path = (':research:workbench:researchClasspath', RUNTIME) if root is None else \
+        (':researchClasspath', root / 'build/research/runtime.json')
     if build:
+        environment = dict(os.environ)
+        if root is not None:
+            environment['MTGALLIUM_GRADLE_PROJECT'] = str(root)
         subprocess.run(
-            ['bash', str(REPO / 'tools/mtgallium-gradle'),
-             ':research:workbench:researchClasspath', '--console=plain', '-q'],
-            cwd=REPO, stdout=sys.stderr, check=True,
+            ['bash', str(REPO / 'tools/mtgallium-gradle'), task, '--console=plain', '-q'],
+            cwd=REPO, stdout=sys.stderr, check=True, env=environment,
         )
     try:
-        return json.loads(RUNTIME.read_text())
+        return json.loads(path.read_text())
     except FileNotFoundError as error:
         raise FileNotFoundError('No compiled research runtime; run tools/mtgallium-research build') from error
 

@@ -5,7 +5,6 @@ import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.sdk.model.Deck
 import kotlinx.serialization.json.*
-import org.mtgallium.agent.infoset.argentum.ARGENTUM_HEURISTIC_CHOICE_TAG_V1
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.neural.FactualPolicyEncoder
@@ -18,14 +17,16 @@ import org.mtgallium.agent.monored.LinearValueLink
 import org.mtgallium.agent.monored.LinearWeights
 
 /** Live world and native policy state. */
-internal class PythonGame(
+class PythonGame internal constructor(
     val plan: GamesPlan,
     val world: ArgentumSearchWorld,
     private val gameId: String,
     private val sessions: MutableMap<Pair<String, String>, SearchPolicySession> = linkedMapOf(),
+    private val policies: NativePolicies = NativePolicies.installed,
 ) {
     private val knownDecks = plan.decks.mapIndexed { index, deck -> "p$index" to deck }.toMap()
     private val actors = knownDecks.keys.toList()
+    private val policyContext = NativePolicyContext(plan, world, gameId, knownDecks)
 
     fun status(): JsonObject = buildJsonObject {
         val terminal = world.terminalPayoff(actors.first()) != null
@@ -92,42 +93,30 @@ internal class PythonGame(
         }
     }
 
-    private fun searchSession(actor: String): SearchPolicySession = sessions.getOrPut(actor to "search") {
-        SearchPolicySession(world, actor, knownDecks,
-            SearchPolicyConfig(plan.particles, plan.simulations, plan.searchDepth, plan.explorationConstant,
-                plan.leaf, plan.actionProfile, baseSeed = plan.seed,
-                rolloutTurnHorizon = plan.rolloutTurnHorizon),
-            when (plan.opponentModel) {
-                "mixture" -> defaultMonoRedOpponentPolicy()
-                "heuristic" -> DeterminizedArgentumHeuristicOpponentPolicy()
-                "random" -> UniformOpponentPolicy
-                else -> error("Unknown opponent model '${plan.opponentModel}'")
-            }, gameId,
-            rolloutPolicy = PolicyDefaults.rootRolloutPolicy(),
-            rolloutOpponentPolicy = PolicyDefaults.opponentRolloutPolicy(),
-            valueSource = LeafValueSource.Information(
-                plan.valueWeights?.let { LinearValueEvaluator(it, plan.valueLink ?: LinearValueLink.CLIP) }
-                    ?: MonoRedInformationEvaluator))
+    /** Search sessions live for the game; other native policies are constructed for each use. */
+    private fun nativePolicy(name: String, actor: String): NativePolicy =
+        sessions[actor to name]?.let(NativePolicy::Search)
+            ?: policies.create(name, policyContext, actor).also {
+                if (it is NativePolicy.Search) sessions[actor to name] = it.session
+            }
+
+    private fun nativePlayer(policy: NativePolicy): Player = when (policy) {
+        is NativePolicy.Direct -> policy.player
+        is NativePolicy.Search -> searchPlayer(world, policy.session)
     }
 
-    private fun nativePlayer(name: String, actor: String): Player = when (name) {
-        "random" -> selectorPlayer(UniformOpponentPolicy)
-        "heuristic" -> selectorPlayer(DeterminizedArgentumHeuristicOpponentPolicy())
-        "production" -> Player(DecisionView(admission = DecisionAdmission.PRODUCTION, annotations = true)) { context, _ -> productionChoice(context) }
-        "search" -> searchPlayer(world, searchSession(actor))
-        else -> error("Unknown native policy '$name'; Python policies supply their selected action directly")
-    }
+    private fun nativePlayer(name: String, actor: String): Player = nativePlayer(nativePolicy(name, actor))
 
     /** The CLI and live connection share the same native policy construction and observers. */
     val players: Map<String, Player> get() = actors.mapIndexed { i, actor ->
         actor to observedPlayer(actor, nativePlayer(plan.policies[i], actor))
     }.toMap()
 
+    /** Check names and settings, and start search memory, including a shadow's, before the first move. */
     fun initializePolicies() {
-        plan.policies.forEachIndexed { index, name -> if (name == "search") nativePlayer(name, actors[index]) }
-        plan.shadowPolicies.filter { it == "search" }.forEach { name ->
-            actors.forEach { actor -> nativePlayer(name, actor) }
-        }
+        policies.checkSettings(plan)
+        plan.policies.forEachIndexed { index, name -> nativePolicy(name, actors[index]) }
+        plan.shadowPolicies.forEach { name -> actors.forEach { actor -> nativePolicy(name, actor) } }
     }
 
     /** Advance each existing native memory once, even when Python overrides the selected action. */
@@ -140,11 +129,12 @@ internal class PythonGame(
 
     fun select(name: String, seed: Long?): JsonObject {
         val actor = requireNotNull(world.actorToAct()) { "A terminal game has no decision" }
-        val player = nativePlayer(name, actor)
+        val policy = nativePolicy(name, actor)
+        val player = nativePlayer(policy)
         val request = context(player.view)
         val selectionSeed = seed ?: ComponentSeeds.derive(plan.seed, actor,
             world.acceptedDecisionCountForHost.toString())
-        val selection = if (name == "search") searchSession(actor).select(world, actor, selectionSeed) else null
+        val selection = (policy as? NativePolicy.Search)?.session?.select(world, actor, selectionSeed)
         val selected = selection?.choice ?: player.choose(request, selectionSeed)
         check(selected in request.expansion.candidates) { "Native policy returned a non-admitted action" }
         return buildJsonObject {
@@ -202,7 +192,7 @@ internal class PythonGame(
     fun fork(): PythonGame {
         val child = world.fork() as ArgentumSearchWorld
         return PythonGame(plan, child, gameId,
-            sessions.mapValues { (_, session) -> session.forkForFactualContinuation(child) }.toMutableMap())
+            sessions.mapValues { (_, session) -> session.forkForFactualContinuation(child) }.toMutableMap(), policies)
     }
 
     companion object {
@@ -231,8 +221,8 @@ private fun decodeView(value: JsonObject?): DecisionView = DecisionView(
     annotations = value?.get("annotations")?.jsonPrimitive?.booleanOrNull ?: false,
 )
 
-/** One private, synchronous connection. */
-internal class PythonResearchConnection {
+/** One private, synchronous connection; the protocol the Python session speaks. */
+class PythonResearchConnection {
     private val registry by lazy(::buildRegistry)
     private val games = linkedMapOf<Int, PythonGame>()
     private var nextId = 0
@@ -246,7 +236,7 @@ internal class PythonResearchConnection {
         }
         return when (request.getValue("command").jsonPrimitive.content) {
             "create" -> {
-                val plan = researchJson.decodeFromJsonElement<GamesPlan>(request.getValue("plan"))
+                val plan = decodeGamesPlan(request.getValue("plan").jsonObject)
                 // Search RNG identity must not depend on which worker/session happened to run a setup.
                 remember(PythonGame.create(plan, registry, "python-game-${plan.seed}"))
             }
@@ -324,7 +314,3 @@ object PythonResearch {
         }
     }
 }
-
-/** The action Argentum's determinized heuristic marks in the menu; a missing mark stops the game. */
-internal fun productionChoice(context: DecisionSiteRequest): SemanticChoice =
-    context.expansion.candidates.single { ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags }

@@ -7,6 +7,7 @@ import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.sdk.model.Deck
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.core.*
@@ -43,7 +44,23 @@ data class GamesPlan(
     val maximumSeconds: Double? = null,
     val recordDecisions: Boolean = false,
     val recordReplay: Boolean = false,
+    /** Settings read by added native policies; see [NativePolicyProvider.settings]. */
+    val extensions: Map<String, JsonElement> = emptyMap(),
 )
+
+/** The JSON names of a settings class, such as the ones a [NativePolicyProvider] reads. */
+fun settingNames(serializer: KSerializer<*>): Set<String> =
+    with(serializer.descriptor) { (0 until elementsCount).map(::getElementName).toSet() }
+
+/** Read a plan whose added-policy settings may sit beside its fields, as Python and plan files write them. */
+fun decodeGamesPlan(value: JsonObject): GamesPlan {
+    val fields = settingNames(GamesPlan.serializer())
+    val (known, added) = value.entries.partition { it.key in fields }
+    val nested = value["extensions"]?.jsonObject.orEmpty()
+    require(added.none { it.key in nested }) { "Plan settings given twice: ${added.map { it.key }.filter { it in nested }}" }
+    return researchJson.decodeFromJsonElement(JsonObject(known.associate { it.key to it.value } +
+        ("extensions" to JsonObject(nested + added.associate { it.key to it.value }))))
+}
 
 /** Read one privileged engine-state snapshot from a replay. */
 @Serializable
@@ -108,7 +125,7 @@ fun main(args: Array<String>) {
         """.trimIndent())
         "games" -> {
             arity(3, "games PLAN.json OUTPUT_DIRECTORY")
-            println(researchJson.encodeToString(runGames(readJson(path(1)), path(2))))
+            println(researchJson.encodeToString(runGames(decodeGamesPlan(readJson(path(1))), path(2))))
         }
         "fit" -> {
             require(args.size in 3..4) { "fit ROOTS.json MODEL.json [RIDGE]" }

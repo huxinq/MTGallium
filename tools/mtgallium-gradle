@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# MTGALLIUM_GRADLE_PROJECT names a build that includes this checkout, such as a private one.
+project=${MTGALLIUM_GRADLE_PROJECT:-.}
 if [[ $(uname -s) == Linux ]] && command -v flock >/dev/null 2>&1; then
-    exec python3 tools/gradle_lock.py third_party/argentum-engine/gradlew --project-dir . "$@"
+    exec python3 tools/gradle_lock.py third_party/argentum-engine/gradlew --project-dir "$project" "$@"
 fi
-exec third_party/argentum-engine/gradlew --project-dir . "$@"
+exec third_party/argentum-engine/gradlew --project-dir "$project" "$@"
