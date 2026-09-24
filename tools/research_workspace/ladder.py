@@ -29,7 +29,7 @@ from typing import Any
 from . import REPO, research_build, runtime
 from .game import Action, Decision, ResearchError, Session
 from .ladder_stream import stream_pairs
-from .ladder_checkpoint import checkpointed
+from .ladder_checkpoint import Checkpoint
 
 Policy = str | Callable[[Decision], Action | int]
 
@@ -235,7 +235,6 @@ def _append(path: Path, row: dict) -> None:
         fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-@checkpointed
 def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[str, Policy],
              incumbent: Policy, incumbent_name: str | None = None,
              decks: Sequence[Mapping[str, int]], setups: int | None = None,
@@ -249,6 +248,32 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
              luck_correction: Mapping[str, Any] | None = None, factual: bool = False,
              schema: Mapping | None = None, include_events: bool = True,
              checkpoint: str | Path | None = None) -> dict:
+    """Evaluate paired seat swaps; checkpoint enables durable native-policy recovery."""
+    options = dict(candidate=candidate, name=name, opponents=opponents, incumbent=incumbent,
+        incumbent_name=incumbent_name, decks=decks, setups=setups, seeds=seeds, threads=threads,
+        config=config, output=output, build=build, java_options=java_options, phase=phase,
+        seed_pool=seed_pool, sequential=sequential, max_pairs=max_pairs, claim=claim,
+        pool_start=pool_start, evidence_root=evidence_root, luck_correction=luck_correction,
+        factual=factual, schema=schema, include_events=include_events)
+    if checkpoint is None:
+        return _evaluate(**options)
+    with Checkpoint(checkpoint) as store:
+        return _evaluate(**options, checkpoint=store)
+
+
+def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[str, Policy],
+             incumbent: Policy, incumbent_name: str | None = None,
+             decks: Sequence[Mapping[str, int]], setups: int | None = None,
+             seeds: Sequence[int] | None = None, threads: int | None = None,
+             config: Mapping[str, Any] | None = None, output: str | Path | None = None,
+             build: bool = True, java_options: Sequence[str] = JAVA_OPTIONS,
+             phase: str = 'exploration', seed_pool: str | None = None,
+             sequential: str | None = None, max_pairs: int | None = None,
+             claim: str | None = None, pool_start: int | None = None,
+             evidence_root: str | Path | None = None,
+             luck_correction: Mapping[str, Any] | None = None, factual: bool = False,
+             schema: Mapping | None = None, include_events: bool = True,
+             checkpoint: Checkpoint | None = None) -> dict:
     """Evaluate paired seat swaps; checkpoint enables durable native-policy recovery."""
     if luck_correction is not None and any(
             (config or {}).get(key) is not None for key in ('maximum_seconds', 'maximumSeconds')):
@@ -350,13 +375,16 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
             sequential=sequential, max_pairs=max_pairs, claim=claim, pool_start=pool_start,
             phase=phase, java_options=list(java_options), java_opts=os.environ.get('JAVA_OPTS', ''),
             evidence_root=str(root.resolve()), output=str(Path(output).resolve())))
+        saved_plan = checkpoint.load_plan()
+        if saved_plan is not None and saved_plan['pool_metadata'] is not None:
+            from .ladder_statistics import validate_allocation
+            validate_allocation(root, saved_plan['pool_metadata'])
         retained = checkpoint.read('result.json')
         if retained is not None:
             retained = checkpoint.publish(output, retained)
             if retained['state'] == 'failed':
                 raise ResearchError('Checkpoint retains a failed comparison; refusing to replay outcomes')
             return retained
-        saved_plan = checkpoint.read('plan.json')
     if saved_plan is not None:
         pool_metadata = saved_plan['pool_metadata']
         seeds = saved_plan['seeds']
@@ -457,6 +485,13 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
         completed, stream_errors = stream_pairs(
             opponents, setups, worker_count,
             lambda: Session(build=False, java_options=java_options), play_pair, tests, checkpoint)
+    if tests is None and checkpoint is not None:
+        observed = {(opponent, game['seed'], game['candidate_seat']) for opponent, game in completed}
+        for opponent in opponents:
+            for seed in seed_values:
+                for seat in (0, 1):
+                    if (opponent, seed, f'p{seat}') not in observed:
+                        completed.append((opponent, unfinished(seed, seat, 'UNEXECUTED')))
     elapsed = time.monotonic() - started
     grouped = {opponent_name: [] for opponent_name in opponents}
     for opponent_name, game in completed:
@@ -470,6 +505,7 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
                       'seeds': seed_values, 'build': build, 'java_options': list(java_options),
                       'model_files': model_files, 'java_opts_environment': os.environ.get('JAVA_OPTS', '')},
            'source': source,
+           'stream_errors': stream_errors,
            'timings': {'build_seconds': build_elapsed, 'evaluation_seconds': elapsed,
                        'total_seconds': time.monotonic() - total_started},
            'opponents': [dict(_summarize(opponent_name, grouped[opponent_name],
@@ -479,7 +515,6 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
     if modern:
         row['config']['seed_pool'] = pool_metadata
         row['config']['comparison_method'] = 'sequential' if tests is not None else 'fixed'
-        row['stream_errors'] = stream_errors
         for summary in row['opponents']:
             games = grouped[summary['name']]
             summary['unfinished_candidate_losses'] = sum(

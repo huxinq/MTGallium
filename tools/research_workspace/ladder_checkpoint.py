@@ -1,5 +1,4 @@
 """Durable comparison checkpoints. A directory belongs to exactly one evaluation."""
-from functools import wraps
 import fcntl
 import hashlib
 import json
@@ -7,10 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import time
-
-
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+from .persistence import canonical_json as canonical, durable_directory, sync_directory
 
 
 class Checkpoint:
@@ -18,7 +14,7 @@ class Checkpoint:
         self.path = Path(path)
 
     def __enter__(self):
-        self.path.mkdir(parents=True, exist_ok=True)
+        durable_directory(self.path)
         self.lock = (self.path / '.lock').open('a')
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -48,21 +44,25 @@ class Checkpoint:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, self.path / name)
-        fd = os.open(self.path, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        sync_directory(self.path)
 
     def prepare(self, specification):
         specification = json.loads(canonical(specification))
         header = self.read('identity.json')
         if header is None:
+            if any(self.path.glob('*.json')):
+                raise ValueError('missing checkpoint identity for retained evidence')
             header = dict(version=1, id=secrets.token_hex(16), specification=specification)
             self.write('identity.json', header)
         if header['version'] != 1 or header['specification'] != specification:
             raise ValueError('checkpoint configuration/source mismatch; use the original invocation')
         self.id = header['id']
+
+    def load_plan(self):
+        plan = self.read('plan.json')
+        if plan is None and any(path.name != 'identity.json' for path in self.path.glob('*.json')):
+            raise ValueError('missing checkpoint plan for retained evidence')
+        return plan
 
     def records(self):
         return [self.read(path.name) for path in sorted(self.path.glob('pair-*.json'))]
@@ -97,7 +97,7 @@ class Checkpoint:
         elif retained != row:
             raise ValueError('checkpoint result mismatch')
         output = Path(output)
-        output.parent.mkdir(parents=True, exist_ok=True)
+        durable_directory(output.parent)
         with output.open('a+') as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
             stream.seek(0)
@@ -114,15 +114,5 @@ class Checkpoint:
                 stream.write(canonical(row).decode() + '\n')
                 stream.flush()
                 os.fsync(stream.fileno())
+        sync_directory(output.parent)
         return row
-
-
-def checkpointed(function):
-    @wraps(function)
-    def run(*args, **kwargs):
-        path = kwargs.get('checkpoint')
-        if path is None:
-            return function(*args, **kwargs)
-        with Checkpoint(path) as checkpoint:
-            return function(*args, **dict(kwargs, checkpoint=checkpoint))
-    return run

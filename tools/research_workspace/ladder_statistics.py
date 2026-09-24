@@ -33,6 +33,7 @@ from pathlib import Path
 import secrets
 from statistics import NormalDist
 import tempfile
+from .persistence import canonical_json as _canonical, sync_directory as _sync_directory, durable_directory
 
 
 POOL_SIZES = {'development': 8192, 'confirmation': 32768}
@@ -42,10 +43,6 @@ POWER = 0.95
 FUTILITY = 0.1
 HYPOTHESES = {'improvement': (0.0, 20.0), 'non_regression': (-10.0, 0.0)}
 _NORMAL = NormalDist()
-
-
-def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
 
 
 def _sha(value):
@@ -76,14 +73,6 @@ def _locked(directory):
             yield
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
-
-
-def _sync_directory(directory):
-    descriptor = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _load_pools(directory):
@@ -137,7 +126,8 @@ def _load_pools(directory):
     return document, ledger
 
 
-def allocate(root, kind, count, claim=None, start=None, declaration=None, resume=False):
+def allocate(root, kind, count, claim=None, start=None, declaration=None, resume=False,
+             existing_only=False):
     """Allocate a frozen contiguous slice; confirmation is locked and append-only.
 
     root must be an existing evidence directory. Development defaults to offset
@@ -170,8 +160,11 @@ def allocate(root, kind, count, claim=None, start=None, declaration=None, resume
     if not root.is_dir():
         raise ValueError('evidence root must already exist')
     directory = root / 'ladder'
-    directory.mkdir(exist_ok=True)
+    durable_directory(directory)
     with _locked(directory):
+        if existing_only and (not (directory / 'seed-pools.json').exists() or
+                              not (directory / 'confirmation-reservations.jsonl').exists()):
+            raise ValueError('missing authoritative pool or reservation ledger')
         document, ledger = _load_pools(directory)
         reservations, previous = [], None
         with ledger.open() as stream:
@@ -202,6 +195,8 @@ def allocate(root, kind, count, claim=None, start=None, declaration=None, resume
                         raise ValueError('confirmation checkpoint reservation mismatch')
                     recovered = dict(row, sha256=_sha(row))
                     start = row['start']
+        if existing_only and kind == 'confirmation' and recovered is None:
+            raise ValueError('missing authoritative confirmation reservation')
         if start is None:
             start = max((r['stop'] for r in reservations), default=0) if kind == 'confirmation' else 0
         stop = start + count
@@ -231,6 +226,15 @@ def allocate(root, kind, count, claim=None, start=None, declaration=None, resume
                 'declaration': declaration,
                 'reservation_sha256': record['sha256'] if kind == 'confirmation' else None,
                 'fresh_confirmation': kind == 'confirmation'}
+
+
+def validate_allocation(root, metadata):
+    """Verify saved allocation against authoritative files without reserving anything."""
+    actual = allocate(root, metadata['kind'], len(metadata['seeds']),
+                      claim=metadata['claim'], start=metadata['start'],
+                      declaration=metadata['declaration'], resume=True, existing_only=True)
+    if actual != metadata:
+        raise ValueError('saved seed allocation does not match authoritative evidence')
 
 
 def elo_score(elo):

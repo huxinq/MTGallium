@@ -57,7 +57,30 @@ row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
                decks=[deck, deck], sequential="improvement")
 ```
 
-For long comparisons, supply `checkpoint=evidence / "runs/my-comparison"`.
+For long comparisons, supply a checkpoint directory. For example, save this
+invocation with your run configuration and repeat it unchanged after interruption:
+
+```python
+import json
+from pathlib import Path
+from research_workspace import evaluate
+
+evidence = Path.home() / "Documents/MTGallium-private-evidence"
+deck = json.loads((evidence / "decks/my-deck.json").read_text())["mainDeck"]
+checkpoint = evidence / "runs/my-comparison/checkpoint"
+row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
+               decks=[deck, deck], sequential="improvement", max_pairs=128,
+               evidence_root=evidence, checkpoint=checkpoint)
+```
+
+Replace the example deck path with your retained deck file. To monitor from a
+second process, define the same `checkpoint` path and read:
+
+```python
+progress = json.loads((checkpoint / "progress.json").read_text())["value"]
+print(progress["timestamp"], progress["state"], progress["opponents"])
+```
+
 This supports native policies with either fixed or sequential comparisons.
 Re-run the same invocation and checkpoint directory after interruption: completed
 pairs are reused, unfinished assigned pairs are replayed with their original
@@ -72,8 +95,7 @@ recovery. A confirmation resumes its original reservation and claim, never a
 fresh seed slice. Repeating a completed invocation returns the saved result
 without appending a duplicate ladder row.
 
-Read `json.loads((checkpoint / "progress.json").read_text())["value"]` for each
-opponent's completed-game count, partial score, ordered-pair count and sequential
+The progress document contains each opponent's completed-game count, partial score, ordered-pair count and sequential
 test state. It updates after each pair; its timestamp can be stale after a crash.
 Partial scores are descriptive and include completed in-flight pairs; they are
 not final strength claims. Checkpoint files use atomic replacement, checksums,
@@ -82,6 +104,30 @@ Timing in a resumed result covers only the latest invocation, not total run cost
 If a crash tears the final shared ladder append, publication refuses that damaged
 ledger; the complete result remains in `result.json` for repair without replay.
 Existing calls without `checkpoint` retain their in-memory behavior.
+
+For recovery problems:
+
+- **Checkpoint in use:** verify the original process has stopped; don't remove
+  `.lock` or start another writer against a copied checkpoint.
+- **Configuration/source mismatch:** use the original checkout or remote snapshot,
+  model files, worker count and invocation. Do not edit the checkpoint identity.
+- **Missing/corrupt reservation ledger:** restore the authoritative pools and
+  ledger together from a consistent backup. Recovery validates the original
+  reservation before any games or result publication; a checkpoint alone cannot
+  authorize reuse of confirmation seeds.
+- **Retained game/session error:** inspect `result.json`, `errors.json`, and pair
+  records (each document's payload is under `value`). Errors are retained evidence,
+  not an interruption to retry silently. Preserve the failed run and diagnose the
+  cause before declaring another comparison; don't delete errors or reuse its
+  confirmation claim with a different checkpoint.
+- **Torn final ladder append:** stop all writers and back up the ledger and
+  checkpoint. Under the same exclusive file lock used by the writers, inspect the
+  bytes after the final newline. Only remove that unterminated suffix if it is
+  verified as a prefix of the saved result's canonical JSON and identifies this
+  checkpoint; preserve every complete row. If ownership is ambiguous, restore a
+  consistent ledger backup instead. Then rerun the unchanged invocation: it
+  republishes `result.json` without replaying games and suppresses duplicates.
+  Never remove a complete row or edit retained game outcomes to repair publication.
 
 The first pool allocation freezes 8,192 development seeds and 32,768 disjoint
 confirmation seeds from OS randomness in `ladder/seed-pools.json` under the
