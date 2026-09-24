@@ -3,8 +3,8 @@
 Use the current public checkout for source development. Preserve unrelated work,
 private research data and the Argentum pin. Trace a change through its callers;
 update the affected tests, examples and documentation. Prefer names from MTG and
-ordinary research; the [glossary](docs/glossary.md) and [API map](docs/terminology.md)
-record existing meanings.
+ordinary research; [terminology](docs/terminology.md) and the
+[glossary](docs/glossary.md) record existing meanings.
 
 ## Behavior changes
 

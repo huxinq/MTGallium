@@ -17,9 +17,10 @@
 
 - [Architecture](architecture.md): dataflow, modules and dependency rules, with
   links to the detailed contracts.
-- [Glossary](glossary.md) defines terms; the [API map](terminology.md) links
-  concepts to classes.
-- [White paper](whitepapers/README.md): the mathematical model.
+- [White paper](whitepapers/README.md): the model of information, belief,
+  value and search. [Terminology](terminology.md) lists its terms and the code
+  that implements them.
+- [Glossary](glossary.md): implementation and experiment terms.
 - [History](history.md): retired protocols and the Argentum pin record.
 
 ## Change the code

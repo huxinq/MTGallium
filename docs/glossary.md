@@ -1,33 +1,11 @@
 # MTGallium glossary
 
-Definitions used by the [API map](terminology.md), [architecture](architecture.md),
-and [white paper](whitepapers/README.md). Usage and commands belong in the
-[research guides](README.md#run-research).
+Implementation and experiment terms. Information state, belief, world, value,
+settlement and the other terms of the model are defined in
+[terminology](terminology.md) and the [white paper](whitepapers/README.md).
+Usage and commands belong in the [research guides](README.md#run-research).
 
 ## Information and knowledge
-
-### Game state and game history
-
-A game state is the current configuration at a player choice or termination.
-A game history is an initial state followed by legal choices and their resulting
-states. The formal model excludes engine randomness from the transition after
-each choice.
-
-### Observation
-
-Information disclosed to a player by the game. One transition can produce an
-ordered sequence of observations, or none.
-
-### Information state
-
-The player's full ordered observation history, including their own observed
-choices. Also called player history in the theoretical model.
-
-### Compatibility and information set
-
-The legal game histories that produce a player's stated observation history form
-that player's information set. Mapping them to current states can merge histories
-with different pasts. See [the formal model, §4](whitepapers/README.md).
 
 ### Player observation snapshot
 
@@ -42,17 +20,13 @@ represented exact knowledge, and candidate choices. Its digest includes the
 candidate expansion. `BoundedPolicyInput` further limits the representation for
 neural policies. See [fields][policy-contract].
 
-### Full epistemic state
-
-The game state together with both players' information states. “Epistemic”
-means concerning information or knowledge.
-
 ### Epistemic state and decision site
 
-`EpistemicState` captures the represented observation, history, and knowledge
-independently of action enumeration. `DecisionSite` adds the actor and an ordered
-menu with completeness and proposal metadata. Its `information()` record and
-digest use that same menu.
+`EpistemicState` captures one player's represented observation, history, and
+knowledge independently of action enumeration. Despite its name, it describes
+one player, not a [world](terminology.md#game-and-information). `DecisionSite`
+adds the actor and an ordered menu with completeness and proposal metadata. Its
+`information()` record and digest use that same menu.
 
 ### Captured decision view
 
@@ -60,24 +34,12 @@ digest use that same menu.
 expansion limit. `DecisionSiteRequest` captures that demand at one world revision;
 expensive information projection can remain lazy.
 
-### Perspective safety
-
-A policy receives public information, its player's own private information, and
-legitimately remembered facts. The trusted Argentum adapter projects these from
-full engine state. See [information boundaries](architecture/information-and-decisions.md).
-
 ### Represented knowledge
 
 Exact facts recoverable from declared known decks and the player's visible history
 (`PolicyKnowledgeState`), including remembered card identities and library
 positions. Tracking can be explicitly incomplete after a visible transition the
 adapter cannot represent exactly. See [the knowledge contract][knowledge-contract].
-
-### Belief and particles
-
-A belief assigns probabilities to compatible histories. A particle represents a
-hypothetical world; its weight supplies relative mass in the approximation.
-A posterior incorporates observed evidence under the configured inference model.
 
 ### Belief backend and snapshot
 
@@ -93,27 +55,11 @@ requirements, unions, and expected counts in other players' pooled hands. The
 Argentum implementation captures particle weights and counts; a subsequent belief
 update needs a fresh snapshot. Joint queries preserve particle correlations.
 
-### Probabilistic support
-
-The histories or hypotheses assigned positive mass by a belief.
-
-### Determinization
-
-A hypothetical world constructed by filling in hidden information consistently
-with represented knowledge.
-
 ### Knowledge consistency
 
 Agreement with the snapshot, knowledge projection, visible history, known
 objects and zones, and remembered library prefix checked by
 `knowledgeConsistencyFailure`. See [adapter checks][search-world].
-
-### Observation conditioning
-
-Discard hypothetical descendants that cannot explain newly observed information
-and renormalize the remainder. The conditioned tracker combines this test with
-action likelihood before resampling. See
-[belief maintenance](architecture/policies-and-beliefs.md#belief-maintenance).
 
 ## Actions and decisions
 
@@ -141,15 +87,6 @@ objects the observer remembers. See
 The probability of a concrete action given its selected search group. Exact
 action likelihood is the group probability times this conditional probability.
 
-### Legal, proposed, admitted, and accepted actions
-
-| Stage | Meaning |
-| --- | --- |
-| Legal | Allowed by the engine's rules in the state. |
-| Proposed | Represented by action generation as a candidate. |
-| Admitted | Included in the configured selection menu. |
-| Accepted | Applied successfully by the engine after rebinding. |
-
 ### Live policy selection
 
 `RootActionSelection` records the chosen semantic action. Searched selections
@@ -162,21 +99,11 @@ An action profile declares the covered families and representation limits.
 Menu-profile completeness means the supplied candidates cover that profile;
 rules completeness means they cover every rules-legal action in that state.
 
-### Rebinding
-
-Resolve a semantic choice to the current native objects and legal action before
-submitting it to the engine.
-
 ### Combat edge reference
 
 A local name for a damage edge, built from its direction, trample-drain role,
 and viewer-safe endpoint references. The adapter maps it to the native wire ID.
 Indistinguishable edges produce an ambiguity failure.
-
-### Genuine player decision and simulation
-
-A player choice includes responses, targets, ordering, and mulligans. Simulation
-advances to the next such choice, termination, or an execution failure.
 
 ### Non-game failure
 
@@ -205,38 +132,12 @@ incarnation transition. It names the spell before resolution. See
 
 ## Search and learning
 
-### Policy
-
-A behavioral policy assigns an action distribution from player information.
-A deterministic policy assigns all mass to one action.
-
 ### Policy role contracts
 
 `ActionSelector` selects from a supplied menu. `ActionDistributionModel`
 assigns probabilities to that menu. `OpponentPolicy` supplies both. Live action
 selection, root-player continuation, opponent continuation, and belief updating
 configure their policies separately.
-
-### Search node and action branch
-
-Nodes group visits by actor and represented information; branches record semantic
-choices. See [search](../agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearch.kt).
-
-### Root and leaf
-
-The root starts a search and determines its player payoff perspective. A leaf is
-where tree exploration stops and obtains a settlement.
-
-### Rollout and continuation policy
-
-A rollout simulates play with separately configured root-player and opponent
-policies. The policy used to infer observed opponent choices has its own role.
-
-### Search-conditioned response model
-
-A simulated policy that also depends on the search record. Equal opponent
-information across different root searches can then receive different responses.
-See the counterexample in [the formal model](whitepapers/README.md).
 
 ### Factual-root branch
 
@@ -245,35 +146,6 @@ on that hidden world and the continuation policies. Forking copies game and
 native search state; copy Python policy state separately. "Factual" here means
 the actual game; the [factual policy tensors](#factual-policy-tensors) use the
 word differently.
-
-### Visits and backups
-
-A backup adds a simulation's settlement to tree statistics. Node and edge visits
-count successful backups. Each search creates a fresh tree; prefix caching
-reuses computation within that search.
-
-### Information-state evaluator
-
-`InformationStateEvaluator` scores the perspective player's represented
-information. See [value models](value-models.md).
-
-### Target value and search mean
-
-A target value specifies expected payoff under a belief and continuation
-policies; an action value also fixes the current action. A search mean averages
-the settlements backed to a node or branch under its actual adaptive sampling.
-
-### Value, payoff, and settlement
-
-| Quantity | Meaning |
-| --- | --- |
-| Terminal payoff | The specified player's result after the game in that world ends. |
-| Information-state evaluation | A score computed from that player's represented information. |
-| Sampled-world evaluation | A score computed using a complete hypothetical world. |
-| Bounded-rollout settlement | A value supplied by the configured rule at a continuation limit. |
-
-A settlement is the value one simulation backs up into the tree, supplied by one
-of these routes. `SearchSettlementOrigin` records which route supplied it.
 
 ### Features, model, fit, and checkpoint
 
