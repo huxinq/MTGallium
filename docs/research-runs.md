@@ -69,14 +69,24 @@ POSIX file locking (use the evidence host for shared storage).
 The sequential unit is a complete seat-swapped pair. `sequential="improvement"`
 tests 0 versus +20 Elo; `sequential="non_regression"` tests -10 versus 0 Elo,
 using `1 / (1 + 10**(-elo/400))`. A normal profile GSPRT uses alpha=beta=0.05.
-`max_pairs` caps the comparison. The improvement default is 1,376 pairs (2,752
-games), derived as `ceil(v * (z(.975) + z(.95))**2 / delta**2)` with pair variance
-`v=0.0875`, 95% planning power, and the 20-Elo score difference. Non-regression
-uses the same calculation for its smaller 10-Elo difference. These assumptions
-and any explicit cap are recorded. Each look forecasts the
-probability of crossing either bound within the remaining budget using a
-Brownian approximation with the current drift and variance. Below 10%, it stops
-for futility. The normal model and error targets are approximate.
+`max_pairs` caps the comparison. The fixed size for 20 Elo is 1,376 pairs,
+derived as `ceil(v * (z(.975) + z(.95))**2 / delta**2)` with pair variance
+`v=0.0875` and 95% planning power; non-regression uses its 10-Elo difference.
+The default cap is twice that, 2,752 pairs (5,504 games), because the test's
+stopping time has a long tail: at the fixed size about 5% of runs at either
+design point reach the cap, cutting power from 0.95 to 0.90, while at twice it
+0.2% do, for about 4% more expected pairs. Non-regression's cap is limited to
+the 8,192-seed development pool (about 1.5 times its fixed size, power about
+0.945). These figures come from an exact lattice calculation of the test at
+`v=0.0875`. The assumptions and any explicit cap are recorded.
+
+Futility is judged under the design hypotheses, not the running estimate. Each
+look computes the Brownian probability that a true H1 would reach the upper
+bound, and that a true H0 would reach the lower bound, within the remaining
+budget. It stops for futility only when both are below 10%, so a slow start
+cannot end a comparison that the budget could still decide. The forecast at the
+current drift is still reported but does not stop the test. The normal model
+and error targets are approximate.
 
 Improvement outcomes are **BETTER**, **NOT_BETTER**, or **INCONCLUSIVE**;
 non-regression outcomes are **NON_INFERIOR**, **INFERIOR**, or **INCONCLUSIVE**.

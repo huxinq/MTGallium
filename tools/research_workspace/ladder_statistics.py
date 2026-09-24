@@ -11,6 +11,9 @@ Stop when decision != 'continue'. Its cap is independent of legacy setups.
 Normal GSPRT profiles the unknown variance separately under each point mean.
 Wald error targets and Brownian futility are approximations for bounded pair
 scores, not exact error guarantees. Futility/cap are inconclusive, not H0 wins.
+Futility is judged under the design hypotheses, not the running estimate: stop
+only when neither a true H1 would reach the upper bound nor a true H0 the lower
+bound within the remaining budget with probability >= FUTILITY.
 The reported normal interval is descriptive, NOT a confidence sequence.
 
 Brownian survival integrates the killed interval heat kernel (image expansion
@@ -233,7 +236,7 @@ def fixed_confirmation_size(mode='improvement', *, variance=PLANNING_VARIANCE,
                             alpha=ALPHA, power=POWER, two_sided=True):
     """Fixed normal size: ceil(v*(z(1-alpha/2)+z(power))²/delta²).
 
-    This is also the default development budget (~1376 improvement pairs).
+    The default sequential budget is sequential_cap(), not this size.
     Fix this size before confirmation; no sequential peeking in fixed analysis.
     Non-regression is powered at 0 Elo against the -10 Elo null boundary.
     """
@@ -242,6 +245,18 @@ def fixed_confirmation_size(mode='improvement', *, variance=PLANNING_VARIANCE,
     lo, hi = _hypotheses(mode)
     return math.ceil(variance * (_NORMAL.inv_cdf(1-alpha/(2 if two_sided else 1)) +
                                 _NORMAL.inv_cdf(power))**2 / (hi-lo)**2)
+
+
+def sequential_cap(mode='improvement'):
+    """Default sequential budget: twice the fixed size, within the development pool.
+
+    The SPRT's stopping time has a long right tail. At the fixed size about 5% of
+    runs at either design point reach the cap, cutting power from .95 to .90; at
+    twice the fixed size 0.2% do, for about 4% more expected pairs there (exact
+    lattice calculation, pair variance .0875). Non-regression's doubled size
+    exceeds the development pool, so it is capped at the pool (1.49x, ~.945 power).
+    """
+    return min(2*fixed_confirmation_size(mode), POOL_SIZES['development'])
 
 
 def planning_design(mode='improvement'):
@@ -361,6 +376,56 @@ def brownian_either_bound(current, lower, upper, remaining, drift, variance):
     return max(0.0, min(1.0, 1-math.fsum(terms)))
 
 
+def brownian_upper_bound(current, lower, upper, remaining, drift, variance):
+    """P(exit [lower,upper] through upper by remaining) for X=current+drift*t+sqrt(v)*W.
+
+    Unbounded-time exit probability minus the integrated upper-boundary flux after
+    remaining: in unit coordinates y=(X-lower)/width, a=drift*width/v and tau=v*t/width²,
+    the flux is exp(a(1-x)-a²tau/2)*pi*sum n(-1)^(n+1) sin(n pi x) exp(-n²pi²tau/2).
+    The lower-bound probability follows by reflection. Same assumptions as
+    brownian_either_bound, which bounds the result.
+    """
+    either = brownian_either_bound(current, lower, upper, remaining, drift, variance)
+    if current >= upper:
+        return 1.0
+    if current <= lower or either == 0 or remaining == 0:
+        return 0.0
+    if variance == 0:
+        return float(current + drift*remaining >= upper)
+    width = upper-lower
+    x, tau, a = (current-lower)/width, variance*remaining/width**2, drift*width/variance
+    if a*(1-x) > 5:
+        # A large tilt multiplies nearly cancelling terms; the opposite bound's
+        # series has tilt -a*x <= 0 here, so take the complement of the union.
+        return max(0.0, either-brownian_lower_bound(current, lower, upper, remaining, drift, variance))
+    if a == 0:
+        eventual = x
+    elif abs(a) > 350:
+        eventual = 1.0 if a > 0 else math.exp(2*abs(a)*(x-1))
+    else:
+        eventual = math.expm1(-2*a*x)/math.expm1(-2*a)
+    tail = math.fsum(2*math.pi*n*(-1)**(n+1)*math.sin(n*math.pi*x)/(n*n*math.pi**2+a*a) *
+                     math.exp(a*(1-x)-.5*(n*n*math.pi**2+a*a)*tau)
+                     for n in range(1, math.ceil(math.sqrt(80/(math.pi**2*tau)))+2))
+    return max(0.0, min(either, eventual-tail))
+
+
+def brownian_lower_bound(current, lower, upper, remaining, drift, variance):
+    """P(exit through lower by remaining); the reflection of brownian_upper_bound."""
+    return brownian_upper_bound(-current, -upper, -lower, remaining, -drift, variance)
+
+
+def _design_reach(lower, upper, current, remaining, mu0, mu1, pair_variance):
+    """P(H1 reaches upper), P(H0 reaches lower) within remaining pairs.
+
+    Under the linearized LLR n*delta*(mean-midpoint)/v each pair adds mean
+    ±delta²/(2v) under H1/H0 and variance delta²/v, with v the pair variance.
+    """
+    step = (mu1-mu0)**2/pair_variance
+    return (brownian_upper_bound(current, lower, upper, remaining, step/2, step),
+            brownian_lower_bound(current, lower, upper, remaining, -step/2, step))
+
+
 class SequentialTest:
     """Normal profile GSPRT with Wald bounds, a fixed cap and Brownian futility.
 
@@ -368,15 +433,17 @@ class SequentialTest:
     are 'accept_h1', 'accept_h0', 'futility', 'max_pairs'. Terminal tests reject
     further observations. A minimum of 30 pairs and positive empirical variance
     are required for inferential stopping; degenerate data continue to the cap.
-    Brownian drift is current LLR/n; its variance uses the delta-method slope
-    of the profiled LLR times the empirical pair variance. It is a local forecast
-    of an adaptive statistic, not an exact first-passage law for that statistic.
+    Futility stops only when both design forecasts (H1 reaching the upper bound,
+    H0 reaching the lower bound within the remaining pairs) fall below FUTILITY,
+    so a slow start cannot end a comparison that the budget could still decide.
+    either_bound_probability remains a descriptive forecast at the current drift
+    (LLR/n, delta-method variance); it is not a stopping input.
     """
 
     def __init__(self, mode, max_pairs=None):
         self.mu0, self.mu1 = _hypotheses(mode)
         self.mode = mode
-        self.max_pairs = fixed_confirmation_size(mode) if max_pairs is None else max_pairs
+        self.max_pairs = sequential_cap(mode) if max_pairs is None else max_pairs
         _integer(self.max_pairs, 'max_pairs', 1)
         self.n, self.mean, self.m2 = 0, 0.0, 0.0
         self.decision = 'continue'
@@ -404,13 +471,14 @@ class SequentialTest:
                 self.decision = 'accept_h0'
         if self.decision == 'continue' and self.n >= self.max_pairs:
             self.decision = 'max_pairs'
-        elif self.decision == 'continue' and self.n >= 30 and self.m2 > 0 and result['either_bound_probability'] < FUTILITY:
+        elif (self.decision == 'continue' and self.n >= 30 and self.m2 > 0 and
+              max(result['design_reach_probabilities'].values()) < FUTILITY):
             self.decision = 'futility'
         return self.result()
 
     def result(self):
         variance = self.m2/(self.n-1) if self.n > 1 else None
-        llr, probability = 0.0, None
+        llr, probability, reach = 0.0, None, None
         if self.n and self.m2 > 0:
             v = self.m2/self.n
             v0, v1 = v+(self.mean-self.mu0)**2, v+(self.mean-self.mu1)**2
@@ -423,6 +491,10 @@ class SequentialTest:
             probability = brownian_either_bound(llr, self.lower, self.upper,
                                                max(0, self.max_pairs-self.n),
                                                llr/self.n, slope*slope*variance)
+            if variance:
+                h1, h0 = _design_reach(self.lower, self.upper, llr, max(0, self.max_pairs-self.n),
+                                       self.mu0, self.mu1, variance)
+                reach = {'h1_reaches_upper': h1, 'h0_reaches_lower': h0}
         interval = [0.0, 1.0]
         if variance is not None and variance > 0:
             radius = _NORMAL.inv_cdf(.975)*math.sqrt(variance/self.n)
@@ -437,7 +509,8 @@ class SequentialTest:
                 'decision': self.decision, 'outcome': outcome, 'stopped': stopped,
                 'score': self.mean if self.n else None, 'pair_variance': variance,
                 'llr': llr, 'lower_bound': self.lower, 'upper_bound': self.upper,
-                'either_bound_probability': probability, 'futility_threshold': FUTILITY,
+                'either_bound_probability': probability, 'design_reach_probabilities': reach,
+                'futility_rule': 'design-hypotheses-v1', 'futility_threshold': FUTILITY,
                 'alpha': ALPHA, 'beta': BETA, 'hypotheses_elo': list(HYPOTHESES[self.mode]),
                 'planning_design': planning_design(self.mode),
                 'normal_interval_95': interval,

@@ -181,6 +181,33 @@ class BrownianTest(unittest.TestCase):
                 stats.brownian_either_bound(*args)
 
 
+class OneSidedBrownianTest(unittest.TestCase):
+    def test_bounds_partition_the_union(self):
+        # Independent of the one-sided series: the tested union probability.
+        for current in (-2.9, -1, 0, .7, 2.93):
+            for t in (1, 5, 30, 1000, 1e6):
+                for drift in (-.05, -.0047, 0, .02):
+                    for variance in (.0005, .00945, 1):
+                        args = (current, -2.944, 2.944, t, drift, variance)
+                        self.assertAlmostEqual(stats.brownian_either_bound(*args),
+                                               stats.brownian_upper_bound(*args) +
+                                               stats.brownian_lower_bound(*args), places=12)
+
+    def test_wald_limit_single_bound_limit_and_reflection(self):
+        step = (stats.elo_score(20)-.5)**2/.0875
+        bound = math.log(19)
+        self.assertAlmostEqual(.95, stats.brownian_upper_bound(0, -bound, bound, 1e7, step/2, step), places=12)
+        self.assertAlmostEqual(.05, stats.brownian_upper_bound(0, -bound, bound, 1e7, -step/2, step), places=12)
+        mu, t, distance = .4, .7, 1.
+        normal = NormalDist()
+        expected = normal.cdf((mu*t-distance)/math.sqrt(t)) + math.exp(2*mu*distance)*normal.cdf((-mu*t-distance)/math.sqrt(t))
+        self.assertAlmostEqual(expected, stats.brownian_upper_bound(0, -100, 1, t, mu, 1), places=12)
+        self.assertAlmostEqual(stats.brownian_upper_bound(.3, 0, 1, .2, .5, .7),
+                               stats.brownian_lower_bound(-.3, -1, 0, .2, -.5, .7), places=14)
+        self.assertEqual(0, stats.brownian_upper_bound(.5, 0, 1, 0, 1, 1))
+        self.assertEqual(1, stats.brownian_upper_bound(1, 0, 1, 1, 0, 1))
+
+
 class SequentialMathTest(unittest.TestCase):
     def test_planning_derivation(self):
         z = NormalDist()
@@ -190,7 +217,8 @@ class SequentialMathTest(unittest.TestCase):
         self.assertEqual(expected, stats.fixed_confirmation_size())
         self.assertEqual(655, stats.fixed_confirmation_size(power=.8, two_sided=False))
         self.assertGreater(stats.fixed_confirmation_size('non_regression'), 4*1376-20)
-        self.assertEqual(expected, stats.SequentialTest('improvement').max_pairs)
+        self.assertEqual(2*expected, stats.SequentialTest('improvement').max_pairs)
+        self.assertEqual(8192, stats.SequentialTest('non_regression').max_pairs)
 
     def test_profile_normal_likelihood_reference(self):
         values = [.25,.5,.75,1,.25,.5,.5,.75]
@@ -223,6 +251,18 @@ class SequentialMathTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 test.add(.5)
 
+    def test_futility_is_judged_under_the_design_hypotheses(self):
+        # At the midpoint the running drift is zero, so a forecast from it says the
+        # remaining budget cannot decide; a true +20 Elo candidate still could.
+        midpoint = (stats.elo_score(0)+stats.elo_score(20))/2
+        test = stats.SequentialTest('improvement', max_pairs=185)
+        for i in range(30):
+            result = test.add(midpoint + (.25 if i%2 else -.25))
+        self.assertLess(result['either_bound_probability'], .1)
+        self.assertGreater(result['design_reach_probabilities']['h1_reaches_upper'], .1)
+        self.assertEqual('continue', result['decision'])
+        self.assertEqual('design-hypotheses-v1', result['futility_rule'])
+
     def test_futility_and_cap_are_inconclusive(self):
         test = stats.SequentialTest('improvement', max_pairs=31)
         midpoint = (stats.elo_score(0)+stats.elo_score(20))/2
@@ -230,7 +270,7 @@ class SequentialMathTest(unittest.TestCase):
             test.add(midpoint + (.2 if i%2 else -.2))
         self.assertEqual('futility', test.result()['decision'])
         self.assertEqual('INCONCLUSIVE', test.result()['outcome'])
-        self.assertLess(test.result()['either_bound_probability'], .1)
+        self.assertLess(max(test.result()['design_reach_probabilities'].values()), .1)
         test = stats.SequentialTest('improvement', max_pairs=3)
         for _ in range(3):
             test.add(.5)
