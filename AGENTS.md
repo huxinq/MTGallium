@@ -19,4 +19,5 @@ model, or interpretation of retained results.
 | Train or export neural policies | [Neural policy training](docs/neural-policy.md) |
 
 Results live in run folders and [ladder rows](docs/research-runs.md#policy-ladder).
-Do not create work notes, briefs, or handoffs.
+What they establish lives in `FINDINGS.md` at the private evidence root, which
+only reviews change. Do not create other work notes, briefs, or handoffs.
