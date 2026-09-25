@@ -15,6 +15,10 @@ Each `InformationSetSearch.search` call starts a fresh tree and transition cache
 source. See [value models](../value-models.md#search-use).
 
 Native policy sessions observe accepted actions and own their particle beliefs.
+For ordinary search, the host requests the maximum expansion limit reachable
+through progressive widening at the configured simulation budget. This admits
+widened choices for menus whose smaller expansions are prefixes of larger ones.
+Direct root selection and root guidance retain their existing menu contracts.
 
 An optional `SearchPrior` replaces UCT with PUCT at searching-player nodes. It
 receives only the acting player's captured `DecisionSiteRequest`, scores up to

@@ -87,6 +87,21 @@ data class SearchPolicyConfig(
         rolloutTurnHorizon = rolloutTurnHorizon,
     )
 
+    /** The host must admit every root action reachable by this search budget. */
+    internal fun decisionView(
+        prior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
+        widen: Boolean = true,
+    ): org.mtgallium.agent.infoset.core.DecisionView {
+        if (prior != null) return org.mtgallium.agent.infoset.core.DecisionView(
+            limit = prior.candidateLimit, admission = prior.admission)
+        if (!widen) return org.mtgallium.agent.infoset.core.DecisionView()
+        val reachableLimit = wideningThresholds.zip(wideningLimits)
+            .filter { (visits, _) -> visits < simulations }
+            .fold(initialExpansionLimit) { limit, (_, widened) -> maxOf(limit, widened) }
+        return org.mtgallium.agent.infoset.core.DecisionView(
+            limit = reachableLimit.takeUnless { it == 64 && initialExpansionLimit == 64 })
+    }
+
     fun behaviorSpecification(
         knownDecks: Map<String, Map<String, Int>>,
         opponentPolicy: PolicyComponent,
@@ -208,10 +223,10 @@ class SearchPolicySession private constructor(
     }
 
     val latestBeliefDiagnostics: BeliefDiagnostics get() = belief.latestDiagnostics
-    /** Host admission must include candidates scored by an optional wider search prior. */
+    /** Host admission includes progressive widening and an optional wider search prior. */
     val decisionView: org.mtgallium.agent.infoset.core.DecisionView
-        get() = org.mtgallium.agent.infoset.core.DecisionView(limit = searchPrior?.candidateLimit,
-            admission = searchPrior?.admission ?: org.mtgallium.agent.infoset.core.DecisionAdmission.SEMANTIC)
+        get() = parameters.decisionView(searchPrior,
+            widen = rootSelectionPolicy == null && directRootSelectionPolicy == null)
     val beliefDiagnosticsHistory: List<BeliefDiagnostics> get() = belief.diagnosticsHistory
     val beliefReconditionings: Int get() = belief.reconditionings
     val beliefParticleDepletions: Int get() = belief.particleDepletions

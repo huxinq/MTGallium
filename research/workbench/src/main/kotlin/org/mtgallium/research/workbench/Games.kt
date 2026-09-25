@@ -126,7 +126,10 @@ fun playGame(
         val choice = player.choose(context, ComponentSeeds.derive(policySeed, actor, index.toString()))
         val nanos = System.nanoTime() - decisionStarted
         val selected = context.expansion.candidates.indexOf(choice)
-        check(selected >= 0) { "Policy returned a choice outside its current decision menu" }
+        check(selected >= 0) {
+            "Policy returned a choice outside its current decision menu: actor=$actor decision=$index " +
+                "view=${player.view} candidates=${context.expansion.candidates.size} choice=$choice"
+        }
         val luckBefore = luckCorrection?.before(world)
         val trace = if (rawTrace != null || luckBefore != null) world.stepWithReplayTrace(choice) else null
         val step = trace?.result ?: world.step(choice)
