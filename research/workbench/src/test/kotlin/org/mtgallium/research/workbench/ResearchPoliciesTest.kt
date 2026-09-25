@@ -40,10 +40,15 @@ class ResearchPoliciesTest {
             skipMulligans = true, seed = 69,
         ), registry, "value-snapshot")
         val snapshot = game.valueSnapshot()
+        val factual = game.valueSnapshot(org.mtgallium.agent.neural.FactualTensorSchema())
 
         listOf("p0", "p1").forEach { player ->
             val information = game.world.informationState(player)
             val actual = snapshot.getValue(player).jsonObject
+            assertFalse("view" in actual)
+            assertEquals(researchJson.encodeToJsonElement(
+                org.mtgallium.agent.neural.FactualPolicyEncoder().view(information)),
+                factual.getValue(player).jsonObject.getValue("view"))
             val expectedFeatures = researchJson.encodeToJsonElement(
                 ValueFeatures.compile(information, player).values)
 

@@ -43,6 +43,14 @@ residual, sum and clipped value. Nonfinite arithmetic raises an exception.
 
 ## Search use
 
+`FactualPolicyEncoder.view(information)` exposes the same factual view bytes as
+the decision encoder without requiring an acting-player menu. This supports
+evaluators at nonterminal leaves where another player acts; the supplied
+information must still belong to the evaluator's requested perspective.
+Python's `game.value_snapshot(factual_schema=...)` can include these view tokens
+alongside the existing features and V2 scores for both players, including the
+nonacting player. Omitting the schema preserves the original snapshot fields.
+
 Pass the leaf route directly to `createSearch` or `SearchPolicySession` as
 `valueSource`: `LeafValueSource.Information(evaluator)` evaluates the root
 player's represented information, while `LeafValueSource.SampledWorld(id)` asks

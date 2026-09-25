@@ -180,9 +180,9 @@ class Game:
         """Sparse linear-value features, from the named player's or acting player's view."""
         return self._call('value-features', **({} if player is None else {'player': player}))
 
-    def value_snapshot(self) -> dict[str, dict]:
+    def value_snapshot(self, *, factual_schema: Mapping | None = None) -> dict[str, dict]:
         """Value features, V2 and turn for both player perspectives at this position."""
-        return self._call('value-snapshot')
+        return self._call('value-snapshot', **({} if factual_schema is None else {'factualSchema': dict(factual_schema)}))
 
     def value_score(self, player: str, weights: Mapping, *, link: str = 'clip') -> dict[str, float]:
         """Score the named player's current information with the JVM linear evaluator."""

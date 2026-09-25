@@ -25,6 +25,28 @@ import org.mtgallium.agent.infoset.core.SingletonSelectionConfig
 
 class SearchPolicyTest {
     @Test
+    fun `host menu covers reachable widening without changing the default view`() {
+        val parameters = LivePolicyConfig().policyParameters()
+        assertNull(parameters.copy(simulations = 56).decisionView().limit)
+        assertNull(parameters.copy(simulations = 64).decisionView().limit)
+        assertEquals(128, parameters.copy(simulations = 65).decisionView().limit)
+        assertEquals(128, parameters.copy(simulations = 186).decisionView().limit)
+        assertNull(parameters.copy(simulations = 186).decisionView(widen = false).limit)
+        assertEquals(128, parameters.copy(simulations = 256).decisionView().limit)
+        assertEquals(256, parameters.copy(simulations = 257).decisionView().limit)
+        assertEquals(32, parameters.copy(simulations = 1, initialExpansionLimit = 32).decisionView().limit)
+        val prior = object : org.mtgallium.agent.infoset.core.SearchPrior {
+            override val configurationId = "host-menu-test"
+            override val candidateLimit = 96
+            override val admission = org.mtgallium.agent.infoset.core.DecisionAdmission.PRODUCTION
+            override val explorationConstant = 1.0
+            override fun probabilities(context: DecisionSiteRequest): Map<String, Double> = error("unused")
+        }
+        assertEquals(96, parameters.copy(simulations = 1025).decisionView(prior).limit)
+        assertEquals(prior.admission, parameters.decisionView(prior).admission)
+    }
+
+    @Test
     fun `runtime config maps every behavior-affecting field into policy parameters`() {
         val config = LivePolicyConfig(
             particles = 16,

@@ -40,13 +40,14 @@ class PythonGame internal constructor(
             actors.associateWith { requireNotNull(world.terminalPayoff(it)) }) else JsonNull)
     }
 
-    fun valueSnapshot(): JsonObject = buildJsonObject {
+    fun valueSnapshot(factualSchema: FactualTensorSchema? = null): JsonObject = buildJsonObject {
         actors.forEach { player ->
             val information = world.informationState(player)
             put(player, buildJsonObject {
                 put("features", researchJson.encodeToJsonElement(ValueFeatures.compile(information, player).values))
                 put("v2", MonoRedInformationEvaluator.evaluate(information, player))
                 put("turn", information.observation.turnNumber)
+                factualSchema?.let { put("view", researchJson.encodeToJsonElement(FactualPolicyEncoder(it).view(information))) }
             })
         }
     }
@@ -298,7 +299,9 @@ class PythonResearchConnection {
                 val player = request["player"]?.jsonPrimitive?.content ?: requireNotNull(world.actorToAct())
                 researchJson.encodeToJsonElement(ValueFeatures.compile(world.informationState(player), player).values)
             }
-            "value-snapshot" -> game().valueSnapshot()
+            "value-snapshot" -> game().valueSnapshot(request["factualSchema"]?.let {
+                researchJson.decodeFromJsonElement<FactualTensorSchema>(it)
+            })
             "value-score" -> game().valueScore(
                 request.getValue("player").jsonPrimitive.content,
                 researchJson.decodeFromJsonElement(request.getValue("weights")),

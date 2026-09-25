@@ -186,6 +186,13 @@ even after a failed run. Fix the claim, policies, models and sample size before
 running. Confirmation has no sequential stopping and supplies the unbiased raw
 estimate and ordinary fixed-sample interval.
 
+Additional host value models can implement `NativeValueProvider` and register
+through Java ServiceLoader. A luck model may select `provider` and its JSON
+`settings` instead of linear weights. The returned evaluator receives each
+player's own represented information, and its stable `id` must cover its model
+artifacts and interpretation. The result records a hash of that identity.
+Absent a provider, existing V2 and linear behavior and metadata are unchanged.
+
 `luck_correction` enables an **experimental secondary statistic**. It is off by
 default and never feeds a stopping decision. The host JVM combines evaluators on
 each player's own information into a candidate win probability; library order
