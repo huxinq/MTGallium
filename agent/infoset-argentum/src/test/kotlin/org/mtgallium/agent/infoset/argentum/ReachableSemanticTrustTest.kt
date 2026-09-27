@@ -768,7 +768,7 @@ class ReachableSemanticTrustTest {
                 )
             )
         }
-        val transformed = TransformEffectExecutor(registry).execute(
+        val transformed = TransformEffectExecutor(com.wingedsheep.engine.core.EngineServices(registry).zones, registry).execute(
             battlefield,
             TransformEffect(),
             EffectContext(sourceId = ojer, controllerId = player),

@@ -1,5 +1,6 @@
 package org.mtgallium.agent.infoset.argentum
 
+import com.wingedsheep.engine.handlers.PredicateEvaluator
 import com.wingedsheep.engine.hidden.HiddenWorldMaterializationRequest
 import com.wingedsheep.engine.hidden.HiddenWorldMaterializationResult
 import com.wingedsheep.engine.hidden.HiddenWorldMaterializer
@@ -25,7 +26,7 @@ import com.wingedsheep.sdk.model.GameRng
  * occupying unresolved slots as evidence about the hypothesis.
  */
 internal class KnownDeckWorldMaterializer(private val cardRegistry: CardRegistry) {
-    private val visibility = Visibility(cardRegistry)
+    private val visibility = Visibility(cardRegistry, conditionEvaluator = PredicateEvaluator(cardRegistry).conditions)
     private val materializer = HiddenWorldMaterializer(cardRegistry)
 
     fun materialize(

@@ -238,7 +238,7 @@ private fun decodeView(value: JsonObject?): MenuRequest = MenuRequest(
 )
 
 private fun replayViews(state: GameState, registry: CardRegistry): JsonObject {
-    val transformer = ClientStateTransformer(registry)
+    val transformer = ClientStateTransformer(registry, predicateEvaluator = com.wingedsheep.engine.handlers.PredicateEvaluator(registry))
     return buildJsonObject {
         for ((index, player) in state.turnOrder.withIndex()) {
             put("p$index", researchJson.encodeToJsonElement(transformer.transform(state, player)))

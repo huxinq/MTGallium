@@ -50,7 +50,7 @@ class RememberedTransformKnowledgeTest {
         val battlefield = env.state.removeFromZone(sourceZone, objectId).addToZone(ZoneKey(owner, Zone.BATTLEFIELD), objectId)
             .updateEntity(objectId) { it.with(ControllerComponent(owner)).with(
                 DoubleFacedComponent("Ojer Axonil, Deepest Might", "Temple of Power")) }
-        val executor = TransformEffectExecutor(registry)
+        val executor = TransformEffectExecutor(com.wingedsheep.engine.core.EngineServices(registry).zones, registry)
         val context = EffectContext(sourceId = objectId, controllerId = owner)
         val toTemple = executor.execute(battlefield, TransformEffect(), context)
         assertNull(toTemple.error)

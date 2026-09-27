@@ -221,7 +221,8 @@ class ArgentumSearchWorld private constructor(
         val remembered = rememberedKnowledgeObjectIds(viewer, expected)
         val state = environment.state
         val assignments = linkedMapOf<EntityId, com.wingedsheep.sdk.model.CardDefinition>()
-        val visibility = com.wingedsheep.engine.view.Visibility(cardRegistry())
+        val visibility = com.wingedsheep.engine.view.Visibility(
+            cardRegistry(), conditionEvaluator = com.wingedsheep.engine.handlers.PredicateEvaluator(cardRegistry()).conditions)
         val random = kotlin.random.Random(seed)
         var changed = state
         var changedObjects = 0
