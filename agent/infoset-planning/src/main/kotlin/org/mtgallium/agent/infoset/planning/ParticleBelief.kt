@@ -192,7 +192,38 @@ class ParticleBelief private constructor(
             if (observation == null) "Private choice could not advance any particle"
             else "Private choice and observed information left no compatible particle"
         )
-        val normalized = normalizeLogs(advanced)
+        return finishUpdate(normalizeLogs(advanced), updateSeed, rejuvenator, ancestry, observation) { next, essBefore, weights ->
+            BeliefDiagnostics(
+                mode = mode,
+                requestedParticles = entries.size,
+                acceptedParticles = next.entries.size,
+                rejectedParticles = rejected + observationRejected,
+                effectiveSampleSizeBefore = essBefore,
+                effectiveSampleSizeAfter = effectiveSampleSizeOfWeights(weights),
+                entropy = entropyOfWeights(weights),
+                resamplingCount = next.resamplingCount,
+                failures = buildMap {
+                    if (rejected > 0) put("privateChoiceRejectedParticles", rejected)
+                    if (observationRejected > 0) put("observationMismatchParticles", observationRejected)
+                },
+                architecture = architecture,
+                knowledgeDigest = next.knowledgeDigest,
+                strata = strata,
+                proposalAttempts = proposalAttempts,
+                opponentPolicyDecisions = opponentDecisionCounter.summary(),
+            )
+        }
+    }
+
+    /** Resample if needed, check the assimilated observation and publish the next belief. */
+    private fun finishUpdate(
+        normalized: List<LogWeightedWorld>,
+        updateSeed: Long,
+        rejuvenator: ParticleRejuvenator,
+        ancestry: ParticleAncestryRecorder?,
+        observation: ParticleObservationCondition?,
+        diagnostics: (next: ParticleBelief, essBefore: Double, weightsAfter: List<Double>) -> BeliefDiagnostics,
+    ): ParticleBeliefUpdate {
         val essBefore = effectiveSampleSize(normalized)
         val needsResampling = normalized.size != entries.size || essBefore < entries.size / 2.0
         val nextEntries = if (needsResampling) {
@@ -204,38 +235,19 @@ class ParticleBelief private constructor(
         check(observation == null || nextEntries.all { observation.matches(it.world) }) {
             "Particle rejuvenation changed the observed information it must preserve"
         }
-        val nextKnowledgeDigest = if (observation == null) knowledgeDigest else observation.knowledgeDigest
         val next = ParticleBelief(
             entries = nextEntries,
             mode = mode,
             resamplingCount = resamplingCount + if (needsResampling) 1 else 0,
             architecture = architecture,
-            knowledgeDigest = nextKnowledgeDigest,
+            knowledgeDigest = if (observation == null) knowledgeDigest else observation.knowledgeDigest,
             strata = strata,
             proposalAttempts = proposalAttempts,
         )
         return ParticleBeliefUpdate(
             ancestry = ancestry?.finish(needsResampling, nextEntries.size),
             belief = next,
-            diagnostics = BeliefDiagnostics(
-                mode = mode,
-                requestedParticles = entries.size,
-                acceptedParticles = nextEntries.size,
-                rejectedParticles = rejected + observationRejected,
-                effectiveSampleSizeBefore = essBefore,
-                effectiveSampleSizeAfter = effectiveSampleSizeOfWeights(weights),
-                entropy = entropyOfWeights(weights),
-                resamplingCount = next.resamplingCount,
-                failures = buildMap {
-                    if (rejected > 0) put("privateChoiceRejectedParticles", rejected)
-                    if (observationRejected > 0) put("observationMismatchParticles", observationRejected)
-                },
-                architecture = architecture,
-                knowledgeDigest = nextKnowledgeDigest,
-                strata = strata,
-                proposalAttempts = proposalAttempts,
-                opponentPolicyDecisions = opponentDecisionCounter.summary(),
-            ),
+            diagnostics = diagnostics(next, essBefore, weights),
         )
     }
 
@@ -350,43 +362,17 @@ class ParticleBelief private constructor(
         preResamplingReadout?.invoke(normalizedWeights(normalized).mapIndexed { index, weight ->
             ParticleAdvanceMass(requireNotNull(survivingIndices)[index], advanced[index].logWeight, weight)
         })
-        val essBefore = effectiveSampleSize(normalized)
-        val needsResampling = normalized.size != entries.size || essBefore < entries.size / 2.0
-        val nextEntries = if (needsResampling) {
-            systematicResample(normalized, entries.size, updateSeed, rejuvenator, ancestry)
-        } else {
-            normalized
-        }
-        val normalizedAfter = normalizedWeights(nextEntries)
-        val sensitivity = if (probabilities.isEmpty()) null else {
-            probabilities.max() - probabilities.min()
-        }
-        check(observation == null || nextEntries.all { observation.matches(it.world) }) {
-            "Particle rejuvenation changed the observed information it must preserve"
-        }
-        val nextKnowledgeDigest = if (observation == null) knowledgeDigest else observation.knowledgeDigest
-        val next = ParticleBelief(
-            entries = nextEntries,
-            mode = mode,
-            resamplingCount = resamplingCount + if (needsResampling) 1 else 0,
-            architecture = architecture,
-            knowledgeDigest = nextKnowledgeDigest,
-            strata = strata,
-            proposalAttempts = proposalAttempts,
-        )
-        return ParticleBeliefUpdate(
-            ancestry = ancestry?.finish(needsResampling, nextEntries.size),
-            belief = next,
-            diagnostics = BeliefDiagnostics(
+        return finishUpdate(normalized, updateSeed, rejuvenator, ancestry, observation) { next, essBefore, weights ->
+            BeliefDiagnostics(
                 mode = mode,
                 requestedParticles = entries.size,
-                acceptedParticles = nextEntries.size,
+                acceptedParticles = next.entries.size,
                 rejectedParticles = rejected + observationRejected + exactZeroMass,
                 effectiveSampleSizeBefore = essBefore,
-                effectiveSampleSizeAfter = effectiveSampleSizeOfWeights(normalizedAfter),
-                entropy = entropyOfWeights(normalizedAfter),
+                effectiveSampleSizeAfter = effectiveSampleSizeOfWeights(weights),
+                entropy = entropyOfWeights(weights),
                 resamplingCount = next.resamplingCount,
-                modelSensitivity = sensitivity,
+                modelSensitivity = if (probabilities.isEmpty()) null else probabilities.max() - probabilities.min(),
                 failures = buildMap {
                     if (invalidWeights > 0) put("invalidWeights", invalidWeights)
                     if (exactZeroMass > 0) put("exactMemberZeroMassParticles", exactZeroMass)
@@ -394,11 +380,11 @@ class ParticleBelief private constructor(
                     if (observationRejected > 0) put("observationMismatchParticles", observationRejected)
                 },
                 architecture = architecture,
-                knowledgeDigest = nextKnowledgeDigest,
+                knowledgeDigest = next.knowledgeDigest,
                 strata = strata,
                 proposalAttempts = proposalAttempts,
-            ),
-        )
+            )
+        }
     }
 
     private fun contextContaining(world: SearchWorld, signature: String, view: MenuRequest): DecisionContext {

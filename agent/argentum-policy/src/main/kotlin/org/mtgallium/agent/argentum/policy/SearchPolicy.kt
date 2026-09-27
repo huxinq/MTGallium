@@ -21,6 +21,7 @@ import org.mtgallium.agent.infoset.planning.InformationSetSearchConfig
 import org.mtgallium.agent.infoset.planning.LeafValueSource
 import org.mtgallium.agent.value.MaterialEvaluator
 import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
 import org.mtgallium.agent.infoset.core.PolicyComponent
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.planning.RolloutTurnHorizon
@@ -33,15 +34,15 @@ const val SEARCH_POLICY_UNPROFILED_RUNTIME_ID: String = "unprofiled-search-teach
 
 /** All behavior-affecting inputs shared by live play and offline evaluation. */
 data class SearchPolicyConfig(
-    val particles: Int,
-    val simulations: Int,
-    val maxPolicyDecisions: Int,
-    val explorationConstant: Double,
-    val leaf: LeafEvaluationConfig,
-    val actionSpaceProfile: ActionSpaceProfile,
+    val particles: Int = 8,
+    val simulations: Int = 64,
+    val maxPolicyDecisions: Int = 32,
+    val explorationConstant: Double = 1.4,
+    val leaf: LeafEvaluationConfig = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT),
+    val actionSpaceProfile: ActionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
     val beliefMode: BeliefMode = BeliefMode.CONSISTENCY_ONLY_V1,
     val beliefArchitecture: BeliefApproximation = BeliefApproximation.SEQUENTIAL_B_V1,
-    val baseSeed: Long,
+    val baseSeed: Long = 20260825L,
     val profileId: String = SEARCH_POLICY_UNPROFILED_RUNTIME_ID,
     val initialExpansionLimit: Int = 64,
     val wideningThresholds: List<Int> = listOf(64, 256, 1024),
@@ -58,6 +59,8 @@ data class SearchPolicyConfig(
         require(explorationConstant >= 0.0 && explorationConstant.isFinite())
         require(profileId.isNotBlank())
     }
+
+    val displayName: String get() = "$profileId · ${particles}×${simulations} · ${actionSpaceProfile.profileId}"
 
     fun searchConfig(): InformationSetSearchConfig = InformationSetSearchConfig(
         simulations = simulations,

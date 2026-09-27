@@ -24,7 +24,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.int
-import org.mtgallium.agent.argentum.policy.LivePolicyConfig
+import org.mtgallium.agent.argentum.policy.SearchPolicyConfig
 import org.mtgallium.agent.argentum.policy.PolicyIdentity
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.HistoryEventOrdering
@@ -226,7 +226,7 @@ class FrozenPublicByteGoldensTest {
 
     @Test
     fun identityBytes() {
-        val base = LivePolicyConfig(particles = 4, simulations = 8, maxPolicyDecisions = 4).policyParameters()
+        val base = SearchPolicyConfig(particles = 4, simulations = 8, maxPolicyDecisions = 4)
         val identities = sortedMapOf(
             "default" to PolicyIdentity.identity(base, decks, UniformOpponentPolicy),
             "snapshot-a" to PolicyIdentity.identity(base.copy(beliefArchitecture = BeliefApproximation.SNAPSHOT_A_V1),

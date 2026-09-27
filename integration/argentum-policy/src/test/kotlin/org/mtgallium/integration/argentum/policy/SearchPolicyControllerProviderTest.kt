@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit
 import org.mtgallium.agent.infoset.argentum.ArgentumStateFingerprint
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumKnownDeckBeliefWorldSource
-import org.mtgallium.agent.argentum.policy.LivePolicyConfig
+import org.mtgallium.agent.argentum.policy.SearchPolicyConfig
 
 class SearchPolicyControllerProviderTest {
     @Test
@@ -71,14 +71,14 @@ class SearchPolicyControllerProviderTest {
             ),
             properties.knownDecks,
         )
-        SearchPolicyControllerProvider(fullRegistry(), LivePolicyConfig(), properties.knownDecks)
+        SearchPolicyControllerProvider(fullRegistry(), SearchPolicyConfig(), properties.knownDecks)
     }
 
     @Test
     fun `provider rejects incomplete open-deck declarations before game start`() {
         assertFailsWith<IllegalArgumentException> {
             SearchPolicyControllerProvider(
-                fullRegistry(), LivePolicyConfig(), mapOf("p0" to mapOf("Mountain" to 8)),
+                fullRegistry(), SearchPolicyConfig(), mapOf("p0" to mapOf("Mountain" to 8)),
             )
         }
     }
@@ -92,7 +92,7 @@ class SearchPolicyControllerProviderTest {
             mapOf("p0" to mapOf("not-a-card" to 8), "p1" to mapOf("Mountain" to 8)),
         ).forEach { declarations ->
             assertFailsWith<IllegalArgumentException> {
-                SearchPolicyControllerProvider(registry, LivePolicyConfig(), declarations)
+                SearchPolicyControllerProvider(registry, SearchPolicyConfig(), declarations)
             }
         }
     }
@@ -104,7 +104,7 @@ class SearchPolicyControllerProviderTest {
             "p0" to linkedMapOf("Island" to 8),
             "p1" to linkedMapOf("Mountain" to 9),
         )
-        val provider = SearchPolicyControllerProvider(registry, LivePolicyConfig(), declarations)
+        val provider = SearchPolicyControllerProvider(registry, SearchPolicyConfig(), declarations)
         declarations.getValue("p0")["Island"] = 1
         declarations.getValue("p1").clear()
 
@@ -144,7 +144,7 @@ class SearchPolicyControllerProviderTest {
             ), skipMulligans = false, useHandSmoother = false, startingPlayerIndex = 1, seed = 18L))
         }
         val setup = replaySetup(18L, 1, p0, actualOpponentDeck, p1, policyDeck)
-        val controller = SearchPolicyControllerProvider(registry, LivePolicyConfig(), declarations).create(
+        val controller = SearchPolicyControllerProvider(registry, SearchPolicyConfig(), declarations).create(
             AiControllerContext(
                 playerId = p1,
                 gameSessionId = "mismatch-test",
@@ -176,7 +176,7 @@ class SearchPolicyControllerProviderTest {
             ), skipMulligans = false, useHandSmoother = false, startingPlayerIndex = 1, seed = 19L))
         }
         val setup = replaySetup(19L, 1, p0, opponentDeck, p1, policyDeck)
-        val controller = SearchPolicyControllerProvider(registry, LivePolicyConfig(maxPolicyDecisions = 1), declarations).create(
+        val controller = SearchPolicyControllerProvider(registry, SearchPolicyConfig(maxPolicyDecisions = 1), declarations).create(
             AiControllerContext(
                 playerId = p1,
                 gameSessionId = "permutation-test",
@@ -246,7 +246,7 @@ class SearchPolicyControllerProviderTest {
         )
         val provider = SearchPolicyControllerProvider(
             registry,
-            LivePolicyConfig(maxPolicyDecisions = 1),
+            SearchPolicyConfig(maxPolicyDecisions = 1),
             knownDecks,
             insightSink = { _, insight -> insights += insight },
         )
@@ -340,7 +340,7 @@ class SearchPolicyControllerProviderTest {
             val insights = mutableListOf<SearchPolicyInsight>()
             val controller = SearchPolicyControllerProvider(
                 registry,
-                LivePolicyConfig(maxPolicyDecisions = 1),
+                SearchPolicyConfig(maxPolicyDecisions = 1),
                 knownDecks,
                 insightSink = { _, insight -> insights += insight },
             ).create(
@@ -406,7 +406,7 @@ class SearchPolicyControllerProviderTest {
         val actions = mutableListOf<com.wingedsheep.engine.core.GameAction>()
         val controller = SearchPolicyControllerProvider(
             registry,
-            LivePolicyConfig(maxPolicyDecisions = 1),
+            SearchPolicyConfig(maxPolicyDecisions = 1),
             knownDecks,
         ).create(
             AiControllerContext(

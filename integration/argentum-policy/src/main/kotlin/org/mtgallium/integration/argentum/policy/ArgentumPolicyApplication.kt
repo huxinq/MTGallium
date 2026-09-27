@@ -26,7 +26,7 @@ import org.mtgallium.agent.infoset.argentum.ArgentumStateFingerprint
 import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
 import org.mtgallium.agent.argentum.policy.ResolvedPolicyDecision
 import org.mtgallium.agent.infoset.planning.RootActionSelection
-import org.mtgallium.agent.argentum.policy.LivePolicyConfig
+import org.mtgallium.agent.argentum.policy.SearchPolicyConfig
 import org.mtgallium.agent.argentum.policy.LivePolicySession
 import org.springframework.boot.SpringApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -44,7 +44,7 @@ class ArgentumPolicyConfiguration {
         properties: SearchPolicyProperties,
     ): AiControllerProvider = SearchPolicyControllerProvider(
         registry,
-        LivePolicyConfig(
+        SearchPolicyConfig(
             baseSeed = properties.baseSeed,
         ).let { current -> current.copy(
             profileId = if (
@@ -68,7 +68,7 @@ fun main(args: Array<String>) {
 
 class SearchPolicyControllerProvider(
     private val registry: CardRegistry,
-    private val runtimeConfig: LivePolicyConfig,
+    private val runtimeConfig: SearchPolicyConfig,
     knownDecks: Map<String, Map<String, Int>>,
     private val insightSink: (AiControllerContext, SearchPolicyInsight) -> Unit = { _, _ -> },
 ) : AiControllerProvider {
@@ -88,7 +88,7 @@ class SearchPolicyControllerProvider(
 private class SearchPolicyController(
     private val context: AiControllerContext,
     private val registry: CardRegistry,
-    private val config: LivePolicyConfig,
+    private val config: SearchPolicyConfig,
     private val knownDecks: Map<String, Map<String, Int>>,
     private val publishInsight: (SearchPolicyInsight) -> Unit,
 ) : AiPlayerController {

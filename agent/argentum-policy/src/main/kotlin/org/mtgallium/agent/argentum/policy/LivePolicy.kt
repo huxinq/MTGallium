@@ -1,72 +1,16 @@
 package org.mtgallium.agent.argentum.policy
 
 import org.mtgallium.agent.infoset.planning.RootActionSelection
-import org.mtgallium.agent.infoset.planning.SingletonMenuShortcutConfig
 import com.wingedsheep.engine.core.GameAction
 import org.mtgallium.agent.infoset.argentum.ArgentumObservedStep
 import org.mtgallium.agent.infoset.argentum.ArgentumResolvedChoice
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.BeliefDiagnostics
-import org.mtgallium.agent.infoset.core.BeliefApproximation
-import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ComponentSeeds
-import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
 import org.mtgallium.agent.infoset.planning.LeafValueSource
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.SemanticChoice
-import org.mtgallium.agent.infoset.core.ActionSpaceProfile
 import org.mtgallium.agent.value.MaterialEvaluator
-
-data class LivePolicyConfig(
-    val profileId: String = SEARCH_POLICY_UNPROFILED_RUNTIME_ID,
-    val particles: Int = 8,
-    val simulations: Int = 64,
-    val maxPolicyDecisions: Int = 32,
-    val explorationConstant: Double = 1.4,
-    val leaf: LeafEvaluationConfig = LeafEvaluationConfig(
-        LeafEvaluationMethod.BOUNDED_ROLLOUT,
-    ),
-    val actionSpaceProfile: ActionSpaceProfile =
-        ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
-    val beliefMode: BeliefMode = BeliefMode.CONSISTENCY_ONLY_V1,
-    val beliefArchitecture: BeliefApproximation = BeliefApproximation.SEQUENTIAL_B_V1,
-    val baseSeed: Long = 20260825L,
-    val initialExpansionLimit: Int = 64,
-    val wideningThresholds: List<Int> = listOf(64, 256, 1024),
-    val wideningLimits: List<Int> = listOf(128, 256, 512),
-    val maxQuiescenceDecisions: Int = 32,
-    val maxQuiescenceForcedPasses: Int = 256,
-    val singletonSelection: SingletonMenuShortcutConfig = SingletonMenuShortcutConfig(),
-) {
-    init {
-        require(particles > 0)
-        require(simulations > 0)
-        require(maxPolicyDecisions > 0)
-        require(explorationConstant >= 0.0 && explorationConstant.isFinite())
-    }
-
-    val displayName: String get() = "$profileId · ${particles}×${simulations} · ${actionSpaceProfile.profileId}"
-
-    fun policyParameters(): SearchPolicyConfig = SearchPolicyConfig(
-        particles = particles,
-        simulations = simulations,
-        maxPolicyDecisions = maxPolicyDecisions,
-        explorationConstant = explorationConstant,
-        leaf = leaf,
-        actionSpaceProfile = actionSpaceProfile,
-        beliefMode = beliefMode,
-        beliefArchitecture = beliefArchitecture,
-        baseSeed = baseSeed,
-        profileId = profileId,
-        initialExpansionLimit = initialExpansionLimit,
-        wideningThresholds = wideningThresholds,
-        wideningLimits = wideningLimits,
-        maxQuiescenceDecisions = maxQuiescenceDecisions,
-        maxQuiescenceForcedPasses = maxQuiescenceForcedPasses,
-        singletonSelection = singletonSelection,
-    )
-}
 
 /** A live selection resolved for the current engine state, not yet an accepted transition. */
 class ResolvedPolicyDecision private constructor(
@@ -106,11 +50,11 @@ class LivePolicySession(
     private val player: String,
     knownDecks: Map<String, Map<String, Int>>,
     private val gameId: String,
-    private val config: LivePolicyConfig = LivePolicyConfig(),
+    private val config: SearchPolicyConfig = SearchPolicyConfig(),
     private val opponentModel: OpponentPolicy = defaultMonoRedOpponentPolicy(),
     private val valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
 ) {
-    private val parameters = config.policyParameters()
+    private val parameters = config
     private val policy = SearchPolicySession(
         root = world,
         viewer = player,

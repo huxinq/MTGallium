@@ -56,8 +56,8 @@ class ObservedBeliefActivationTest {
 
     private fun session(world: ArgentumSearchWorld, viewer: String, gameId: String) =
         SearchPolicySession(world, viewer, decks,
-            LivePolicyConfig(particles = 8, beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
-                actionSpaceProfile = world.semanticExpansionSpecification().actionSpaceProfile).policyParameters(),
+            SearchPolicyConfig(particles = 8, beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
+                actionSpaceProfile = world.semanticExpansionSpecification().actionSpaceProfile),
             UniformOpponentPolicy, gameId)
 
     @Test fun `exact opponent updates use the conditioning model view instead of the host capture view`() {
@@ -89,7 +89,7 @@ class ObservedBeliefActivationTest {
             for (isCast in listOf(false, true)) {
                 val world = world(mode)
                 val runtime = LivePolicySession(world, "p0", decks, "observed-live-test",
-                    config = LivePolicyConfig(beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
+                    config = SearchPolicyConfig(beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
                         actionSpaceProfile = world.semanticExpansionSpecification().actionSpaceProfile),
                     opponentModel = UniformOpponentPolicy)
                 assertTrue(runtime.applyObserved(if (isCast) cast(world) else pass(world)).result.accepted)
@@ -133,7 +133,7 @@ class ObservedBeliefActivationTest {
         val actor = requireNotNull(root.actorToAct())
         val live = root.fork() as ArgentumSearchWorld
         val runtime = LivePolicySession(live, actor, decks, "legacy-observed-actor",
-            config = LivePolicyConfig(particles = 8, beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
+            config = SearchPolicyConfig(particles = 8, beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
                 actionSpaceProfile = live.semanticExpansionSpecification().actionSpaceProfile),
             opponentModel = UniformOpponentPolicy)
         // A mismatched actor history depletes the conditioned population and throws the

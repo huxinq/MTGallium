@@ -5,12 +5,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import org.mtgallium.agent.infoset.core.BeliefApproximation
-import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ActionMenu
 import org.mtgallium.agent.infoset.core.ActionOmissionReason
 import org.mtgallium.agent.infoset.core.SemanticChoice
@@ -26,7 +23,7 @@ import org.mtgallium.agent.infoset.planning.SingletonMenuShortcutConfig
 class SearchPolicyTest {
     @Test
     fun `host menu covers reachable widening without changing the default view`() {
-        val parameters = LivePolicyConfig().policyParameters()
+        val parameters = SearchPolicyConfig()
         assertNull(parameters.copy(simulations = 56).decisionView().limit)
         assertNull(parameters.copy(simulations = 64).decisionView().limit)
         assertEquals(128, parameters.copy(simulations = 65).decisionView().limit)
@@ -47,50 +44,9 @@ class SearchPolicyTest {
     }
 
     @Test
-    fun `runtime config maps every behavior-affecting field into policy parameters`() {
-        val config = LivePolicyConfig(
-            particles = 16,
-            simulations = 256,
-            maxPolicyDecisions = 47,
-            explorationConstant = 0.75,
-            beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
-            beliefArchitecture = BeliefApproximation.SNAPSHOT_A_V1,
-            baseSeed = 91L,
-            initialExpansionLimit = 32,
-            wideningThresholds = listOf(40, 80),
-            wideningLimits = listOf(64, 128),
-            maxQuiescenceDecisions = 11,
-            maxQuiescenceForcedPasses = 79,
-            singletonSelection = SingletonMenuShortcutConfig(enabled = true),
-        )
-
-        val parameters = config.policyParameters()
-
-        assertEquals(config.particles, parameters.particles)
-        assertEquals(config.simulations, parameters.simulations)
-        assertEquals(config.maxPolicyDecisions, parameters.maxPolicyDecisions)
-        assertEquals(config.explorationConstant, parameters.explorationConstant)
-        assertEquals(config.leaf, parameters.leaf)
-        assertEquals(config.actionSpaceProfile, parameters.actionSpaceProfile)
-        assertEquals(config.beliefMode, parameters.beliefMode)
-        assertEquals(config.beliefArchitecture, parameters.beliefArchitecture)
-        assertEquals(config.baseSeed, parameters.baseSeed)
-        assertEquals(config.profileId, parameters.profileId)
-        assertEquals(config.initialExpansionLimit, parameters.initialExpansionLimit)
-        assertEquals(config.wideningThresholds, parameters.wideningThresholds)
-        assertEquals(config.wideningLimits, parameters.wideningLimits)
-        assertEquals(config.maxQuiescenceDecisions, parameters.maxQuiescenceDecisions)
-        assertEquals(config.maxQuiescenceForcedPasses, parameters.maxQuiescenceForcedPasses)
-        assertEquals(config.singletonSelection, parameters.singletonSelection)
-        assertEquals(config.initialExpansionLimit, parameters.searchConfig().initialExpansionLimit)
-        assertEquals(config.wideningThresholds, parameters.searchConfig().wideningThresholds)
-        assertEquals(config.wideningLimits, parameters.searchConfig().wideningLimits)
-    }
-
-    @Test
     fun `policy parameters reject invalid search budgets`() {
         assertFailsWith<IllegalArgumentException> {
-            LivePolicyConfig().policyParameters().copy(simulations = 0)
+            SearchPolicyConfig().copy(simulations = 0)
         }
     }
 
@@ -110,11 +66,11 @@ class SearchPolicyTest {
         assertIs<RootActionSelection.PolicySingletonAction>(selected)
         assertIs<RootActionSelection.Unsearched>(selected)
 
-        val enabled = LivePolicyConfig(
+        val enabled = SearchPolicyConfig(
             singletonSelection = SingletonMenuShortcutConfig(enabled = true),
-        ).policyParameters()
+        )
         assertTrue(enabled.singletonSelection.enabled)
-        assertEquals(false, LivePolicyConfig().singletonSelection.enabled)
+        assertEquals(false, SearchPolicyConfig().singletonSelection.enabled)
     }
 
     @Test

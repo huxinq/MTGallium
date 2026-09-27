@@ -9,10 +9,10 @@ class FrozenModelCompositionTest {
     @Test fun `host binds actual model configuration into unchanged behavior vocabulary`() {
         fun model(weight: Double) = LinearValueEvaluator(
             LinearWeights(weights = mapOf("state/synthetic" to weight)))
-        val parameters = LivePolicyConfig(leaf = LeafEvaluationConfig(
+        val parameters = SearchPolicyConfig(leaf = LeafEvaluationConfig(
             LeafEvaluationMethod.CURRENT_INFORMATION_STATE,
             RolloutCutoff.EVALUATE,
-        )).policyParameters()
+        ))
         val decks = mapOf("p0" to mapOf("Mountain" to 20, "Shock" to 4), "p1" to mapOf("Mountain" to 20, "Shock" to 4))
         val base = model(.25)
         val specification = parameters.behaviorSpecification(
