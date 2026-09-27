@@ -11,8 +11,8 @@ recorded. The [architecture](../architecture.md) locates the modules; the
 knowledge, player-visible history and candidates. `InformationStateRepresentationDigest`
 computes its identity, including the ordered candidate signatures and proposal version.
 
-`DecisionSite` derives its information record from its captured player state and
-exact ordered expansion. `DecisionSiteRequest` captures that site lazily from one
+`DecisionPoint` derives its information record from its captured player state and
+exact ordered expansion. `DecisionContext` captures that site lazily from one
 engine revision, so later engine changes cannot alter a request already handed to
 a policy. The trusted Argentum adapter may read referee state to construct this
 view. A policy receives public information, its player's private information and
@@ -21,7 +21,7 @@ remembered facts. Unknown opponent cards and engine RNG state remain in the adap
 Decision views from one captured revision share a lazy epistemic source. Feature
 projection is computed on demand: state features are reused for a captured
 state, while menu normalization and centering are recomputed for the supplied menu.
-`DecisionSiteRequest.semanticReferenceGroups` lazily projects and freezes the
+`DecisionContext.semanticReferenceGroups` lazily projects and freezes the
 acting player's visible action-reference relations from that same captured
 revision, for factual encoders used within search or continuation policies.
 
@@ -30,8 +30,9 @@ revision, for factual encoders used within search or continuation policies.
 `RootActionSelector` handles one admitted menu in this order: rules-forced pass,
 enabled singleton action, direct policy, then the searched fallback.
 `RootActionSelection.Searched` carries an `InformationSetSearchResult`.
-`SingletonSelectionConfig.enabled` defaults to `false`; mulligans and decision
-responses are always searched.
+`SingletonMenuShortcutConfig.enabled` defaults to `false`; mulligans and decision
+responses bypass singleton selection, then use the direct policy or searched
+fallback.
 
 `ActionSelector` selects choices. `ActionDistributionModel` supplies likelihoods.
 Continuation policies use selectors; observed-action conditioning uses a
@@ -57,16 +58,19 @@ action contract.
 
 ## Cross-world action correspondence
 
-`captureObservedActionForHost` captures the acting decision site, an observer's
+`recordObservedAction` captures the acting decision site, an observer's
 information state, native declaration, search group, and trusted object bindings
 from one immutable revision. The bindings are diagnostic data.
 
-`correspondObservedActionForHost` joins observer-local handles only when both
+`matchObservedAction` joins observer-local handles only when both
 worlds have the same observer information and each handle's
 [incarnation](../glossary.md#incarnation) is continuous in the local world.
 Native IDs are world-local. Passes, attacker declarations, blocker declarations
 and blocker ordering can be matched across worlds; other action families return
 a typed refusal.
+
+These trusted operations and referee state access through `trueState()` belong
+to host code. Player-facing policy inputs use the perspective projection.
 
 For group `g` and member `x`, exact likelihood is
 `P(g | actor information) × K(x | g, actor information)`. The current member

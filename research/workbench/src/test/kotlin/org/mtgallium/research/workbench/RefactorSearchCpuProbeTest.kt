@@ -18,15 +18,15 @@ import org.mtgallium.agent.argentum.policy.SearchPolicyConfig
 import org.mtgallium.agent.argentum.policy.SearchPolicySession
 import org.mtgallium.agent.argentum.policy.defaultMonoRedOpponentPolicy
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
-import org.mtgallium.agent.infoset.argentum.PerspectiveHistoryEventOrder
-import org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.InformationSetSearchResult
-import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.RootActionSelection
-import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
+import org.mtgallium.agent.infoset.argentum.HistoryEventOrdering
+import org.mtgallium.agent.infoset.argentum.HistoryObjectReferencing
+import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.InformationSetSearchResult
+import org.mtgallium.agent.infoset.core.CanonicalJson
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.RootActionSelection
+import org.mtgallium.agent.infoset.core.ActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -75,12 +75,12 @@ class RefactorSearchCpuProbeTest {
                     skipMulligans = true, useHandSmoother = false))
             }
             val world = ArgentumSearchWorld.create(environment, "refactor-cpu-$sampleIndex", seed, seed,
-                expander = UnifiedSemanticExpander(actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1),
+                expander = ArgentumActionGenerator(actionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1),
                 knownDecks = known,
-                historyEventOrder = if (v2) PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2
-                    else PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
-                historyObjectReference = if (v2) PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
-                    else PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
+                historyEventOrder = if (v2) HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2
+                    else HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1,
+                historyObjectReference = if (v2) HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2
+                    else HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
             // Build a bounded non-empty observation history before preparing the session.
             repeat(24) {
                 val menu = world.expandChoices().candidates
@@ -100,8 +100,8 @@ class RefactorSearchCpuProbeTest {
             val session = SearchPolicySession(world, actor, known,
                 SearchPolicyConfig(particles = 8, simulations = 64, maxPolicyDecisions = 16,
                     explorationConstant = 1.4,
-                    leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-                    actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+                    leaf = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT),
+                    actionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
                     baseSeed = seed), defaultMonoRedOpponentPolicy(), "refactor-cpu-$sampleIndex")
             val searchStart = cpu.processCpuTime
             val wallStart = System.nanoTime()
@@ -113,7 +113,7 @@ class RefactorSearchCpuProbeTest {
             assertEquals(64, result.candidates.sumOf { it.visits })
             assertTrue(searchCpuNanos > 0)
             if (measured) lines += buildJsonObject {
-                val raw = PolicyJson.format.encodeToJsonElement(InformationSetSearchResult.serializer(), result).jsonObject
+                val raw = CanonicalJson.format.encodeToJsonElement(InformationSetSearchResult.serializer(), result).jsonObject
                 put("searchBehavior", JsonObject(raw + ("diagnostics" to
                     JsonObject(raw.getValue("diagnostics").jsonObject - "evaluatorNanos"))))
                 put("sourceSha", sourceSha)

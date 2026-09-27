@@ -1,5 +1,12 @@
 package org.mtgallium.research.workbench
 
+import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
+import org.mtgallium.agent.infoset.argentum.ActionGenerationSpecification
+import org.mtgallium.agent.argentum.policy.ObservedActionLikelihood
+import org.mtgallium.agent.value.*
+import org.mtgallium.agent.neural.ByteTokenSchema
+import org.mtgallium.agent.neural.DecisionByteTokens
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.gym.GameEnvironment
@@ -20,15 +27,15 @@ import kotlinx.serialization.json.int
 import org.mtgallium.agent.argentum.policy.LivePolicyConfig
 import org.mtgallium.agent.argentum.policy.PolicyIdentity
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
-import org.mtgallium.agent.infoset.argentum.PerspectiveHistoryEventOrder
-import org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
+import org.mtgallium.agent.infoset.argentum.HistoryEventOrdering
+import org.mtgallium.agent.infoset.argentum.HistoryObjectReferencing
+import org.mtgallium.agent.infoset.core.BeliefApproximation
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
-import org.mtgallium.agent.monored.ValueFeatures
-import org.mtgallium.agent.neural.FactualPolicyEncoder
+import org.mtgallium.agent.value.ValueFeatures
+import org.mtgallium.agent.neural.InformationStateByteEncoder
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -39,6 +46,139 @@ import kotlin.test.fail
  * resources can satisfy the ordinary test. Identity has its own baseline for the deliberate PR2 bump.
  */
 class FrozenPublicByteGoldensTest {
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @Test
+    fun frozenVocabularyPreservesSerializerNamesAndWireTokens() {
+        val names = listOf(
+            ReturnSource.serializer().descriptor,
+            LeafEvaluationMethod.serializer().descriptor,
+            RolloutCutoff.serializer().descriptor,
+            QuiescencePassRule.serializer().descriptor,
+            LeafEvaluationConfig.serializer().descriptor,
+            LeafEvaluationDiagnostic.serializer().descriptor,
+            RolloutTurnHorizon.serializer().descriptor,
+            InformationSetSearchConfig.serializer().descriptor,
+            RootActionStatistics.serializer().descriptor,
+            ReturnSourceCounts.serializer().descriptor,
+            InformationSetSearchDiagnostics.serializer().descriptor,
+            InformationSetSearchResult.serializer().descriptor,
+            SingletonMenuShortcutConfig.serializer().descriptor,
+            ObservedEvent.serializer().descriptor,
+            ObservedEventKind.serializer().descriptor,
+            ObservedEventDetail.serializer().descriptor,
+            HistoryHashChain.serializer().descriptor,
+            ObservedEventDetail.Choice.serializer().descriptor,
+            ObservedEventDetail.ZoneChange.serializer().descriptor,
+            ObservedEventDetail.Draw.serializer().descriptor,
+            ObservedEventDetail.Reveal.serializer().descriptor,
+            ObservedEventDetail.Look.serializer().descriptor,
+            ObservedEventDetail.LibraryReorder.serializer().descriptor,
+            ObservedEventDetail.Shuffle.serializer().descriptor,
+            ObservedEventDetail.LifeChange.serializer().descriptor,
+            ObservedEventDetail.Damage.serializer().descriptor,
+            ObservedEventDetail.CounterChange.serializer().descriptor,
+            ObservedEventDetail.ObjectState.serializer().descriptor,
+            ObservedEventDetail.Causal.serializer().descriptor,
+            ObservedEventDetail.ResourceChange.serializer().descriptor,
+            ObservedEventDetail.CharacteristicChange.serializer().descriptor,
+            ObservedEventDetail.Combat.serializer().descriptor,
+            ObservedEventDetail.TurnStructure.serializer().descriptor,
+            ObservedEventDetail.Terminal.serializer().descriptor,
+            ObservedEventDetail.UnsupportedVisibleTransition.serializer().descriptor,
+            PlayerKnowledge.serializer().descriptor,
+            ZoneKnowledge.serializer().descriptor,
+            KnownObject.serializer().descriptor,
+            PlayerView.serializer().descriptor,
+            ZoneView.serializer().descriptor,
+            ObjectView.serializer().descriptor,
+            StackObjectView.serializer().descriptor,
+            PendingDecisionView.serializer().descriptor,
+            CombatView.serializer().descriptor,
+            PendingDecisionOptions.serializer().descriptor,
+            PendingDecisionOptions.Targets.serializer().descriptor,
+            PendingDecisionOptions.Cards.serializer().descriptor,
+            PendingDecisionOptions.YesNo.serializer().descriptor,
+            PendingDecisionOptions.BatchYesNo.serializer().descriptor,
+            PendingDecisionOptions.Modes.serializer().descriptor,
+            PendingDecisionOptions.Colors.serializer().descriptor,
+            PendingDecisionOptions.Number.serializer().descriptor,
+            PendingDecisionOptions.Distribution.serializer().descriptor,
+            PendingDecisionOptions.Order.serializer().descriptor,
+            PendingDecisionOptions.Piles.serializer().descriptor,
+            PendingDecisionOptions.Options.serializer().descriptor,
+            PendingDecisionOptions.Replacement.serializer().descriptor,
+            PendingDecisionOptions.LibrarySearch.serializer().descriptor,
+            PendingDecisionOptions.LibraryReorder.serializer().descriptor,
+            PendingDecisionOptions.DamageAssignment.serializer().descriptor,
+            PendingDecisionOptions.CombatResolution.serializer().descriptor,
+            PendingDecisionOptions.ManaSources.serializer().descriptor,
+            PendingDecisionOptions.BudgetModal.serializer().descriptor,
+            KnownLibraryOrder.serializer().descriptor,
+            AttackerView.serializer().descriptor,
+            BlockerView.serializer().descriptor,
+            ManaPoolView.serializer().descriptor,
+            RestrictedManaView.serializer().descriptor,
+            EventAudience.serializer().descriptor,
+            EventAudienceScope.serializer().descriptor,
+            ActionOmissionReason.serializer().descriptor,
+            PolicyInputLimits.serializer().descriptor,
+            ActionGenerationSpecification.serializer().descriptor,
+            ByteTokenSchema.serializer().descriptor,
+            DecisionByteTokens.serializer().descriptor,
+            KernelFeatureVector.serializer().descriptor,
+            KernelActionFeatures.serializer().descriptor,
+            KernelTrainingRoot.serializer().descriptor,
+            KernelRidgeActionModel.serializer().descriptor,
+            ResearchGameConfig.serializer().descriptor,
+            ActionMenu.serializer().descriptor,
+            ActionSpaceProfile.serializer().descriptor,
+            BeliefApproximation.serializer().descriptor,
+            BeliefMode.serializer().descriptor,
+            HistoryEventOrdering.serializer().descriptor,
+            ObservedActionLikelihood.serializer().descriptor,
+            InverseLink.serializer().descriptor,
+            ChanceControlVariateConfig.serializer().descriptor,
+            LuckEvent.serializer().descriptor,
+            LinearWeights.serializer().descriptor,
+            ValueInputError.serializer().descriptor,
+            MaterialWeights.serializer().descriptor,
+            MaterialPermanentFeatures.serializer().descriptor,
+            MaterialFeatures.serializer().descriptor,
+            SemanticChoice.serializer().descriptor,
+        ).map { it.serialName }
+        val tokens = listOf(
+            wireTokens(ActionSpaceProfile.serializer(), ActionSpaceProfile.entries),
+            wireTokens(BeliefApproximation.serializer(), BeliefApproximation.entries),
+            wireTokens(BeliefMode.serializer(), BeliefMode.entries),
+            wireTokens(LeafEvaluationMethod.serializer(), LeafEvaluationMethod.entries),
+            wireTokens(QuiescencePassRule.serializer(), QuiescencePassRule.entries),
+            wireTokens(HistoryEventOrdering.serializer(), HistoryEventOrdering.entries),
+            wireTokens(ObservedActionLikelihood.serializer(), ObservedActionLikelihood.entries),
+            wireTokens(InverseLink.serializer(), InverseLink.entries),
+            wireTokens(ReturnSource.serializer(), ReturnSource.entries),
+            wireTokens(EventAudienceScope.serializer(), EventAudienceScope.entries),
+            wireTokens(ActionOmissionReason.serializer(), ActionOmissionReason.entries),
+            MenuSource.entries.joinToString(",") { it.name },
+            HistoryObjectReferencing.entries.joinToString(",") { it.name },
+            RootActionStatistics.serializer().descriptor.let { d ->
+                (0 until d.elementsCount).joinToString(",", transform = d::getElementName)
+            },
+            LuckEvent.serializer().descriptor.getElementName(6),
+            InformationSetSearchDiagnostics.serializer().descriptor.let { d ->
+                d.getElementName(d.getElementIndex("unsettledLeafEvaluations"))
+            },
+        )
+        val expected = requireNotNull(javaClass.getResource("/frozen-public-byte-goldens/vocabulary.txt")).readText()
+        kotlin.test.assertEquals(expected, (names + tokens).joinToString("\n", postfix = "\n"))
+    }
+
+    private fun <T> wireTokens(serializer: kotlinx.serialization.KSerializer<T>, values: List<T>): String =
+        values.joinToString(",") { value ->
+            Json.encodeToString(serializer, value).also { encoded ->
+                kotlin.test.assertEquals(value, Json.decodeFromString(serializer, encoded))
+            }
+        }
+
     private val decks = mapOf("p0" to mapOf("Mountain" to 8), "p1" to mapOf("Mountain" to 8))
 
     @Test
@@ -89,9 +229,9 @@ class FrozenPublicByteGoldensTest {
         val base = LivePolicyConfig(particles = 4, simulations = 8, maxPolicyDecisions = 4).policyParameters()
         val identities = sortedMapOf(
             "default" to PolicyIdentity.identity(base, decks, UniformOpponentPolicy),
-            "snapshot-a" to PolicyIdentity.identity(base.copy(beliefArchitecture = BeliefArchitecture.SNAPSHOT_A_V1),
+            "snapshot-a" to PolicyIdentity.identity(base.copy(beliefArchitecture = BeliefApproximation.SNAPSHOT_A_V1),
                 decks, UniformOpponentPolicy),
-            "privileged-o" to PolicyIdentity.identity(base.copy(beliefArchitecture = BeliefArchitecture.PRIVILEGED_O_V1),
+            "privileged-o" to PolicyIdentity.identity(base.copy(beliefArchitecture = BeliefApproximation.PRIVILEGED_O_V1),
                 decks, UniformOpponentPolicy),
             "conditioned" to PolicyIdentity.identity(base.copy(beliefMode = BeliefMode.POLICY_CONDITIONED_V1),
                 decks, UniformOpponentPolicy),
@@ -102,18 +242,18 @@ class FrozenPublicByteGoldensTest {
             "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/BeliefTracker.kt",
             "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/BeliefPreparation.kt",
             "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/PolicyDefaults.kt",
-            "agent/mono-red-models/src/main/kotlin/org/mtgallium/agent/monored/MonoRedInformationEvaluator.kt",
+            "agent/mono-red-models/src/main/kotlin/org/mtgallium/agent/monored/MonoRedInformationEvaluator.kt", // persisted: reviewed source path
             "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyContract.kt",
         ))
     }
 
     @Test
     fun publicBehaviorBytes() {
-        val world = publicWorld(PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
-            PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
+        val world = publicWorld(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1,
+            HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
         val site = world.decisionContext().site()
         val information = site.information()
-        val tensors = FactualPolicyEncoder().decision(site)
+        val tensors = InformationStateByteEncoder().decision(site)
         val keys = ValueFeatures.compile(information, "p0").values.keys.sorted()
         assertTrue(keys.isNotEmpty())
         val outputs = sortedMapOf<String, ByteArray>(
@@ -121,17 +261,17 @@ class FrozenPublicByteGoldensTest {
             "tensor/view-text" to untoken(tensors.view),
             "tensor/flags" to "${tensors.rulesExhaustive},${tensors.profileExhaustive}\n".toByteArray(UTF_8),
             // The public API returns hashed vectors; it does not expose pre-hash feature names.
-            "kernel/public-fixture-vectors" to researchJson.encodeToString(rootActionKernelFeatures(site)).toByteArray(UTF_8),
+            "kernel/public-fixture-vectors" to researchJson.encodeToString(kernelActionFeatures(site)).toByteArray(UTF_8),
         )
         tensors.actions.forEachIndexed { index, action ->
             outputs["tensor/action-text-%03d".format(index)] = untoken(action)
         }
         // A visible land move makes this an ordinary history corpus; it is not a qualified
         // simultaneous-untap witness. That mechanism retains its focused regression tests.
-        for (order in listOf(PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
-            PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)) {
-            for (references in listOf(PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,
-                PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2)) {
+        for (order in listOf(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1,
+            HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)) {
+            for (references in listOf(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1,
+                HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2)) {
                 val historyWorld = publicWorld(order, references)
                 var landPlays = 0
                 for (step in 0 until 48) {
@@ -150,27 +290,27 @@ class FrozenPublicByteGoldensTest {
                     val state = historyWorld.informationState(viewer)
                     check(state.history.isNotEmpty()) { "History fixture produced no events for $viewer" }
                     val prefix = "history/${order.name}/${references.name}/$viewer"
-                    outputs["$prefix/events"] = PolicyJson.format.encodeToString(state.history).toByteArray(UTF_8)
-                    outputs["$prefix/commitment"] = PolicyJson.format.encodeToString(state.historyCommitment).toByteArray(UTF_8)
+                    outputs["$prefix/events"] = CanonicalJson.format.encodeToString(state.history).toByteArray(UTF_8)
+                    outputs["$prefix/commitment"] = CanonicalJson.format.encodeToString(state.historyCommitment).toByteArray(UTF_8)
                 }
             }
         }
         verifyOrCapture("behavior", outputs, listOf(
             "agent/mono-red-models/src/main/kotlin/org/mtgallium/agent/monored/ValueFeatures.kt",
             "agent/neural-policy/src/main/kotlin/org/mtgallium/agent/neural/FactualPolicyTensors.kt",
-            "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/SemanticFeatures.kt",
+            "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/SemanticFeatures.kt", // persisted: reviewed source path
             "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/Kernel.kt",
             "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/Games.kt",
             "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyContract.kt",
-            "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyHistoryCommitment.kt",
+            "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyHistoryCommitment.kt", // persisted: reviewed source path
             "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt",
-            "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryEventOrder.kt",
-            "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryObjectReference.kt",
+            "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryEventOrder.kt", // persisted: reviewed source path
+            "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryObjectReference.kt", // persisted: reviewed source path
         ))
     }
 
-    private fun publicWorld(order: PerspectiveHistoryEventOrder,
-        references: PerspectiveHistoryObjectReference): ArgentumSearchWorld {
+    private fun publicWorld(order: HistoryEventOrdering,
+        references: HistoryObjectReferencing): ArgentumSearchWorld {
         val registry = buildRegistry()
         val environment = GameEnvironment.create(registry)
         environment.reset(GameConfig(

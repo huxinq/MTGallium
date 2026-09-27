@@ -12,15 +12,15 @@ import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionCounter
 import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementEvidenceDisposition
-import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
+import org.mtgallium.agent.infoset.core.HistoryHashChain
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
-import org.mtgallium.agent.infoset.core.DecisionSiteRequest
-import org.mtgallium.agent.infoset.core.EpistemicState
-import org.mtgallium.agent.infoset.core.PolicyExpansion
-import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
-import org.mtgallium.agent.infoset.core.PolicyManaPool
+import org.mtgallium.agent.infoset.core.DecisionContext
+import org.mtgallium.agent.infoset.core.InformationState
+import org.mtgallium.agent.infoset.core.ActionMenu
+import org.mtgallium.agent.infoset.core.PlayerKnowledge
+import org.mtgallium.agent.infoset.core.ManaPoolView
 import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
-import org.mtgallium.agent.infoset.core.PolicyPlayerView
+import org.mtgallium.agent.infoset.core.PlayerView
 import org.mtgallium.agent.infoset.core.SemanticActionIntent
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticActionTargetRelation
@@ -41,18 +41,18 @@ class OpponentPoliciesTest {
 
     @Test
     fun `only policies that consume Argentum tags declare annotation requirements`() {
-        assertFalse(SemanticHeuristicOpponentPolicy().requiresPolicyAnnotations)
-        assertTrue(DeterminizedArgentumHeuristicOpponentPolicy().requiresPolicyAnnotations)
-        assertTrue(defaultMonoRedOpponentPolicy().requiresPolicyAnnotations)
-        assertFalse(FaceBurnOpponentPolicy().requiresPolicyAnnotations)
-        assertFalse(HoldBurnOpponentPolicy().requiresPolicyAnnotations)
+        assertFalse(SemanticHeuristicOpponentPolicy().requiresArgentumAiChoiceTag)
+        assertTrue(DeterminizedArgentumHeuristicOpponentPolicy().requiresArgentumAiChoiceTag)
+        assertTrue(defaultMonoRedOpponentPolicy().requiresArgentumAiChoiceTag)
+        assertFalse(FaceBurnOpponentPolicy().requiresArgentumAiChoiceTag)
+        assertFalse(HoldBurnOpponentPolicy().requiresArgentumAiChoiceTag)
         assertFalse(MixtureOpponentPolicy(
             "zero-weight-annotation-component",
             listOf(
                 OpponentPolicyMixtureEntry(DeterminizedArgentumHeuristicOpponentPolicy(), 0.0),
                 OpponentPolicyMixtureEntry(UniformOpponentPolicy, 1.0),
             ),
-        ).requiresPolicyAnnotations)
+        ).requiresArgentumAiChoiceTag)
     }
 
     @Test
@@ -151,12 +151,12 @@ class OpponentPoliciesTest {
     ): Map<String, Double> = policy.distribution(context(candidates), 91L)
         .entries.associate { it.value.signature to it.probability }
 
-    private fun context(candidates: List<SemanticChoice>): DecisionSiteRequest {
+    private fun context(candidates: List<SemanticChoice>): DecisionContext {
         val information = information(candidates)
-        return DecisionSiteRequest.capture(
+        return DecisionContext.capture(
             actor = requireNotNull(information.actingPlayerId),
-            expansion = PolicyExpansion(candidates, true, candidates.size.toLong(), "opponent-policy-test-v1"),
-            epistemic = { EpistemicState.capture(information) },
+            menu = ActionMenu(candidates, true, candidates.size.toLong(), "opponent-policy-test-v1"),
+            epistemic = { InformationState.capture(information) },
         )
     }
 
@@ -202,20 +202,20 @@ class OpponentPoliciesTest {
 
     private fun information(candidates: List<SemanticChoice>): InformationStateRepresentation {
         val observation = PlayerObservationSnapshot(
-            perspectivePlayerId = "p0",
+            viewerId = "p0",
             turnNumber = 1,
             phase = "PRECOMBAT_MAIN",
             step = "PRECOMBAT_MAIN",
             activePlayerId = "p0",
             priorityPlayerId = "p0",
             players = listOf(
-                PolicyPlayerView(
+                PlayerView(
                     "p0", "Actor", 20, 5, 40, 0, 0,
-                    PolicyManaPool(), active = true, priority = true, lost = false,
+                    ManaPoolView(), active = true, priority = true, lost = false,
                 ),
-                PolicyPlayerView(
+                PlayerView(
                     "p1", "Opponent", 20, 5, 40, 0, 0,
-                    PolicyManaPool(), active = false, priority = false, lost = false,
+                    ManaPoolView(), active = false, priority = false, lost = false,
                 ),
             ),
             zones = emptyList(),
@@ -227,9 +227,9 @@ class OpponentPoliciesTest {
             actingPlayerId = "p0",
             observation = observation,
             informationStateDigest = "opponent-policy-fixture-info",
-            historyCommitment = PolicyHistoryCommitment.empty(),
+            historyCommitment = HistoryHashChain.empty(),
             history = emptyList(),
-            knowledge = PolicyKnowledgeState.empty("p0"),
+            knowledge = PlayerKnowledge.empty("p0"),
             candidates = candidates,
             terminated = false,
         )

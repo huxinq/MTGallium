@@ -4,11 +4,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
-import org.mtgallium.agent.infoset.core.BeliefSnapshot
-import org.mtgallium.agent.infoset.core.BeliefSnapshotSource
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.planning.BeliefSnapshot
+import org.mtgallium.agent.infoset.planning.BeliefSnapshotSource
+import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.argentum.ArgentumParticleBeliefSnapshot
 
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefSupport
@@ -17,38 +16,37 @@ import org.mtgallium.agent.infoset.argentum.ArgentumConditionalRejuvenator
 import org.mtgallium.agent.infoset.argentum.ArgentumKnownDeckBeliefWorldSource
 import org.mtgallium.agent.infoset.argentum.ArgentumParticleDiagnostics
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
-import org.mtgallium.agent.infoset.core.BeliefBatch
+import org.mtgallium.agent.infoset.core.BeliefApproximation
+import org.mtgallium.agent.infoset.planning.ParticleSet
 import org.mtgallium.agent.infoset.core.BeliefDiagnostics
 import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ComponentSeeds
 import org.mtgallium.agent.infoset.core.ActionSelector
 import org.mtgallium.agent.infoset.core.ActionDistributionModel
 import org.mtgallium.agent.infoset.core.OpponentPolicy
-import org.mtgallium.agent.infoset.core.ParticleBelief
-import org.mtgallium.agent.infoset.core.ParticleDepletionException
-import org.mtgallium.agent.infoset.core.ParticleRejuvenator
+import org.mtgallium.agent.infoset.planning.ParticleBelief
+import org.mtgallium.agent.infoset.planning.ParticleDepletionException
+import org.mtgallium.agent.infoset.planning.ParticleRejuvenator
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
-import org.mtgallium.agent.infoset.core.SearchWorld
+import org.mtgallium.agent.infoset.planning.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.Weighted
 import org.mtgallium.agent.infoset.core.decisionView
 
 /** An explicit diagnostic choice, independent of the represented history format. */
-@Serializable
-enum class ObservedBeliefConditioning { HISTORICAL_GROUP_SIGNATURE_V1, QUALIFIED_SUPPORTED_FAMILIES_V1 }
+@Serializable @SerialName("org.mtgallium.agent.argentum.policy.ObservedBeliefConditioning")
+enum class ObservedActionLikelihood { HISTORICAL_GROUP_SIGNATURE_V1, QUALIFIED_SUPPORTED_FAMILIES_V1 }
 
 /** Inputs actually used by the shared belief tracker, independently of tree execution. */
 @OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.SearchTeacherBeliefConfiguration")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.SearchTeacherBeliefConfiguration")
 data class BeliefConfig(
     val particles: Int,
     val beliefMode: BeliefMode = BeliefMode.CONSISTENCY_ONLY_V1,
-    val beliefArchitecture: BeliefArchitecture = BeliefArchitecture.SEQUENTIAL_B_V1,
+    val beliefArchitecture: BeliefApproximation = BeliefApproximation.SEQUENTIAL_B_V1,
     /** Absent preserves historical bytes and the host's representation-bound default. */
     @EncodeDefault(EncodeDefault.Mode.NEVER)
-    val observedConditioning: ObservedBeliefConditioning? = null,
+    val observedConditioning: ObservedActionLikelihood? = null,
 ) {
     init { require(particles > 0) }
 }
@@ -93,7 +91,7 @@ data class BeliefUpdateDiagnostics(
 }
 
 /** Concrete particle maintenance backend, shared by live reconstruction and experiment arenas. */
-internal class ArgentumParticleBeliefBackend private constructor(
+internal class ArgentumParticleFilter private constructor(
     root: ArgentumSearchWorld,
     private val viewer: String,
     private val knownDecks: Map<String, Map<String, Int>>,
@@ -102,7 +100,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
     private val privateChoiceSelector: ActionSelector,
     private val gameId: String,
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink,
-    source: ArgentumParticleBeliefBackend?,
+    source: ArgentumParticleFilter?,
 ) : BeliefSnapshotSource {
     constructor(root: ArgentumSearchWorld, viewer: String, knownDecks: Map<String, Map<String, Int>>,
         parameters: SearchPolicyConfig, opponentModel: OpponentPolicy, gameId: String,
@@ -157,12 +155,12 @@ internal class ArgentumParticleBeliefBackend private constructor(
 
     init {
         require(root.historyObjectReference !=
-            org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2 ||
-            parameters.beliefArchitecture == BeliefArchitecture.SEQUENTIAL_B_V1) {
+            org.mtgallium.agent.infoset.argentum.HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2 ||
+            parameters.beliefArchitecture == BeliefApproximation.SEQUENTIAL_B_V1) {
             "Qualified observed updates require SEQUENTIAL_B_V1"
         }
         if (parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1 &&
-            parameters.beliefArchitecture != BeliefArchitecture.SEQUENTIAL_B_V1) {
+            parameters.beliefArchitecture != BeliefApproximation.SEQUENTIAL_B_V1) {
             throw ConditionedBeliefReconstructionRequired("UNSUPPORTED_ARCHITECTURE")
         }
         maintenanceFailure?.let { throw it }
@@ -180,12 +178,12 @@ internal class ArgentumParticleBeliefBackend private constructor(
     }
 
     /** Continue the same posterior and update lifecycle on an independently forked factual world. */
-    fun fork(actual: ArgentumSearchWorld): ArgentumParticleBeliefBackend {
+    fun fork(actual: ArgentumSearchWorld): ArgentumParticleFilter {
         maintenanceFailure?.let { throw it }
         require(actual.informationState(viewer).informationStateDigest == expectedInformation.informationStateDigest) {
             "Factual continuation must preserve the session's current information state"
         }
-        return ArgentumParticleBeliefBackend(
+        return ArgentumParticleFilter(
             actual,
             viewer,
             knownDecks,
@@ -229,18 +227,18 @@ internal class ArgentumParticleBeliefBackend private constructor(
 
     private var capturedSnapshot: BeliefSnapshot? = null
     private val qualifiedObservedMode = when (parameters.observedConditioning) {
-        ObservedBeliefConditioning.HISTORICAL_GROUP_SIGNATURE_V1 -> false
-        ObservedBeliefConditioning.QUALIFIED_SUPPORTED_FAMILIES_V1 -> true
+        ObservedActionLikelihood.HISTORICAL_GROUP_SIGNATURE_V1 -> false
+        ObservedActionLikelihood.QUALIFIED_SUPPORTED_FAMILIES_V1 -> true
         null -> root.historyObjectReference ==
-            org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
+            org.mtgallium.agent.infoset.argentum.HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2
     }
     var lastObservedUpdate: ObservedBeliefUpdateEvidence? = source?.lastObservedUpdate
         private set
     private var exactObservedConditioningUsed: Boolean = source?.exactObservedConditioningUsed ?: false
-    private val inferenceModelIdentity: String = "particle-inference-v1-sha256:" + PolicyJson.digest(buildJsonObject {
-        put("configuration", PolicyJson.format.encodeToJsonElement(parameters))
-        put("opponentDistribution", PolicyJson.format.encodeToJsonElement(opponentDistribution.behaviorSpecification))
-        put("privateChoiceSelector", PolicyJson.format.encodeToJsonElement(privateChoiceSelector.behaviorSpecification))
+    private val inferenceModelIdentity: String = "particle-inference-v1-sha256:" + CanonicalJson.digest(buildJsonObject {
+        put("configuration", CanonicalJson.format.encodeToJsonElement(parameters))
+        put("opponentDistribution", CanonicalJson.format.encodeToJsonElement(opponentDistribution.behaviorSpecification))
+        put("privateChoiceSelector", CanonicalJson.format.encodeToJsonElement(privateChoiceSelector.behaviorSpecification))
         // Direct observed submission no longer derives optionality from proposal expansion,
         // including in historical representation/signature modes. Keep configuration bytes,
         // but never reuse the old inference identity for those changed histories.
@@ -260,7 +258,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
     }
 
     /** Compatibility adapter for callers still consuming prepared weighted worlds. */
-    fun batch(): BeliefBatch<Weighted<SearchWorld>> = snapshot().hypotheses.materialize().batch
+    fun batch(): ParticleSet<Weighted<SearchWorld>> = snapshot().hypotheses.materialize().batch
 
     fun synchronize(actual: ArgentumSearchWorld, decisionIndex: Int) {
         maintenanceFailure?.let { throw it }
@@ -276,7 +274,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
             expected,
         )
         var unsupportedParticles = supportFailures.values.sum()
-        val rootRefresh = parameters.beliefArchitecture == BeliefArchitecture.SNAPSHOT_A_V1
+        val rootRefresh = parameters.beliefArchitecture == BeliefApproximation.SNAPSHOT_A_V1
         if (digestMismatches == 0 && supportFailures.isEmpty() && !rootRefresh && !pendingDepletion) {
             val knowledgeChanged = latestDiagnostics.knowledgeDigest != expected.knowledge.knowledgeDigest
             if (expectedInformation != expected || knowledgeChanged) capturedSnapshot = null
@@ -285,7 +283,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
             return
         }
         capturedSnapshot = null
-        if (parameters.beliefArchitecture == BeliefArchitecture.SEQUENTIAL_B_V1 &&
+        if (parameters.beliefArchitecture == BeliefApproximation.SEQUENTIAL_B_V1 &&
             digestMismatches > 0 && supportFailures.isEmpty() && !pendingDepletion
         ) {
             conditioningAttempts++
@@ -364,35 +362,35 @@ internal class ArgentumParticleBeliefBackend private constructor(
         exactObservedAction: org.mtgallium.agent.infoset.argentum.ArgentumObservedActionCapture? = null,
     ) {
         require(exactObservedAction == null ||
-            parameters.observedConditioning != ObservedBeliefConditioning.HISTORICAL_GROUP_SIGNATURE_V1) {
+            parameters.observedConditioning != ObservedActionLikelihood.HISTORICAL_GROUP_SIGNATURE_V1) {
             "An exact update conflicts with the declared historical group-conditioning mode"
         }
         capturedSnapshot = null
         maintenanceFailure?.let { throw it }
         val expected = actual.informationState(viewer)
         val exactCapture = exactObservedAction ?: if (qualifiedObservedMode && !privateToActor &&
-            actual.lastObservedActionHasQualifiedTransportForHost() == true) {
-            requireNotNull(actual.lastObservedActionCaptureForHost(viewer)) { "Missing accepted host predecessor" }
+            actual.lastObservedActionHasQualifiedTransport() == true) {
+            requireNotNull(actual.lastObservedActionCapture(viewer)) { "Missing accepted host predecessor" }
         } else null
-        if (qualifiedObservedMode) requireNotNull(actual.lastObservedActionHasQualifiedTransportForHost()) {
+        if (qualifiedObservedMode) requireNotNull(actual.lastObservedActionHasQualifiedTransport()) {
             "Qualified updates require the actual accepted host transition"
         }
         val route = when {
-            privateToActor && actor != viewer -> ObservedBeliefUpdateRoute.PRIVATE_UNOBSERVED_V1
-            exactCapture != null -> ObservedBeliefUpdateRoute.QUALIFIED_EXACT_MEMBER_V1
-            qualifiedObservedMode -> ObservedBeliefUpdateRoute.UNSUPPORTED_FAMILY_SIGNATURE_COMPATIBILITY_V1
-            else -> ObservedBeliefUpdateRoute.HISTORICAL_SIGNATURE_V1
+            privateToActor && actor != viewer -> ObservedActionLikelihoodRoute.PRIVATE_UNOBSERVED_V1
+            exactCapture != null -> ObservedActionLikelihoodRoute.QUALIFIED_EXACT_MEMBER_V1
+            qualifiedObservedMode -> ObservedActionLikelihoodRoute.UNSUPPORTED_FAMILY_SIGNATURE_COMPATIBILITY_V1
+            else -> ObservedActionLikelihoodRoute.HISTORICAL_SIGNATURE_V1
         }
         lastObservedUpdate = ObservedBeliefUpdateEvidence(route, choice.operationFamily,
             if (qualifiedObservedMode) QUALIFIED_OBSERVED_BELIEF_V1 else route.name)
         if (exactCapture != null) {
-            require(exactCapture.observerInformation.perspectivePlayerId == viewer)
+            require(exactCapture.observerInformation.viewerId == viewer)
             require(exactCapture.actingSite.actor == actor && exactCapture.searchGroup == choice)
             require(!privateToActor) { "Exact observer conditioning cannot expose a private declaration" }
-            require(parameters.beliefArchitecture == BeliefArchitecture.SEQUENTIAL_B_V1)
+            require(parameters.beliefArchitecture == BeliefApproximation.SEQUENTIAL_B_V1)
             exactObservedConditioningUsed = true
         }
-        if (parameters.beliefArchitecture == BeliefArchitecture.SNAPSHOT_A_V1) {
+        if (parameters.beliefArchitecture == BeliefApproximation.SNAPSHOT_A_V1) {
             rebuildPopulation(
                 actual = actual,
                 expected = expected,
@@ -405,25 +403,25 @@ internal class ArgentumParticleBeliefBackend private constructor(
         // New information is evidence about descendants, not a reason to redraw all worlds.
         // Filter before the core's single resampling step; keep the legacy mode unchanged.
         val observation = if (parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1) {
-            org.mtgallium.agent.infoset.core.ParticleObservationCondition(expected.knowledge.knowledgeDigest) { world ->
+            org.mtgallium.agent.infoset.planning.ParticleObservationCondition(expected.knowledge.knowledgeDigest) { world ->
                 ArgentumBeliefSupport.completeFailures(listOf(world), viewer, expected).isEmpty()
             }
         } else null
         val privateOpponentChoice = actor != viewer && privateToActor &&
-            parameters.beliefArchitecture != BeliefArchitecture.PRIVILEGED_O_V1
+            parameters.beliefArchitecture != BeliefApproximation.PRIVILEGED_O_V1
         val signatureStep = if (exactCapture == null && !privateOpponentChoice)
-            actual.observedChoicePropagationForHost(actor, choice) else null
+            actual.observedChoicePropagation(actor, choice) else null
         sequentialUpdateAttempts++
         val update = try {
             when {
-                privateOpponentChoice -> belief.advanceUnobserved(
+                privateOpponentChoice -> belief.propagateThroughHiddenChoice(
                     actor = actor,
                     opponentPolicy = privateChoiceSelector,
                     updateSeed = seed,
                     rejuvenator = rejuvenator,
                     observation = observation,
                 )
-                parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1 && actor != viewer -> belief.advance(
+                parameters.beliefMode == BeliefMode.POLICY_CONDITIONED_V1 && actor != viewer -> belief.propagateAndReweight(
                     actor = actor,
                     observedSignature = choice.signature,
                     conditioningPolicy = opponentDistribution,
@@ -433,7 +431,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
                     exactAction = exactCapture?.particleAction(opponentDistribution.decisionView()),
                     signatureStep = signatureStep,
                 )
-                else -> belief.advance(
+                else -> belief.propagateAndReweight(
                     actor = actor,
                     observedSignature = choice.signature,
                     updateSeed = seed,
@@ -443,12 +441,12 @@ internal class ArgentumParticleBeliefBackend private constructor(
                     signatureStep = signatureStep,
                 )
             }
-        } catch (failure: org.mtgallium.agent.infoset.core.ExactObservationDepletionException) {
+        } catch (failure: org.mtgallium.agent.infoset.planning.ExactObservationDepletionException) {
             sequentialUpdateDepletions++
             val stop = ConditionedBeliefReconstructionRequired(failure.report.kind.name, failure.report, failure)
             maintenanceFailure = stop
             throw stop
-        } catch (failure: org.mtgallium.agent.infoset.core.UnsupportedObservedActionException) {
+        } catch (failure: org.mtgallium.agent.infoset.planning.UnsupportedObservedActionException) {
             sequentialUpdateOtherRefusals++
             val stop = ConditionedBeliefReconstructionRequired("UNAVAILABLE_CORRESPONDENCE", failure.report, failure)
             maintenanceFailure = stop
@@ -568,11 +566,11 @@ internal class ArgentumParticleBeliefBackend private constructor(
         actual: ArgentumSearchWorld,
         information: InformationStateRepresentation,
         purpose: String,
-    ): BeliefBatch<Weighted<SearchWorld>> {
+    ): ParticleSet<Weighted<SearchWorld>> {
         val seed = ComponentSeeds.derive(gameId, viewer, purpose)
         val batch = when (parameters.beliefArchitecture) {
-            BeliefArchitecture.SNAPSHOT_A_V1,
-            BeliefArchitecture.SEQUENTIAL_B_V1 -> ArgentumKnownDeckBeliefWorldSource(
+            BeliefApproximation.SNAPSHOT_A_V1,
+            BeliefApproximation.SEQUENTIAL_B_V1 -> ArgentumKnownDeckBeliefWorldSource(
                 actual,
                 proposalAuditSink,
                 "$viewer:$purpose",
@@ -583,10 +581,10 @@ internal class ArgentumParticleBeliefBackend private constructor(
                         diagnostics = batch.diagnostics.copy(architecture = parameters.beliefArchitecture),
                     )
                 }
-            BeliefArchitecture.PRIVILEGED_O_V1 -> BeliefBatch(
+            BeliefApproximation.PRIVILEGED_O_V1 -> ParticleSet(
                 particles = List(parameters.particles) { particleIndex ->
                     Weighted(
-                        actual.forkForHypotheticalSearch(
+                        actual.forkWithChanceStream(
                             ComponentSeeds.derive(seed, particleIndex, "privileged-particle")
                         ),
                         1.0 / parameters.particles,

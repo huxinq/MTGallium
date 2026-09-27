@@ -40,6 +40,7 @@ class RuntimeSemanticChoiceIdentityTest {
     private val deck = mapOf("Mountain" to 16, "Nova Hellkite" to 4)
 
     @Test
+
     fun `ordinary and warped Nova singleton attacks remain distinct through rebinding and Warp exile`() {
         val base = environment()
         val player = base.playerIds[0]
@@ -55,7 +56,7 @@ class RuntimeSemanticChoiceIdentityTest {
 
         val ordinaryCastChoice = constructor.expandChoices().candidates.single { choice ->
             val cast = resolvedCast(constructor, choice)
-            cast?.let { cardName(constructor.authoritativeState(), it.cardId) == "Nova Hellkite" &&
+            cast?.let { cardName(constructor.trueState(), it.cardId) == "Nova Hellkite" &&
                 !it.useAlternativeCost } == true
         }
         val ordinaryNova = requireNotNull(resolvedCast(constructor, ordinaryCastChoice)).cardId
@@ -64,7 +65,7 @@ class RuntimeSemanticChoiceIdentityTest {
 
         val warpedCastChoice = constructor.expandChoices().candidates.single { choice ->
             val cast = resolvedCast(constructor, choice)
-            cast?.let { cardName(constructor.authoritativeState(), it.cardId) == "Nova Hellkite" &&
+            cast?.let { cardName(constructor.trueState(), it.cardId) == "Nova Hellkite" &&
                 it.useAlternativeCost } == true
         }
         val warpedNova = requireNotNull(resolvedCast(constructor, warpedCastChoice)).cardId
@@ -73,7 +74,7 @@ class RuntimeSemanticChoiceIdentityTest {
         resolveStack(constructor)
         advanceToAttackDeclaration(constructor)
 
-        val attackRoot = constructor.authoritativeState()
+        val attackRoot = constructor.trueState()
         assertFalse(attackRoot.getEntity(ordinaryNova)?.has<WarpedComponent>() == true)
         assertTrue(attackRoot.getEntity(warpedNova)?.has<WarpedComponent>() == true)
         assertEquals(listOf(warpedNova), attackRoot.delayedTriggers.map { it.sourceId })
@@ -101,13 +102,13 @@ class RuntimeSemanticChoiceIdentityTest {
         assertEquals(2, visibleNovas.size)
         assertEquals(listOf(false, true), visibleNovas.map { it.isWarped }.sorted())
 
-        val expansion = source.expandChoices()
+        val menu = source.expandChoices()
         assertEquals(CANDIDATE_SCHEMA_V4, information.candidateSchemaVersion)
-        assertTrue(expansion.proposalVersion.startsWith("semantic-structured-actions-v6:"))
-        assertTrue(expansion.isExhaustive)
-        assertEquals(4, expansion.estimatedCandidateCount)
-        assertEquals(4, expansion.candidates.size)
-        val byAttackers = expansion.candidates.associateBy { choice ->
+        assertTrue(menu.proposalVersion.startsWith("semantic-structured-actions-v6:"))
+        assertTrue(menu.isExhaustive)
+        assertEquals(4, menu.estimatedCandidateCount)
+        assertEquals(4, menu.candidates.size)
+        val byAttackers = menu.candidates.associateBy { choice ->
             val action = (source.resolveChoice(choice) as ArgentumResolvedChoice.Action).value as DeclareAttackers
             action.attackers.keys
         }
@@ -141,8 +142,8 @@ class RuntimeSemanticChoiceIdentityTest {
         advanceThroughWarpExile(ordinaryBranch, player, warpedNova)
         advanceThroughWarpExile(warpedBranch, player, warpedNova)
         listOf(ordinaryBranch, warpedBranch).forEach { branch ->
-            assertTrue(ordinaryNova in branch.authoritativeState().getBattlefield(player))
-            assertTrue(warpedNova in branch.authoritativeState().getExile(player))
+            assertTrue(ordinaryNova in branch.trueState().getBattlefield(player))
+            assertTrue(warpedNova in branch.trueState().getExile(player))
         }
     }
 
@@ -158,7 +159,7 @@ class RuntimeSemanticChoiceIdentityTest {
         assertEquals(2, identical.size)
         val first = identical[0].entityId
         val second = identical[1].entityId
-        val projector = SafeObservationProjector()
+        val projector = PlayerObservationProjector()
 
         val baseline = projector.project(observation)
         assertEquals(
@@ -198,17 +199,17 @@ class RuntimeSemanticChoiceIdentityTest {
         assertTrue(branch.step(choice).accepted)
         assertEquals(
             source.playerIds[1],
-            branch.authoritativeState().getEntity(expectedAttacker)?.get<AttackingComponent>()?.defenderId,
+            branch.trueState().getEntity(expectedAttacker)?.get<AttackingComponent>()?.defenderId,
         )
-        assertFalse(branch.authoritativeState().getEntity(otherNova)?.has<AttackingComponent>() == true)
+        assertFalse(branch.trueState().getEntity(otherNova)?.has<AttackingComponent>() == true)
         return branch
     }
 
     private fun advanceToAttackDeclaration(world: ArgentumSearchWorld) {
         repeat(32) {
-            val expansion = world.expandChoices()
-            if (expansion.candidates.any { it.operationFamily == SemanticOperationFamily.DECLARE_ATTACKERS }) return
-            val pass = expansion.candidates.singleOrNull {
+            val menu = world.expandChoices()
+            if (menu.candidates.any { it.operationFamily == SemanticOperationFamily.DECLARE_ATTACKERS }) return
+            val pass = menu.candidates.singleOrNull {
                 it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
             } ?: error("No priority pass before attack declaration")
             assertTrue(world.step(pass).accepted)
@@ -222,21 +223,21 @@ class RuntimeSemanticChoiceIdentityTest {
         warpedNova: EntityId,
     ) {
         repeat(96) {
-            if (warpedNova in world.authoritativeState().getExile(owner) &&
-                world.authoritativeState().stack.isEmpty()
+            if (warpedNova in world.trueState().getExile(owner) &&
+                world.trueState().stack.isEmpty()
             ) return
-            val expansion = world.expandChoices()
-            val choice = expansion.candidates.singleOrNull()
-                ?: expansion.candidates.singleOrNull {
+            val menu = world.expandChoices()
+            val choice = menu.candidates.singleOrNull()
+                ?: menu.candidates.singleOrNull {
                     it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
                 }
-                ?: expansion.candidates.singleOrNull {
+                ?: menu.candidates.singleOrNull {
                     it.actionIntent.kind == SemanticActionIntentKind.DECLINE_BLOCK
                 }
                 ?: error(
                     "No deterministic route to the Warp trigger at " +
-                        "${world.authoritativeState().phase}/${world.authoritativeState().step}: " +
-                        expansion.candidates.joinToString { it.display.label },
+                        "${world.trueState().phase}/${world.trueState().step}: " +
+                        menu.candidates.joinToString { it.display.label },
                 )
             assertTrue(world.step(choice).accepted)
         }
@@ -245,7 +246,7 @@ class RuntimeSemanticChoiceIdentityTest {
 
     private fun resolveStack(world: ArgentumSearchWorld) {
         repeat(16) {
-            if (world.authoritativeState().stack.isEmpty()) return
+            if (world.trueState().stack.isEmpty()) return
             val pass = world.expandChoices().candidates.single {
                 it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
             }

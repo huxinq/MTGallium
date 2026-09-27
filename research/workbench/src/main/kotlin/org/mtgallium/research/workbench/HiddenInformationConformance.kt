@@ -7,10 +7,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 
 @Serializable
 data class HiddenInformationCheckPlan(
-    val game: GamesPlan,
+    val game: ResearchGameConfig,
     val seeds: List<Long> = listOf(101, 102, 103, 104),
     val policies: List<String> = emptyList(),
     val permutations: Int = 4,
@@ -46,7 +47,7 @@ fun hiddenInformationCorpus(plan: HiddenInformationCheckPlan): List<HiddenInform
         playGame(game.world, game.players, seed, plan.maximumCorpusDecisions, beforeChoice = { world, request, index ->
             val info = request.information()
             val observation = info.observation
-            val families = request.expansion.candidates.map { it.operationFamily.name }
+            val families = request.menu.candidates.map { it.operationFamily.name }
             val category = when {
                 families.any { it.contains("MULLIGAN") || it.contains("KEEP_HAND") || it.contains("BOTTOM") } -> "MULLIGAN"
                 families.any { it.contains("ATTACK") } -> "ATTACK"
@@ -74,7 +75,7 @@ fun hiddenInformationCorpus(plan: HiddenInformationCheckPlan): List<HiddenInform
 @Serializable
 data class ConformanceCandidate(
     val signature: String, val visits: Int, val mean: Double,
-    val settlements: SearchSettlementCounts,
+    val settlements: ReturnSourceCounts,
 )
 
 @Serializable
@@ -122,7 +123,7 @@ data class HiddenInformationReport(
 fun checkHiddenInformation(
     plan: HiddenInformationCheckPlan,
     positions: List<HiddenInformationPosition> = hiddenInformationCorpus(plan),
-    providers: List<NativePolicyProvider> = NativePolicies.installed.providers,
+    providers: List<JvmPolicyProvider> = NativePolicies.installed.providers,
 ): List<HiddenInformationReport> {
     val policies = NativePolicies(providers)
     policies.checkSettings(plan.game)
@@ -143,20 +144,20 @@ fun checkHiddenInformation(
             }
             fun select(source: ArgentumSearchWorld): ConformanceSelection {
                 val world = source.fork() as ArgentumSearchWorld
-                check(world.actorToAct() == position.actor && world.acceptedDecisionCountForHost == position.decisionIndex)
+                check(world.actorToAct() == position.actor && world.acceptedDecisionCount == position.decisionIndex)
                 val game = NativePolicyContext(plan.game.copy(seed = position.seed), world, position.gameId,
                     plan.game.decks.mapIndexed { i, deck -> "p$i" to deck }.toMap())
                 val seed = ComponentSeeds.derive(position.seed, position.actor, position.decisionIndex.toString())
                 return when (val policy = policies.create(name, game, position.actor)) {
-                    is NativePolicy.Direct -> {
+                    is JvmPolicy.Memoryless -> {
                         val request = world.decisionContext(policy.player.view)
                         val choice = policy.player.choose(request, seed)
-                        check(choice in request.expansion.candidates) { "Choice outside admitted menu" }
-                        ConformanceSelection(choice.signature, request.expansion.candidates.map { it.signature })
+                        check(choice in request.menu.candidates) { "Choice outside admitted menu" }
+                        ConformanceSelection(choice.signature, request.menu.candidates.map { it.signature })
                     }
-                    is NativePolicy.Search -> {
+                    is JvmPolicy.SearchSession -> {
                         val specification = policy.session.behaviorSpecification
-                        val menu = world.decisionContext().expansion.candidates.map { it.signature }
+                        val menu = world.decisionContext().menu.candidates.map { it.signature }
                         val selection = policy.session.select(world, position.actor, seed)
                         val result = (selection as? RootActionSelection.Searched)?.search
                         ConformanceSelection(selection.choice.signature, menu,
@@ -183,7 +184,7 @@ fun checkHiddenInformation(
             var positionAccepted = false
             for (index in 0 until plan.permutations) {
                 val seed = ComponentSeeds.derive(position.seed, position.decisionIndex, "hidden-permutation-$index")
-                val proposal = position.world.permuteHiddenTruthForHost(position.actor, seed)
+                val proposal = position.world.forkPermutingHiddenCards(position.actor, seed)
                 val world = proposal.world
                 if (world == null) { reject(requireNotNull(proposal.rejection)); continue }
                 accepted++

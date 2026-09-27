@@ -3,9 +3,9 @@ package org.mtgallium.agent.infoset.core
 interface PolicyComponent {
     val id: String
     /** Opt out only for a declared policy over the plain semantic proposal menu, without production anchors. */
-    val requiresProductionAdmission: Boolean get() = true
+    val requiresArgentumAiChoiceOnMenu: Boolean get() = true
     /** True only when selection, distribution or diagnostics consume optional policy annotations. */
-    val requiresPolicyAnnotations: Boolean get() = false
+    val requiresArgentumAiChoiceTag: Boolean get() = false
 
     /**
      * Versioned behavior supplied to policy and dataset fingerprints. Implementations with
@@ -13,14 +13,14 @@ interface PolicyComponent {
      */
     val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
-            requiresProductionAdmission = requiresProductionAdmission,
+            requiresArgentumAiChoiceOnMenu = requiresArgentumAiChoiceOnMenu,
             implementationId = "opaque-declared-policy-v1",
             declaredId = id,
             distributionIsSeedInvariant = false,
         )
 
     /** Mixtures attribute a sampled action by a posterior component draw. */
-    fun decisionDiagnostic(context: DecisionSiteRequest, chosen: SemanticChoice, policySeed: Long,
+    fun decisionDiagnostic(context: DecisionContext, chosen: SemanticChoice, policySeed: Long,
         attributionSeed: Long): OpponentPolicyDecisionDiagnostic = OpponentPolicyDecisionDiagnostic(
             declaredPolicyId = id, selectedComponentId = id)
 
@@ -32,19 +32,19 @@ interface PolicyComponent {
 /** Selects actions without requiring an enumerable action distribution. */
 interface ActionSelector : PolicyComponent {
     /** A selector may inspect only the requested context; menu-only selectors inspect expansion alone. */
-    fun select(context: DecisionSiteRequest, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision
+    fun select(context: DecisionContext, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision
 }
 
 /** Models action probabilities without requiring an action selector. */
 interface ActionDistributionModel : PolicyComponent {
-    fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice>
+    fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice>
 
     /** Enables exact per-state distribution memoization; sampling remains independently seeded. */
     val distributionIsSeedInvariant: Boolean get() = false
 
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
-            requiresProductionAdmission = requiresProductionAdmission,
+            requiresArgentumAiChoiceOnMenu = requiresArgentumAiChoiceOnMenu,
             implementationId = "opaque-declared-policy-v1",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,
@@ -55,8 +55,8 @@ interface ActionDistributionModel : PolicyComponent {
 /** Combined action-selection and distribution contract. */
 interface OpponentPolicy : ActionSelector, ActionDistributionModel {
     /** Samples one action and returns the component/replacement record for that exact site. */
-    override fun select(context: DecisionSiteRequest, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision {
-        val candidates = context.expansion.candidates
+    override fun select(context: DecisionContext, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision {
+        val candidates = context.menu.candidates
         val chosen = sampleOpponentPolicyDistribution(
             distribution(context, policySeed).requireAdmittedSupport(candidates),
             sampleSeed,
@@ -122,13 +122,13 @@ class ProbabilityDistribution<T> private constructor(
 interface InformationStateEvaluator {
     val id: String
     /** Semantic origin of this evaluator's nonterminal leaf values. */
-    val settlementOrigin: SearchSettlementOrigin
-        get() = SearchSettlementOrigin.HEURISTIC_SETTLEMENT
+    val settlementOrigin: ReturnSource
+        get() = ReturnSource.HEURISTIC_SETTLEMENT
     fun evaluate(information: InformationStateRepresentation, rootPlayer: String): Double
 }
 
 /** Evaluator metadata that remains stable across search traces and evidence packets. */
-interface ConfiguredInformationStateEvaluator : InformationStateEvaluator {
+interface ParameterizedInformationStateEvaluator : InformationStateEvaluator {
     val configurationId: String
 }
 
@@ -151,8 +151,8 @@ object ComponentSeeds {
 }
 
 /** Optional diagnostic sink for actual bounded-rollout choices; it cannot replace the choice. */
-interface BoundedRolloutObserver {
-    fun observeDecision(context: DecisionSiteRequest, choice: SemanticChoice, searchSeed: Long, simulationIndex: Int, depth: Int)
+interface RolloutObserver {
+    fun observeDecision(context: DecisionContext, choice: SemanticChoice, searchSeed: Long, simulationIndex: Int, depth: Int)
 }
 
 data class Weighted<out T>(val value: T, val weight: Double) {
@@ -163,12 +163,12 @@ data class Weighted<out T>(val value: T, val weight: Double) {
 
 
 /** Translate policy requirements once; the decision source owns the actual admitted expansion. */
-fun PolicyComponent.decisionView(limit: Int? = null): DecisionView = DecisionView(limit,
-    if (requiresProductionAdmission) DecisionAdmission.PRODUCTION else DecisionAdmission.SEMANTIC, requiresPolicyAnnotations)
+fun PolicyComponent.decisionView(limit: Int? = null): MenuRequest = MenuRequest(limit,
+    if (requiresArgentumAiChoiceOnMenu) MenuSource.PRODUCTION else MenuSource.SEMANTIC, requiresArgentumAiChoiceTag)
 
 /** Actual-player policy over an admitted context, independent of any search result or engine. */
 interface DecisionPolicy {
     val configurationId: String
     /** Null declares that this policy does not select at this site; the host owns any fallback. */
-    fun choose(context: DecisionSiteRequest, decisionSeed: Long): SemanticChoice?
+    fun choose(context: DecisionContext, decisionSeed: Long): SemanticChoice?
 }

@@ -13,11 +13,11 @@ class MixtureOpponentPolicy(
     override val id: String,
     private val components: List<OpponentPolicyMixtureEntry>,
 ) : OpponentPolicy {
-    override val requiresProductionAdmission: Boolean = components.any {
-        it.weight > 0.0 && it.policy.requiresProductionAdmission
+    override val requiresArgentumAiChoiceOnMenu: Boolean = components.any {
+        it.weight > 0.0 && it.policy.requiresArgentumAiChoiceOnMenu
     }
-    override val requiresPolicyAnnotations: Boolean = components.any {
-        it.weight > 0.0 && it.policy.requiresPolicyAnnotations
+    override val requiresArgentumAiChoiceTag: Boolean = components.any {
+        it.weight > 0.0 && it.policy.requiresArgentumAiChoiceTag
     }
     override val distributionIsSeedInvariant: Boolean = components.all {
         it.policy.distributionIsSeedInvariant
@@ -29,7 +29,7 @@ class MixtureOpponentPolicy(
 
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
-            requiresProductionAdmission = requiresProductionAdmission,
+            requiresArgentumAiChoiceOnMenu = requiresArgentumAiChoiceOnMenu,
             implementationId = "weighted-mixture-with-posterior-attribution-v2",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,
@@ -44,8 +44,8 @@ class MixtureOpponentPolicy(
             },
         )
 
-    override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
-        val candidates = context.expansion.candidates
+    override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
+        val candidates = context.menu.candidates
         val totals = candidates.associate { it.signature to 0.0 }.toMutableMap()
         val normalizer = components.sumOf { it.weight }
         for ((componentIndex, component) in components.withIndex()) {
@@ -63,9 +63,9 @@ class MixtureOpponentPolicy(
         })
     }
 
-    override fun decisionDiagnostic(context: DecisionSiteRequest, chosen: SemanticChoice, policySeed: Long,
+    override fun decisionDiagnostic(context: DecisionContext, chosen: SemanticChoice, policySeed: Long,
         attributionSeed: Long): OpponentPolicyDecisionDiagnostic {
-        val candidates = context.expansion.candidates
+        val candidates = context.menu.candidates
         val contributions = components.mapIndexed { componentIndex, component ->
             val componentSeed = ComponentSeeds.derive(policySeed, componentIndex, component.policy.id)
             // Keep original indices for seed/attribution identity, but never execute an inactive
@@ -108,8 +108,8 @@ object UniformOpponentPolicy : OpponentPolicy {
             distributionIsSeedInvariant = distributionIsSeedInvariant,
         )
 
-    override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
-        ProbabilityDistribution.uniform(context.expansion.candidates)
+    override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
+        ProbabilityDistribution.uniform(context.menu.candidates)
 }
 
 /** Shared selection sampler; menu-only policies must retain this exact seeded draw. */

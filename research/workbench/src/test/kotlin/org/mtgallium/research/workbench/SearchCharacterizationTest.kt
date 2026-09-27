@@ -10,10 +10,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.RolloutCutoff
-import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.RolloutCutoff
+import org.mtgallium.agent.infoset.planning.RolloutTurnHorizon
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -24,17 +24,17 @@ class SearchCharacterizationTest {
     fun `seeded public positions give stable choices visits diagnostics and work digests`() {
         val deck = publicDeck()
         val scenarios = listOf(
-            "default" to GamesPlan(decks = listOf(deck, deck), seed = 811L,
+            "default" to ResearchGameConfig(decks = listOf(deck, deck), seed = 811L,
                 startingHandSize = 7, skipMulligans = true, particles = 1, simulations = 2,
                 searchDepth = 2),
-            "current-information" to GamesPlan(decks = listOf(deck, deck), seed = 811L,
+            "current-information" to ResearchGameConfig(decks = listOf(deck, deck), seed = 811L,
                 startingHandSize = 7, skipMulligans = true, particles = 1, simulations = 2,
-                searchDepth = 2, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)),
-            "quiescence" to GamesPlan(decks = listOf(deck, deck), seed = 811L,
+                searchDepth = 2, leaf = LeafEvaluationConfig(LeafEvaluationMethod.CURRENT_INFORMATION_STATE)),
+            "quiescence" to ResearchGameConfig(decks = listOf(deck, deck), seed = 811L,
                 startingHandSize = 7, skipMulligans = true, particles = 1, simulations = 2,
-                searchDepth = 2, leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+                searchDepth = 2, leaf = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT,
                     RolloutCutoff.QUIESCENCE)),
-            "turn-horizon" to GamesPlan(decks = listOf(deck, deck), seed = 811L,
+            "turn-horizon" to ResearchGameConfig(decks = listOf(deck, deck), seed = 811L,
                 startingHandSize = 7, skipMulligans = true, particles = 1, simulations = 2,
                 searchDepth = 2, rolloutTurnHorizon = RolloutTurnHorizon(1, 32)),
         )
@@ -50,12 +50,12 @@ class SearchCharacterizationTest {
         compareOrCaptureGolden(actual)
     }
 
-    private fun characterize(name: String, plan: GamesPlan): JsonObject {
+    private fun characterize(name: String, plan: ResearchGameConfig): JsonObject {
         val game = PythonGame.create(plan, buildRegistry(), "characterization-$name")
         var foundChoice = false
         var steps = 0
         while (steps < 64) {
-            val menu = game.world.decisionContext().expansion.candidates
+            val menu = game.world.decisionContext().menu.candidates
             if (menu.size > 1) {
                 foundChoice = true
                 break

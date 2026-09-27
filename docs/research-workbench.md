@@ -2,7 +2,7 @@
 
 Build the research tools, run the public examples, and play live games from
 Python or Kotlin. The [games and CLI reference](research-cli.md) covers
-`GamesPlan` settings, native policies, output files and the numerical commands.
+`ResearchGameConfig` settings, native policies, output files and the numerical commands.
 [Batch research runs](research-runs.md) covers ladder evaluation, cost
 measurement, resumable game corpora and remote execution.
 
@@ -73,7 +73,7 @@ PY
 explicit `Session` for several games. Closing a game releases its world without
 closing sibling games; closing the session ends its JVM. A standalone game's
 branches share its session and must finish before the owning game closes.
-`research.game` accepts the [`GamesPlan`](research-cli.md#games-plan) settings as
+`research.game` accepts the [`ResearchGameConfig`](research-cli.md#games-plan) settings as
 snake_case keyword arguments.
 
 ### Decisions and actions
@@ -120,7 +120,7 @@ the byte tensors used by [neural policies](neural-policy.md): the current view
 and actions, the acting player's encoded event history so far, its
 `eventPosition`, and the encoding schema. Pass `from_event` to receive only later
 events; keep the earlier ones yourself. The optional `schema` takes
-`FactualTensorSchema` fields. `play(..., kernel=True, factual=True,
+`ByteTokenSchema` fields. `play(..., kernel=True, factual=True,
 record=callback)` collects the same encodings before each accepted action.
 `research.fit(roots, ridge=...)` and `research.predict(model, menus)` run the
 [kernel routines](research-cli.md#fit-score-encode-and-read) in the same JVM on
@@ -176,8 +176,8 @@ Add a `main` there and run its fully qualified class:
 python3 tools/mtgallium-research jvm org.mtgallium.research.workbench.MyExperimentKt input.json
 ```
 
-Call `createWorld`, `playGame`, `Player`, `selectorPlayer`, `searchPlayer`,
-`rootActionKernelFeatures`, or `fitRootActionKernel` directly. `playGame` accepts
+Call `createWorld`, `playGame`, `GameAgent`, `selectorPlayer`, `searchPlayer`,
+`kernelActionFeatures`, or `fitKernelRidge` directly. `playGame` accepts
 caller-owned policy callbacks, decision recording, and a privileged research hook
 that runs before selection. A `world.fork()` of the actual game is independent
 of its parent and keeps the world's accepted-decision numbering. A native search

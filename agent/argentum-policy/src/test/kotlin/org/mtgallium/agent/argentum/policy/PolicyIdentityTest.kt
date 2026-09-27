@@ -1,8 +1,8 @@
 package org.mtgallium.agent.argentum.policy
 
-import org.mtgallium.agent.monored.ConfiguredMonoRedInformationEvaluator
-import org.mtgallium.agent.monored.MonoRedVisibleEvaluatorConfig
-import org.mtgallium.agent.infoset.core.SingletonSelectionConfig
+import org.mtgallium.agent.value.MaterialEvaluator
+import org.mtgallium.agent.value.MaterialWeights
+import org.mtgallium.agent.infoset.planning.SingletonMenuShortcutConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -10,18 +10,19 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
+import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
+import org.mtgallium.agent.infoset.argentum.ActionGenerationSpecification
+import org.mtgallium.agent.infoset.core.BeliefApproximation
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.LeafValueSource
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.LeafValueSource
 import org.mtgallium.agent.infoset.core.MixtureOpponentPolicy
 import org.mtgallium.agent.infoset.core.ActionSelector
-import org.mtgallium.agent.infoset.core.DecisionSiteRequest
+import org.mtgallium.agent.infoset.core.DecisionContext
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecision
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionDiagnostic
 import org.mtgallium.agent.infoset.core.OpponentPolicy
@@ -29,18 +30,42 @@ import org.mtgallium.agent.infoset.core.OpponentPolicyBehaviorSpecification
 import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementEvidenceDisposition
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.core.ProbabilityDistribution
-import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
-import org.mtgallium.agent.infoset.core.RolloutCutoff
-import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
+import org.mtgallium.agent.infoset.planning.RolloutTurnHorizon
+import org.mtgallium.agent.infoset.planning.RolloutCutoff
+import org.mtgallium.agent.infoset.core.ActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 
 class PolicyIdentityTest {
+    @Test
+    fun `renamed admission capability preserves false wire key and default omission in policy identity`() {
+        val policy = SemanticHeuristicOpponentPolicy(requiresArgentumAiChoiceOnMenu = false)
+        val plain = policy.behaviorSpecification
+        val admitted = plain.copy(requiresArgentumAiChoiceOnMenu = true)
+        val admittedWire = CanonicalJson.format.encodeToJsonElement(admitted) as JsonObject
+        assertFalse("requiresProductionAdmission" in admittedWire)
+        assertFalse("requiresArgentumAiChoiceOnMenu" in admittedWire)
+        val historicalFalseWire = JsonObject(admittedWire +
+            ("requiresProductionAdmission" to JsonPrimitive(false)))
+        assertEquals(historicalFalseWire, CanonicalJson.format.encodeToJsonElement(plain))
+        assertEquals(plain, CanonicalJson.format.decodeFromJsonElement<OpponentPolicyBehaviorSpecification>(historicalFalseWire))
+
+        val specification = PolicyIdentity.specification(parameters(), decks(), policy)
+        val encoded = CanonicalJson.format.encodeToJsonElement(specification) as JsonObject
+        assertEquals(historicalFalseWire, encoded.getValue("opponentPolicy"))
+        val historicalIdentityInput = JsonObject(encoded + ("opponentPolicy" to historicalFalseWire))
+        val decoded = CanonicalJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(historicalIdentityInput)
+        assertEquals(specification, decoded)
+        assertEquals(PolicyIdentity.identity(specification), PolicyIdentity.identity(decoded))
+        assertNotEquals(PolicyIdentity.identity(specification),
+            PolicyIdentity.identity(specification.copy(opponentPolicy = admitted)))
+    }
+
     @Test fun `current behavior describes no retired feature and does not impersonate the old schema`() {
         val specification = PolicyIdentity.specification(parameters(), decks(), mixture())
-        val encoded = PolicyJson.format.encodeToJsonElement(specification) as JsonObject
+        val encoded = CanonicalJson.format.encodeToJsonElement(specification) as JsonObject
         assertEquals(2, specification.schemaVersion)
         assertTrue(PolicyIdentity.identity(specification).startsWith("search-teacher-behavior-v2-sha256:"))
         assertFailsWith<IllegalArgumentException> { specification.copy(schemaVersion = 1) }
@@ -57,7 +82,7 @@ class PolicyIdentityTest {
         assertFalse("searchReuse" in encoded)
         assertFalse("compressPolicySingletonPasses" in (encoded.getValue("search") as JsonObject))
         assertFalse("supportsTraceReuse" in (encoded.getValue("evaluator") as JsonObject))
-        val decoded = PolicyJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(encoded)
+        val decoded = CanonicalJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(encoded)
         assertEquals(specification, decoded)
         assertEquals(PolicyIdentity.identity(specification), PolicyIdentity.identity(decoded))
         val identities = listOf(identity(),
@@ -65,7 +90,7 @@ class PolicyIdentityTest {
         assertEquals(identities.size, identities.distinct().size)
         // Removed fields intentionally change identities; historical evidence keeps the old source.
         assertNotEquals("6fa2130c39432f110f641f004a511973d7b23ec8627b0ffbdc5512fe78321789",
-            PolicyJson.sha256(identities.joinToString("\n")))
+            CanonicalJson.sha256(identities.joinToString("\n")))
     }
 
     @Test
@@ -76,8 +101,8 @@ class PolicyIdentityTest {
             opponentRolloutPolicy = opponentContinuation)
         val root = object : ActionSelector {
             override val id = "selector-only-root"
-            override fun select(context: DecisionSiteRequest,
-                policySeed: Long, sampleSeed: Long) = OpponentPolicyDecision(context.expansion.candidates.first(),
+            override fun select(context: DecisionContext,
+                policySeed: Long, sampleSeed: Long) = OpponentPolicyDecision(context.menu.candidates.first(),
                 OpponentPolicyDecisionDiagnostic(id, id))
         }
         val treatment = PolicyIdentity.specification(parameters(), decks(), beliefModel,
@@ -108,24 +133,24 @@ class PolicyIdentityTest {
             "rollout turn horizon" to base.copy(
                 rolloutTurnHorizon = RolloutTurnHorizon(2, 96),
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.BOUNDED_ROLLOUT,
+                    LeafEvaluationMethod.BOUNDED_ROLLOUT,
                     RolloutCutoff.EVALUATE,
                 ),
             ),
             "base seed" to base.copy(baseSeed = base.baseSeed + 1),
             "belief mode" to base.copy(beliefMode = BeliefMode.POLICY_CONDITIONED_V1),
-            "belief architecture" to base.copy(beliefArchitecture = BeliefArchitecture.SNAPSHOT_A_V1),
+            "belief architecture" to base.copy(beliefArchitecture = BeliefApproximation.SNAPSHOT_A_V1),
             "leaf state source" to base.copy(
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_INFORMATION_STATE,
+                    LeafEvaluationMethod.CURRENT_INFORMATION_STATE,
                     RolloutCutoff.EVALUATE,
                 )
             ),
             "action-space semantics" to base.copy(
-                actionSpaceProfile = SearchActionSpaceProfile.RULES_EXACT_V1
+                actionSpaceProfile = ActionSpaceProfile.RULES_EXACT_V1
             ),
             "singleton selection" to base.copy(
-                singletonSelection = SingletonSelectionConfig(enabled = true)
+                singletonSelection = SingletonMenuShortcutConfig(enabled = true)
             ),
         )
 
@@ -141,7 +166,7 @@ class PolicyIdentityTest {
             knownDecks = decks(),
             opponentPolicy = UniformOpponentPolicy,
         )
-        val encoded = PolicyJson.format.encodeToJsonElement(specification) as JsonObject
+        val encoded = CanonicalJson.format.encodeToJsonElement(specification) as JsonObject
         assertFalse("singletonSelection" in encoded)
         assertFalse("rootSelectionGuidanceId" in encoded)
         assertFalse("searchPriorId" in encoded)
@@ -149,25 +174,25 @@ class PolicyIdentityTest {
             PolicyIdentity.identity(specification.copy(searchPriorId = "puct:model")))
         assertFalse("rolloutTurnHorizon" in (encoded.getValue("search") as JsonObject))
         assertFalse("searchHeuristicProfile" in encoded)
-        val decoded = PolicyJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(encoded)
+        val decoded = CanonicalJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(encoded)
         assertFalse(decoded.singletonSelection.enabled)
-        assertEquals(encoded, PolicyJson.format.encodeToJsonElement(decoded))
+        assertEquals(encoded, CanonicalJson.format.encodeToJsonElement(decoded))
         assertEquals(
-            "$SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX:${PolicyJson.digest(encoded)}",
+            "$SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX:${CanonicalJson.digest(encoded)}",
             PolicyIdentity.identity(decoded),
         )
-        val enabled = specification.copy(singletonSelection = SingletonSelectionConfig(enabled = true))
-        val enabledJson = PolicyJson.format.encodeToJsonElement(enabled) as JsonObject
+        val enabled = specification.copy(singletonSelection = SingletonMenuShortcutConfig(enabled = true))
+        val enabledJson = CanonicalJson.format.encodeToJsonElement(enabled) as JsonObject
         assertTrue("singletonSelection" in enabledJson)
         assertNotEquals(PolicyIdentity.identity(specification), PolicyIdentity.identity(enabled))
-        assertEquals(enabled, PolicyJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(enabledJson))
+        assertEquals(enabled, CanonicalJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(enabledJson))
 
     }
 
     @Test
     fun `evaluator selection and configured weights change the identity`() {
         val base = parameters()
-        val evaluator = ConfiguredMonoRedInformationEvaluator(MonoRedVisibleEvaluatorConfig())
+        val evaluator = MaterialEvaluator(MaterialWeights())
         val expected = identity(parameters = base, valueSource = LeafValueSource.Information(evaluator))
 
         assertNotEquals(
@@ -175,19 +200,19 @@ class PolicyIdentityTest {
             identity(
                 parameters = base.copy(
                     leaf = LeafEvaluationConfig(
-                        LeafStateSource.BOUNDED_ROLLOUT,
+                        LeafEvaluationMethod.BOUNDED_ROLLOUT,
                         RolloutCutoff.EVALUATE,
                     )
                 ),
-                valueSource = LeafValueSource.Information(ConfiguredMonoRedInformationEvaluator(MonoRedVisibleEvaluatorConfig())),
+                valueSource = LeafValueSource.Information(MaterialEvaluator(MaterialWeights())),
             ),
         )
         assertNotEquals(
             expected,
             identity(
                 parameters = base,
-                valueSource = LeafValueSource.Information(ConfiguredMonoRedInformationEvaluator(
-                    MonoRedVisibleEvaluatorConfig(life = 1.3)
+                valueSource = LeafValueSource.Information(MaterialEvaluator(
+                    MaterialWeights(life = 1.3)
                 )),
             ),
         )
@@ -230,7 +255,7 @@ class PolicyIdentityTest {
     @Test
     fun `candidate generator limits and algorithm version change the identity`() {
         val parameters = parameters()
-        val expansion = UnifiedSemanticExpander.defaultBehaviorSpecification(
+        val expansion = ArgentumActionGenerator.defaultBehaviorSpecification(
             parameters.actionSpaceProfile
         )
         val expected = identity(parameters = parameters, actionExpansion = expansion)
@@ -277,14 +302,14 @@ class PolicyIdentityTest {
             opponentPolicy = mixture(),
             rootRolloutPolicy = fixedPolicy("root-rollout-a"),
             opponentRolloutPolicy = fixedPolicy("opponent-rollout-a"),
-            valueSource = LeafValueSource.Information(ConfiguredMonoRedInformationEvaluator(MonoRedVisibleEvaluatorConfig())),
+            valueSource = LeafValueSource.Information(MaterialEvaluator(MaterialWeights())),
         )
-        val encoded = PolicyJson.format.encodeToJsonElement(
+        val encoded = CanonicalJson.format.encodeToJsonElement(
             PolicyBehaviorSpecification.serializer(),
             specification,
         ) as JsonObject
         val reversedFields = JsonObject(encoded.entries.reversed().associate { it.toPair() })
-        assertEquals(PolicyJson.digest(encoded), PolicyJson.digest(reversedFields))
+        assertEquals(CanonicalJson.digest(encoded), CanonicalJson.digest(reversedFields))
     }
 
     @Test
@@ -301,7 +326,7 @@ class PolicyIdentityTest {
 
     private fun parameters(): SearchPolicyConfig = LivePolicyConfig(
         leaf = LeafEvaluationConfig(
-            LeafStateSource.BOUNDED_ROLLOUT,
+            LeafEvaluationMethod.BOUNDED_ROLLOUT,
             RolloutCutoff.QUIESCENCE,
         ),
     ).policyParameters()
@@ -332,8 +357,8 @@ class PolicyIdentityTest {
                 distributionIsSeedInvariant = true,
             )
 
-        override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
-            return ProbabilityDistribution.uniform(context.expansion.candidates)
+        override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
+            return ProbabilityDistribution.uniform(context.menu.candidates)
         }
     }
 
@@ -343,9 +368,9 @@ class PolicyIdentityTest {
         opponentPolicy: OpponentPolicy = mixture(),
         rootRolloutPolicy: OpponentPolicy = fixedPolicy("root-rollout-a"),
         opponentRolloutPolicy: OpponentPolicy = fixedPolicy("opponent-rollout-a"),
-        valueSource: LeafValueSource = LeafValueSource.Information(ConfiguredMonoRedInformationEvaluator(MonoRedVisibleEvaluatorConfig())),
-        actionExpansion: UnifiedSemanticExpansionSpecification =
-            UnifiedSemanticExpander.defaultBehaviorSpecification(parameters.actionSpaceProfile),
+        valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator(MaterialWeights())),
+        actionExpansion: ActionGenerationSpecification =
+            ArgentumActionGenerator.defaultBehaviorSpecification(parameters.actionSpaceProfile),
     ): String = PolicyIdentity.identity(
         parameters = parameters,
         knownDecks = knownDecks,

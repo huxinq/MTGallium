@@ -10,33 +10,35 @@ import com.wingedsheep.mtg.sets.definitions.sth.StrongholdSet
 import com.wingedsheep.sdk.model.Deck
 import kotlin.test.*
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 
 class OpponentHandBeliefQueriesTest {
+
     @Test fun `particle backend queries and generated hypotheses retain exactly the same frozen population`() {
         val (root, batch) = nativeFixture()
         val belief = ParticleBelief.from(batch, BeliefMode.POLICY_CONDITIONED_V1)
         val information = root.informationState("p1")
-        val before = belief.weightedWorlds().map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprintForHost() }
+        val before = belief.weightedWorlds().map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprint() }
         val weights = belief.weightedWorlds().map { it.weight }
         val snapshot = ArgentumParticleBeliefSnapshot.capture(belief, information, batch.diagnostics, "test-inference")
         val generated = snapshot.hypotheses.materialize()
         snapshot.queries.requireSameSnapshot(generated)
         assertEquals(weights, generated.batch.particles.map { it.weight })
-        assertEquals(before, generated.batch.particles.map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprintForHost() })
+        assertEquals(before, generated.batch.particles.map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprint() })
         assertEquals(legacyMarginals(belief, "p1"), snapshot.queries.opponentHand.presenceMarginals())
-        assertEquals(EpistemicState.capture(information).epistemicDigest, snapshot.queries.binding.epistemicDigest)
+        assertEquals(InformationState.capture(information).epistemicDigest, snapshot.queries.binding.epistemicDigest)
         var shockMass = 0.0
         generated.batch.particles.forEach { weighted ->
             val world = weighted.value as ArgentumSearchWorld
             val opponent = world.rawPlayerIds().getValue("p0")
-            if (world.authoritativeState().getHand(opponent).any { world.authoritativeState().getEntity(it)?.get<CardComponent>()?.name == "Shock" }) shockMass += weighted.weight
+            if (world.trueState().getHand(opponent).any { world.trueState().getEntity(it)?.get<CardComponent>()?.name == "Shock" }) shockMass += weighted.weight
         }
         assertEquals(shockMass, snapshot.queries.opponentHand.probabilityAtLeast("Shock"))
         val mutated = generated.batch.particles.first().value
         val pass = mutated.expandChoices().candidates.single { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
         assertTrue(mutated.step(pass).accepted)
-        assertEquals(before, snapshot.hypotheses.materialize().batch.particles.map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprintForHost() })
-        assertEquals(before, belief.weightedWorlds().map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprintForHost() })
+        assertEquals(before, snapshot.hypotheses.materialize().batch.particles.map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprint() })
+        assertEquals(before, belief.weightedWorlds().map { (it.value as ArgentumSearchWorld).freshAuthoritativeFingerprint() })
         val another = ArgentumParticleBeliefSnapshot.capture(belief, information, batch.diagnostics, "test-inference")
         assertFailsWith<IllegalArgumentException> { snapshot.queries.requireSameSnapshot(another.hypotheses.materialize()) }
         assertEquals(shockMass, snapshot.queries.opponentHand.probabilityAtLeast("Shock"))
@@ -135,11 +137,12 @@ class OpponentHandBeliefQueriesTest {
     }
 
     @Test
+
     fun `native snapshot preserves legacy marginals hidden state RNG and represented information`() {
         val (root, batch) = nativeFixture()
         val belief = ParticleBelief.from(batch, BeliefMode.POLICY_CONDITIONED_V1)
         val worlds = belief.weightedWorlds().map { it.value as ArgentumSearchWorld }
-        val fingerprints = (listOf(root) + worlds).map { it.freshAuthoritativeFingerprintForHost() }
+        val fingerprints = (listOf(root) + worlds).map { it.freshAuthoritativeFingerprint() }
         val information = (listOf(root) + worlds).map { world -> listOf("p0", "p1").map(world::informationState) }
         val expected = legacyMarginals(belief, "p1")
         val query = ArgentumHandBeliefQueries.snapshot(belief, "p1")
@@ -150,7 +153,7 @@ class OpponentHandBeliefQueriesTest {
         query.probabilityAllOf(mapOf("Shock" to 1, "Mountain" to 2))
         query.probabilityAnyOf(setOf("Shock", "Mountain"))
         assertEquals(7.0, query.expectedCopies("Shock") + query.expectedCopies("Mountain"), 1e-12)
-        assertEquals(fingerprints, (listOf(root) + worlds).map { it.freshAuthoritativeFingerprintForHost() })
+        assertEquals(fingerprints, (listOf(root) + worlds).map { it.freshAuthoritativeFingerprint() })
         assertEquals(information, (listOf(root) + worlds).map { world -> listOf("p0", "p1").map(world::informationState) })
         assertTrue(belief.weightedWorlds().map { it.weight }.distinct().size > 1, "Use genuinely nonuniform synthetic weights")
 
@@ -171,12 +174,12 @@ class OpponentHandBeliefQueriesTest {
         assertTrue(prior > 0.0 && prior < 1.0)
         val model = object : ActionDistributionModel {
             override val id = "synthetic-query-likelihood"
-            override val requiresProductionAdmission = false
-            override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
+            override val requiresArgentumAiChoiceOnMenu = false
+            override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
         val opponentInformation = context.information()
-        val candidates = context.expansion.candidates
+        val candidates = context.menu.candidates
                 assertEquals("p0", opponentInformation.actingPlayerId)
-                assertEquals("p0", opponentInformation.observation.perspectivePlayerId)
+                assertEquals("p0", opponentInformation.observation.viewerId)
                 val hasShock = opponentInformation.observation.zones
                     .filter { it.zone == "HAND" && it.ownerId == "p0" }.flatMap { it.cards }.any { it.name == "Shock" }
                 val p = if (hasShock) .6 else .4
@@ -188,7 +191,7 @@ class OpponentHandBeliefQueriesTest {
             }
         }
         val pass = root.expandChoices().candidates.single { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
-        val updated = belief.advance("p0", pass.signature, model, 991L)
+        val updated = belief.propagateAndReweight("p0", pass.signature, model, 991L)
         val current = ArgentumHandBeliefQueries.snapshot(updated.belief, "p1")
         assertEquals(belief.resamplingCount, updated.belief.resamplingCount)
         assertEquals(prior * .6 / (prior * .6 + (1 - prior) * .4), current.probabilityAtLeast("Shock"), 1e-12)
@@ -207,16 +210,16 @@ class OpponentHandBeliefQueriesTest {
         belief.weightedWorlds().forEach { weighted ->
             val world = weighted.value as ArgentumSearchWorld
             val viewer = world.rawPlayerIds().getValue(viewerAlias)
-            world.authoritativeState().turnOrder.filter { it != viewer }
-                .flatMap { world.authoritativeState().getHand(it) }
-                .mapNotNull { world.authoritativeState().getEntity(it)?.get<CardComponent>()?.name }
+            world.trueState().turnOrder.filter { it != viewer }
+                .flatMap { world.trueState().getHand(it) }
+                .mapNotNull { world.trueState().getEntity(it)?.get<CardComponent>()?.name }
                 .toSet().forEach { name -> probabilities[name] = probabilities.getOrDefault(name, 0.0) + weighted.weight }
         }
         return probabilities.toSortedMap()
     }
 
     /** Authored small engine fixture, with no historical games or claimed research population. */
-    private fun nativeFixture(): Pair<ArgentumSearchWorld, BeliefBatch<Weighted<SearchWorld>>> {
+    private fun nativeFixture(): Pair<ArgentumSearchWorld, ParticleSet<Weighted<SearchWorld>>> {
         val registry = CardRegistry().apply { register(PortalSet.basicLands); register(StrongholdSet.cards) }
         val deck = mapOf("Mountain" to 18, "Shock" to 2)
         val decks = mapOf("p0" to deck, "p1" to deck)

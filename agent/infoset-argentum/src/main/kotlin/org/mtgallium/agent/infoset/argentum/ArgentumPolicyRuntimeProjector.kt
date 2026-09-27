@@ -19,7 +19,7 @@ import com.wingedsheep.engine.state.permissions.hasMayPlayFor
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.sdk.model.EntityId
-import org.mtgallium.agent.infoset.core.PolicyRestrictedMana
+import org.mtgallium.agent.infoset.core.RestrictedManaView
 
 /** Public runtime facts omitted by Argentum's training observation but present in its client view. */
 internal data class ArgentumPolicyRuntimeProjection(
@@ -41,7 +41,7 @@ internal data class ArgentumPolicyCardRuntime(
 )
 
 internal data class ArgentumPolicyPlayerRuntime(
-    val restrictedMana: List<PolicyRestrictedMana> = emptyList(),
+    val restrictedMana: List<RestrictedManaView> = emptyList(),
     val noncreatureSpellsCast: Int = 0,
     val lostLife: Boolean = false,
     val speedIncreaseFired: Boolean = false,
@@ -116,7 +116,7 @@ internal object ArgentumPolicyRuntimeProjector {
             }.eachCount().entries
                 .sortedWith(compareBy({ it.key.color.orEmpty() }, { it.key.spendRestriction }, { it.key.expiresAt }))
                 .map { (key, count) ->
-                    PolicyRestrictedMana(
+                    RestrictedManaView(
                         color = key.color,
                         spendRestriction = key.spendRestriction,
                         spellRiders = key.spellRiders,

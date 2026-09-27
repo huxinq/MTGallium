@@ -50,7 +50,7 @@ class FrozenSourceContractsTest(unittest.TestCase):
                 r'FUTURE_CHANCE_SEED_DOMAIN = "argentum-hypothetical-future-chance-v1"',
                 r'ComponentSeeds\.derive\(seed, aliases\.getValue\(actor\), "argentum-heuristic"\)',
             ],
-            "agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearch.kt": [
+            "agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/planning/InformationSetSearch.kt": [
                 r'ComponentSeeds\.derive\(searchSeed, simulationIndex, "root-particle"\)',
             ],
         }
@@ -64,21 +64,23 @@ class FrozenSourceContractsTest(unittest.TestCase):
         tensor = (ROOT / "agent/neural-policy/src/main/kotlin/org/mtgallium/agent/neural/FactualPolicyTensors.kt").read_text(encoding="utf-8")
         self.assertIn('val version: String = "factual-policy-json-bytes-v1"', tensor)
         self.assertIn("bytes.map { (it.toInt() and 255) + 1 }", tensor)
-        kernel = (ROOT / "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/SemanticFeatures.kt").read_text(encoding="utf-8")
+        kernel = (ROOT / "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/HashedKernelFeatures.kt").read_text(encoding="utf-8")
         self.assertIn("var hash = -3750763034362895579L", kernel)
         self.assertIn("hash *= 1099511628211L", kernel)
         self.assertIn('"candidate.payload"', kernel)
 
     def test_public_jvm_names_and_service_resource(self):
         names = {
-            "org.mtgallium.agent.infoset.core.InformationSetSearch":
-                "agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearch.kt",
+            "org.mtgallium.agent.infoset.planning.InformationSetSearch":
+                "agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/planning/InformationSetSearch.kt",
             "org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld":
                 "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt",
             "org.mtgallium.agent.infoset.core.ComponentSeeds":
                 "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyCapabilities.kt",
-            "org.mtgallium.research.workbench.NativePolicyProvider":
+            "org.mtgallium.research.workbench.JvmPolicyProvider":
                 "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/NativePolicies.kt",
+            "org.mtgallium.research.workbench.JvmValueModelProvider":
+                "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/NativeValueProvider.kt",
         }
         for qualified, relative in names.items():
             source = (ROOT / relative).read_text(encoding="utf-8")
@@ -86,8 +88,9 @@ class FrozenSourceContractsTest(unittest.TestCase):
             with self.subTest(name=qualified):
                 self.assertRegex(source, rf"(?m)^package {re.escape(package)}$")
                 self.assertRegex(source, rf"(?m)^(?:class|interface|object) {re.escape(symbol)}\b")
-        service = ROOT / "research/workbench/src/test/resources/META-INF/services/org.mtgallium.research.workbench.NativePolicyProvider"
-        self.assertEqual(b"org.mtgallium.research.workbench.TestNativePolicies\n", service.read_bytes())
+        for contract, provider in (("JvmPolicyProvider", "TestNativePolicies"),):
+            service = ROOT / f"research/workbench/src/test/resources/META-INF/services/org.mtgallium.research.workbench.{contract}"
+            self.assertEqual(f"org.mtgallium.research.workbench.{provider}\n".encode("utf-8"), service.read_bytes())
 
 
 if __name__ == "__main__":

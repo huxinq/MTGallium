@@ -4,7 +4,6 @@ import java.security.MessageDigest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -29,10 +28,10 @@ data class InformationStateRepresentation(
     val actingPlayerId: String?,
     val observation: PlayerObservationSnapshot,
     val informationStateDigest: String,
-    val historyCommitment: PolicyHistoryCommitment,
-    val history: List<PolicyHistoryEvent>,
+    val historyCommitment: HistoryHashChain,
+    val history: List<ObservedEvent>,
     /** Exact facts reconstructed from known decks and this viewer's safe event ledger. */
-    val knowledge: PolicyKnowledgeState = PolicyKnowledgeState.empty(observation.perspectivePlayerId),
+    val knowledge: PlayerKnowledge = PlayerKnowledge.empty(observation.viewerId),
     val candidates: List<SemanticChoice>,
     val candidateSchemaVersion: Int = CANDIDATE_SCHEMA_CURRENT,
     val terminated: Boolean,
@@ -57,12 +56,12 @@ data class InformationStateRepresentation(
 object InformationStateRepresentationDigest {
     fun compute(
         observationDigest: String,
-        historyCommitment: PolicyHistoryCommitment,
+        historyCommitment: HistoryHashChain,
         knowledgeDigest: String,
         actingPlayerId: String?,
         candidateSignatures: List<String>,
         proposalVersion: String,
-    ): String = PolicyJson.digest(kotlinx.serialization.json.buildJsonObject {
+    ): String = CanonicalJson.digest(kotlinx.serialization.json.buildJsonObject {
         put("observation", JsonPrimitive(observationDigest))
         put("history", JsonPrimitive(historyCommitment.digest))
         put("knowledge", JsonPrimitive(knowledgeDigest))
@@ -79,26 +78,26 @@ object InformationStateRepresentationDigest {
  */
 @Serializable
 data class PlayerObservationSnapshot(
-    val perspectivePlayerId: String,
+    @kotlinx.serialization.SerialName("perspectivePlayerId") val viewerId: String,
     val turnNumber: Int,
     val phase: String,
     val step: String,
     val activePlayerId: String?,
     val priorityPlayerId: String?,
-    val players: List<PolicyPlayerView>,
-    val zones: List<PolicyZoneView>,
-    val stack: List<PolicyStackItemView>,
+    val players: List<PlayerView>,
+    val zones: List<ZoneView>,
+    val stack: List<StackObjectView>,
     /** Public combat relationships. Null outside combat or in legacy schema-v1 data. */
-    val combat: PolicyCombatView? = null,
+    val combat: CombatView? = null,
     /** False only for snapshot-only/legacy projection helpers that lack authoritative turn state. */
     val currentTurnStateComplete: Boolean = false,
-    val pendingDecision: PolicyPendingDecisionView?,
+    val pendingDecision: PendingDecisionView?,
     /** Digest of the safe snapshot. It is not a complete information-history key. */
     val observationDigest: String,
 )
 
-@Serializable
-data class PolicyPlayerView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyPlayerView")
+data class PlayerView(
     val playerId: String,
     val name: String,
     val life: Int,
@@ -106,7 +105,7 @@ data class PolicyPlayerView(
     val librarySize: Int,
     val graveyardSize: Int,
     val exileSize: Int,
-    val mana: PolicyManaPool,
+    val mana: ManaPoolView,
     val active: Boolean,
     val priority: Boolean,
     val lost: Boolean,
@@ -126,28 +125,28 @@ data class PolicyPlayerView(
     }
 }
 
-@Serializable
-data class PolicyCombatView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyCombatView")
+data class CombatView(
     val attackingPlayerId: String?,
-    val attackers: List<PolicyAttackerView>,
-    val blockers: List<PolicyBlockerView>,
+    val attackers: List<AttackerView>,
+    val blockers: List<BlockerView>,
 )
 
-@Serializable
-data class PolicyAttackerView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyAttackerView")
+data class AttackerView(
     val attackerObjectRef: String,
     val defenderObjectRef: String,
     val blockerObjectRefs: List<String> = emptyList(),
 )
 
-@Serializable
-data class PolicyBlockerView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyBlockerView")
+data class BlockerView(
     val blockerObjectRef: String,
     val blockedAttackerObjectRefs: List<String>,
 )
 
-@Serializable
-data class PolicyManaPool(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyManaPool")
+data class ManaPoolView(
     val white: Int = 0,
     val blue: Int = 0,
     val black: Int = 0,
@@ -155,12 +154,12 @@ data class PolicyManaPool(
     val green: Int = 0,
     val colorless: Int = 0,
     /** Public floating mana whose legal spend differs from an ordinary colored mana unit. */
-    val restricted: List<PolicyRestrictedMana> = emptyList(),
+    val restricted: List<RestrictedManaView> = emptyList(),
 )
 
 /** Grouped, player-visible spend semantics for floating restricted mana. */
-@Serializable
-data class PolicyRestrictedMana(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyRestrictedMana")
+data class RestrictedManaView(
     /** `null` denotes colorless mana. */
     val color: String?,
     /** Stable rules-facing description supplied by the authoritative mana restriction. */
@@ -177,18 +176,18 @@ data class PolicyRestrictedMana(
     }
 }
 
-@Serializable
-data class PolicyZoneView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyZoneView")
+data class ZoneView(
     val ownerId: String,
     val zone: String,
     val hidden: Boolean,
     val size: Int,
-    val cards: List<PolicyCardView>,
+    val cards: List<ObjectView>,
 )
 
 /** `objectRef` is an opaque, observation-scoped routing reference, not an engine entity id. */
-@Serializable
-data class PolicyCardView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyCardView")
+data class ObjectView(
     val objectRef: String,
     val definitionId: String?,
     val name: String,
@@ -221,8 +220,8 @@ data class PolicyCardView(
     val hasActivatedAbilityThisTurn: Boolean = false,
 )
 
-@Serializable
-data class PolicyStackItemView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyStackItemView")
+data class StackObjectView(
     val objectRef: String,
     val controllerId: String?,
     val name: String,
@@ -231,8 +230,8 @@ data class PolicyStackItemView(
     val targets: List<String>,
 )
 
-@Serializable
-data class PolicyPendingDecisionView(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyPendingDecisionView")
+data class PendingDecisionView(
     val decisionKind: String,
     val playerId: String,
     val prompt: String,
@@ -243,18 +242,18 @@ data class PolicyPendingDecisionView(
     val phase: String,
     val subjectObjectRef: String? = null,
     val canRespond: Boolean,
-    val choiceSpec: PolicyDecisionChoiceSpec?,
+    val choiceSpec: PendingDecisionOptions?,
 )
 
 /** Typed union for the complete visible decision contract. */
-@Serializable
-sealed interface PolicyDecisionChoiceSpec {
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyDecisionChoiceSpec")
+sealed interface PendingDecisionOptions {
     @Serializable @SerialName("Targets")
     data class Targets(
         val requirements: JsonArray,
         val legalTargets: Map<Int, List<String>>,
         val canCancel: Boolean,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("Cards")
     data class Cards(
@@ -264,25 +263,25 @@ sealed interface PolicyDecisionChoiceSpec {
         val ordered: Boolean,
         val constraints: JsonObject,
         val cardMetadata: JsonObject? = null,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("YesNo")
     data class YesNo(val yesText: String, val noText: String, val hint: String? = null) :
-        PolicyDecisionChoiceSpec
+        PendingDecisionOptions
 
     @Serializable @SerialName("BatchYesNo")
     data class BatchYesNo(val count: Int, val yesText: String, val noText: String) :
-        PolicyDecisionChoiceSpec
+        PendingDecisionOptions
 
     @Serializable @SerialName("Modes")
     data class Modes(val modes: JsonArray, val minModes: Int, val maxModes: Int) :
-        PolicyDecisionChoiceSpec
+        PendingDecisionOptions
 
     @Serializable @SerialName("Colors")
-    data class Colors(val colors: List<String>) : PolicyDecisionChoiceSpec
+    data class Colors(val colors: List<String>) : PendingDecisionOptions
 
     @Serializable @SerialName("Number")
-    data class Number(val minimum: Int, val maximum: Int) : PolicyDecisionChoiceSpec
+    data class Number(val minimum: Int, val maximum: Int) : PendingDecisionOptions
 
     @Serializable @SerialName("Distribution")
     data class Distribution(
@@ -291,11 +290,11 @@ sealed interface PolicyDecisionChoiceSpec {
         val minimumPerTarget: Int,
         val maximumPerTarget: Map<String, Int>,
         val allowPartial: Boolean,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("Order")
     data class Order(val objects: List<String>, val cardMetadata: JsonObject? = null) :
-        PolicyDecisionChoiceSpec
+        PendingDecisionOptions
 
     @Serializable @SerialName("Piles")
     data class Piles(
@@ -303,7 +302,7 @@ sealed interface PolicyDecisionChoiceSpec {
         val numberOfPiles: Int,
         val labels: List<String>,
         val cardMetadata: JsonObject? = null,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("Options")
     data class Options(
@@ -312,7 +311,7 @@ sealed interface PolicyDecisionChoiceSpec {
         val optionCards: Map<Int, List<String>>? = null,
         val metadata: JsonArray = JsonArray(emptyList()),
         val canCancel: Boolean,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("Replacement")
     data class Replacement(
@@ -322,7 +321,7 @@ sealed interface PolicyDecisionChoiceSpec {
         val toMetadata: JsonArray,
         val allowedToByFrom: List<List<Int>>,
         val defaultFromIndex: Int?,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("LibrarySearch")
     data class LibrarySearch(
@@ -331,11 +330,11 @@ sealed interface PolicyDecisionChoiceSpec {
         val maxSelections: Int,
         val cards: JsonObject,
         val filterDescription: String,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("LibraryReorder")
     data class LibraryReorder(val cards: List<String>, val cardMetadata: JsonObject) :
-        PolicyDecisionChoiceSpec
+        PendingDecisionOptions
 
     @Serializable @SerialName("DamageAssignment")
     data class DamageAssignment(
@@ -347,41 +346,41 @@ sealed interface PolicyDecisionChoiceSpec {
         val defaultAssignments: Map<String, Int>,
         val hasTrample: Boolean,
         val hasDeathtouch: Boolean,
-    ) : PolicyDecisionChoiceSpec
+    ) : PendingDecisionOptions
 
     @Serializable @SerialName("CombatResolution")
-    data class CombatResolution(val contract: JsonObject) : PolicyDecisionChoiceSpec
+    data class CombatResolution(val contract: JsonObject) : PendingDecisionOptions
 
     @Serializable @SerialName("ManaSources")
-    data class ManaSources(val contract: JsonObject) : PolicyDecisionChoiceSpec
+    data class ManaSources(val contract: JsonObject) : PendingDecisionOptions
 
     @Serializable @SerialName("BudgetModal")
-    data class BudgetModal(val contract: JsonObject) : PolicyDecisionChoiceSpec
+    data class BudgetModal(val contract: JsonObject) : PendingDecisionOptions
 }
 
-@Serializable
-data class PolicyHistoryEvent(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyHistoryEvent")
+data class ObservedEvent(
     val eventId: Long,
-    val audience: PolicyAudience,
+    val audience: EventAudience,
     val actor: String?,
-    val kind: PolicyHistoryEventKind,
+    val kind: ObservedEventKind,
     val payload: JsonObject,
     /** Typed safe meaning. Null only for legacy schema-v1 records during migration. */
-    val detail: PerspectiveEventDetail? = null,
+    val detail: ObservedEventDetail? = null,
 )
 
-@Serializable
-data class PolicyAudience(
-    val scope: PolicyAudienceScope,
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyAudience")
+data class EventAudience(
+    val scope: EventAudienceScope,
     /** Empty for public events. Perspective histories never contain an unauthorized id. */
     val entitledPlayerIds: Set<String> = emptySet(),
 )
 
-@Serializable
-enum class PolicyAudienceScope { PUBLIC, ENTITLED_PLAYERS }
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyAudienceScope")
+enum class EventAudienceScope { PUBLIC, ENTITLED_PLAYERS }
 
-@Serializable
-enum class PolicyHistoryEventKind {
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyHistoryEventKind")
+enum class ObservedEventKind {
     ACTION,
     PRIORITY_PASS,
     MULLIGAN,
@@ -448,11 +447,11 @@ data class SemanticChoice(
             operationFamily: SemanticOperationFamily,
             actionIntent: SemanticActionIntent,
             canonicalPayload: JsonObject,
-        ): String = PolicyJson.digest(kotlinx.serialization.json.buildJsonObject {
+        ): String = CanonicalJson.digest(kotlinx.serialization.json.buildJsonObject {
             put("operationFamily", JsonPrimitive(operationFamily.name))
             put(
                 "actionIntent",
-                PolicyJson.format.encodeToJsonElement(SemanticActionIntent.serializer(), actionIntent),
+                CanonicalJson.format.encodeToJsonElement(SemanticActionIntent.serializer(), actionIntent),
             )
             put("canonicalPayload", canonicalPayload)
         })
@@ -575,8 +574,8 @@ data class SemanticChoiceDisplay(
     val policyTags: Set<String> = emptySet(),
 )
 
-@Serializable
-data class PolicyExpansion(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyExpansion")
+data class ActionMenu(
     val candidates: List<SemanticChoice>,
     /** True only when the candidates cover the engine's complete legal action space. */
     val isExhaustive: Boolean,
@@ -587,10 +586,10 @@ data class PolicyExpansion(
     /** True when every action admitted by the declared policy profile was enumerated. */
     val isProfileExhaustive: Boolean = isExhaustive,
     /** Typed provenance for deliberate or bounded omissions from this expansion. */
-    val omissionReasons: Set<PolicyExpansionOmissionReason> = if (isExhaustive) {
+    val omissionReasons: Set<ActionOmissionReason> = if (isExhaustive) {
         emptySet()
     } else {
-        setOf(PolicyExpansionOmissionReason.SOURCE_NON_EXHAUSTIVE)
+        setOf(ActionOmissionReason.SOURCE_NON_EXHAUSTIVE)
     },
 ) {
     init {
@@ -608,8 +607,8 @@ data class PolicyExpansion(
     }
 }
 
-@Serializable
-enum class PolicyExpansionOmissionReason(val intentionalProfileOmission: Boolean) {
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyExpansionOmissionReason")
+enum class ActionOmissionReason(val intentionalProfileOmission: Boolean) {
     PROFILE_SUPPRESSED_STANDALONE_MANA(true),
     SOURCE_NON_EXHAUSTIVE(false),
     RESPONSE_LIMIT(false),
@@ -623,18 +622,18 @@ enum class PolicyExpansionOmissionReason(val intentionalProfileOmission: Boolean
  * A singleton that resulted from a response cap or an action filter is not forced. A singleton
  * non-pass action is a real choice and remains an explicit search/game-tree edge.
  */
-fun PolicyExpansion.exactSingletonPassOrNull(): SemanticChoice? =
+fun ActionMenu.exactSingletonPassOrNull(): SemanticChoice? =
     candidates.singleOrNull()?.takeIf {
         isExhaustive && it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
     }
 
 /** Policy-relative singleton compression; this is an optimization, never rules authority. */
-fun PolicyExpansion.policySingletonPassOrNull(): SemanticChoice? =
+fun ActionMenu.policySingletonPassOrNull(): SemanticChoice? =
     candidates.singleOrNull()?.takeIf {
         isProfileExhaustive && it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
     }
 
-object PolicyJson {
+object CanonicalJson {
     val format = Json {
         encodeDefaults = true
         explicitNulls = true

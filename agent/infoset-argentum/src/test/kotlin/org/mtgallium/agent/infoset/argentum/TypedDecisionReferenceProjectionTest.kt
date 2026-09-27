@@ -38,8 +38,8 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.mtgallium.agent.infoset.core.PolicyDecisionChoiceSpec
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.PendingDecisionOptions
+import org.mtgallium.agent.infoset.core.CanonicalJson
 
 class TypedDecisionReferenceProjectionTest {
     @Test
@@ -147,7 +147,7 @@ class TypedDecisionReferenceProjectionTest {
 
         val projectedTypes = specs.map { spec ->
             val choice = project(base, spec)
-            val encoded = PolicyJson.format.encodeToString(PolicyDecisionChoiceSpec.serializer(), choice)
+            val encoded = CanonicalJson.format.encodeToString(PendingDecisionOptions.serializer(), choice)
             assertFalse("hidden-choice-reference" in encoded, "raw typed reference leaked for ${spec::class.simpleName}")
             choice::class.simpleName
         }
@@ -161,7 +161,7 @@ class TypedDecisionReferenceProjectionTest {
         val (base, actor) = observationWithMaliciousVisibleId()
         val hidden = EntityId("hidden-choice-reference")
 
-        val combat = assertIs<PolicyDecisionChoiceSpec.CombatResolution>(
+        val combat = assertIs<PendingDecisionOptions.CombatResolution>(
             project(base, combatSpec(hidden, actor))
         ).contract
         assertNotNull(combat["edges"])
@@ -170,7 +170,7 @@ class TypedDecisionReferenceProjectionTest {
         assertNotEquals("edges", combatEdge.getValue("id").jsonPrimitive.content)
         assertNotEquals("hidden-choice-reference", combatEdge.getValue("sourceId").jsonPrimitive.content)
 
-        val mana = assertIs<PolicyDecisionChoiceSpec.ManaSources>(
+        val mana = assertIs<PendingDecisionOptions.ManaSources>(
             project(
                 base,
                 ManaSourcesChoiceSpec(
@@ -186,7 +186,7 @@ class TypedDecisionReferenceProjectionTest {
         assertEquals("edges", manaSource.getValue("name").jsonPrimitive.content)
         assertEquals("edges", mana.getValue("requiredCost").jsonPrimitive.content)
 
-        val options = assertIs<PolicyDecisionChoiceSpec.Options>(
+        val options = assertIs<PendingDecisionOptions.Options>(
             project(
                 base,
                 OptionsChoiceSpec(listOf("edges"), "edges", mapOf(0 to listOf(hidden)), emptyList(), false),
@@ -205,7 +205,7 @@ class TypedDecisionReferenceProjectionTest {
             actor,
             combatSpec(hidden, actor),
         )
-        val combatBody = UnifiedSemanticExpander().encodePreparedChoice(
+        val combatBody = ArgentumActionGenerator().encodePreparedChoice(
             ArgentumEngineChoice.Decision(
                 CombatResolutionResponse(
                     decisionId = "routing",
@@ -234,7 +234,7 @@ class TypedDecisionReferenceProjectionTest {
                 listOf(WaterbendPermanentChoice(hidden, "edges", true)),
             ),
         )
-        val manaBody = UnifiedSemanticExpander().encodePreparedChoice(
+        val manaBody = ArgentumActionGenerator().encodePreparedChoice(
             ArgentumEngineChoice.Decision(
                 ManaSourcesSelectedResponse(
                     decisionId = "routing",
@@ -251,13 +251,13 @@ class TypedDecisionReferenceProjectionTest {
     @Test
     fun `action identity rewrites typed source but not an ability id with the same bytes`() {
         val (observation, actor) = observationWithMaliciousVisibleId()
-        val projection = SafeObservationProjector().project(observation)
+        val projection = PlayerObservationProjector().project(observation)
         val action = ActivateAbility(
             playerId = actor,
             sourceId = EntityId("edges"),
             abilityId = AbilityId("edges"),
         )
-        val encoded = UnifiedSemanticExpander().encodePreparedChoice(
+        val encoded = ArgentumActionGenerator().encodePreparedChoice(
             ArgentumEngineChoice.Action(action),
             PreparedSemanticExpansionInput(actor, emptyList(), observation, projection),
         ).canonicalPayload.getValue("body").jsonObject
@@ -269,9 +269,9 @@ class TypedDecisionReferenceProjectionTest {
     private fun project(
         base: TrainingObservation,
         choice: DecisionChoiceSpec,
-    ): PolicyDecisionChoiceSpec {
-        val refs = SafeReferenceMap(base).also { it.admitAuthorizedChoiceReferences(choice) }
-        return SafeObservationProjector().projectChoice(choice, refs)
+    ): PendingDecisionOptions {
+        val refs = ObservationReferenceMap(base).also { it.admitAuthorizedChoiceReferences(choice) }
+        return PlayerObservationProjector().projectChoice(choice, refs)
     }
 
     private fun prepared(
@@ -279,13 +279,13 @@ class TypedDecisionReferenceProjectionTest {
         actor: EntityId,
         choice: DecisionChoiceSpec,
     ): PreparedSemanticExpansionInput {
-        val visible = SafeObservationProjector().project(base)
-        val references = SafeReferenceMap(base).also { it.admitAuthorizedChoiceReferences(choice) }
+        val visible = PlayerObservationProjector().project(base)
+        val references = ObservationReferenceMap(base).also { it.admitAuthorizedChoiceReferences(choice) }
         return PreparedSemanticExpansionInput(
             actor = actor,
             legalActions = emptyList(),
             observation = base,
-            projection = SafeObservationProjection(visible.observation, references),
+            projection = PlayerObservationProjection(visible.observation, references),
         )
     }
 

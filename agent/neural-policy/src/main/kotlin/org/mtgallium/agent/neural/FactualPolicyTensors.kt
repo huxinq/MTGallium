@@ -2,13 +2,12 @@ package org.mtgallium.agent.neural
 
 import java.util.Collections
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.core.*
 
 /** Bytes encode factual structure; learned encoders, not this adapter, choose useful features. */
-@Serializable
-data class FactualTensorSchema(
+@Serializable @kotlinx.serialization.SerialName("org.mtgallium.agent.neural.FactualTensorSchema")
+data class ByteTokenSchema(
     val version: String = "factual-policy-json-bytes-v1",
     val maximumViewBytes: Int = 16384,
     val maximumEventBytes: Int = 4096,
@@ -20,18 +19,18 @@ data class FactualTensorSchema(
         require(maximumViewBytes in 256..65536 && maximumEventBytes in 128..16384)
         require(maximumActionBytes in 128..16384 && maximumCandidates in 1..256)
     }
-    val identity: String get() = PolicyJson.digest(PolicyJson.format.encodeToJsonElement(this))
+    val identity: String get() = CanonicalJson.digest(CanonicalJson.format.encodeToJsonElement(this))
 }
 
 /** Unpadded byte tokens are UTF-8 bytes plus one; zero is reserved for transport padding. */
-@Serializable
-data class FactualDecisionTensors(
+@Serializable @kotlinx.serialization.SerialName("org.mtgallium.agent.neural.FactualDecisionTensors")
+data class DecisionByteTokens(
     val view: List<Int>,
     val actions: List<List<Int>>,
     val rulesExhaustive: Boolean,
     val profileExhaustive: Boolean,
 ) {
-    fun validate(schema: FactualTensorSchema) {
+    fun validate(schema: ByteTokenSchema) {
         require(view.size in 1..schema.maximumViewBytes && view.all { it in 1..256 })
         require(actions.size in 1..schema.maximumCandidates)
         require(actions.all { row -> row.size in 1..schema.maximumActionBytes && row.all { it in 1..256 } })
@@ -46,76 +45,76 @@ class FactualEncodingException(message: String) : IllegalArgumentException(messa
  * [referenceGroups] comes from the trusted adapter: semantic action references may name a GROUP of
  * visible objects, not an exact occurrence. Its members must already occur in the current safe view.
  */
-class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema()) {
-    fun decision(site: DecisionSite, referenceGroups: Map<String, List<String>> = emptyMap()): FactualDecisionTensors {
+class InformationStateByteEncoder(val schema: ByteTokenSchema = ByteTokenSchema()) {
+    fun decision(site: DecisionPoint, referenceGroups: Map<String, List<String>> = emptyMap()): DecisionByteTokens {
         val state = site.epistemic
-        require(site.actor == state.perspectivePlayerId && !state.terminated)
+        require(site.actor == state.viewerId && !state.terminated)
         val (rawView, scope) = scopedView(state)
         val groups = referenceGroups.mapValues { (name, members) ->
             require(members.isNotEmpty() && members.distinct().size == members.size) { "Malformed visible-reference group: $name" }
             members.map { scope.existing(it) }.sorted()
         }
         val view = bytes(scope.transform(rawView), schema.maximumViewBytes, "current view")
-        val actions = site.expansion.candidates.map { action ->
+        val actions = site.menu.candidates.map { action ->
             val raw = buildJsonObject {
                 put("kind", action.kind.name); put("operationFamily", action.operationFamily.name)
-                put("intent", PolicyJson.format.encodeToJsonElement(action.actionIntent))
+                put("intent", CanonicalJson.format.encodeToJsonElement(action.actionIntent))
                 put("payload", action.canonicalPayload)
             }
             bytes(scope.transform(raw, groups = groups), schema.maximumActionBytes, "candidate action")
         }
-        return FactualDecisionTensors(view, frozen(actions), site.expansion.isExhaustive,
-            site.expansion.isProfileExhaustive).also { it.validate(schema) }
+        return DecisionByteTokens(view, frozen(actions), site.menu.isExhaustive,
+            site.menu.isProfileExhaustive).also { it.validate(schema) }
     }
 
     /** The same factual view at a leaf, including when another player is acting. */
     fun view(information: InformationStateRepresentation): List<Int> {
-        val state = EpistemicState.capture(information)
+        val state = InformationState.capture(information)
         require(!state.terminated)
         val (rawView, scope) = scopedView(state)
         return bytes(scope.transform(rawView), schema.maximumViewBytes, "current view")
     }
 
-    private fun scopedView(state: EpistemicState): Pair<JsonObject, References> {
-        val observation = PolicyJson.format.encodeToJsonElement(state.observation).jsonObject.toMutableMap()
+    private fun scopedView(state: InformationState): Pair<JsonObject, References> {
+        val observation = CanonicalJson.format.encodeToJsonElement(state.observation).jsonObject.toMutableMap()
         // Player names and card-definition keys are presentation/registry identifiers, not inputs.
         observation["players"] = JsonArray(state.observation.players.map { player ->
-            JsonObject(PolicyJson.format.encodeToJsonElement(player).jsonObject.filterKeys { it != "name" })
+            JsonObject(CanonicalJson.format.encodeToJsonElement(player).jsonObject.filterKeys { it != "name" })
         })
-        val knowledge = PolicyJson.format.encodeToJsonElement(state.knowledge).jsonObject.toMutableMap()
+        val knowledge = CanonicalJson.format.encodeToJsonElement(state.knowledge).jsonObject.toMutableMap()
         knowledge["deckCardCounts"] = JsonObject(state.observation.players.associate { player ->
             player.playerId to (state.knowledge.deckCardCounts[player.playerId]?.let {
-                PolicyJson.format.encodeToJsonElement(it)
+                CanonicalJson.format.encodeToJsonElement(it)
             } ?: JsonNull)
         })
         knowledge["unlocatedCardCounts"] = JsonObject(state.observation.players.associate { player ->
             player.playerId to (state.knowledge.unlocatedCardCounts[player.playerId]?.let {
-                PolicyJson.format.encodeToJsonElement(it)
+                CanonicalJson.format.encodeToJsonElement(it)
             } ?: JsonNull)
         })
         val rawView = buildJsonObject {
             put("observation", JsonObject(observation)); put("exactKnowledge", JsonObject(knowledge))
         }
-        val scope = References(state.perspectivePlayerId, state.observation.players.map { it.playerId }, rememberedAt(state.history))
+        val scope = References(state.viewerId, state.observation.players.map { it.playerId }, rememberedAt(state.history))
         scope.collect(rawView)
         return rawView to scope
     }
 
     /** Isolated-event convenience. Stateful consumers use [events] to retain qualified continuity. */
-    fun event(event: PolicyHistoryEvent, player: String, players: List<String>): List<Int> =
+    fun event(event: ObservedEvent, player: String, players: List<String>): List<Int> =
         encodeEvent(event, player, players, linkedMapOf())
 
     /** Prefix names are assigned before the suffix; future events assign no earlier names. */
-    fun events(history: List<PolicyHistoryEvent>, player: String, players: List<String>, fromCursor: Int = 0): List<List<Int>> {
+    fun events(history: List<ObservedEvent>, player: String, players: List<String>, fromCursor: Int = 0): List<List<Int>> {
         require(fromCursor in 0..history.size)
         val remembered = rememberedAt(history.take(fromCursor))
         return frozen(history.drop(fromCursor).map { encodeEvent(it, player, players, remembered) })
     }
 
-    private fun encodeEvent(event: PolicyHistoryEvent, player: String, players: List<String>,
+    private fun encodeEvent(event: ObservedEvent, player: String, players: List<String>,
         remembered: MutableMap<String, String>): List<Int> {
         require(player in players && players.distinct().size == players.size)
-        require(event.audience.scope == PolicyAudienceScope.PUBLIC || player in event.audience.entitledPlayerIds) {
+        require(event.audience.scope == EventAudienceScope.PUBLIC || player in event.audience.entitledPlayerIds) {
             "Player is not entitled to this event"
         }
         val raw = eventValue(event)
@@ -124,17 +123,17 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
         return bytes(scope.transform(raw), schema.maximumEventBytes, "delivered event")
     }
 
-    private fun eventValue(event: PolicyHistoryEvent): JsonObject {
+    private fun eventValue(event: ObservedEvent): JsonObject {
         val detail = event.detail
-        if (detail is PerspectiveEventDetail.UnsupportedVisibleTransition)
+        if (detail is ObservedEventDetail.UnsupportedVisibleTransition)
             throw FactualEncodingException("UNSUPPORTED_VISIBLE_TRANSITION")
         if (detail == null) return visibleDelta(event)
         return buildJsonObject {
             put("kind", event.kind.name); put("actor", event.actor?.let(::JsonPrimitive) ?: JsonNull)
-            if (event.kind == PolicyHistoryEventKind.PRIVATE_DECISION_OCCURRED) {
+            if (event.kind == ObservedEventKind.PRIVATE_DECISION_OCCURRED) {
                 put("privateDecisionOccurred", true)
             } else {
-                put("detail", PolicyJson.format.encodeToJsonElement(PerspectiveEventDetail.serializer(), detail))
+                put("detail", CanonicalJson.format.encodeToJsonElement(ObservedEventDetail.serializer(), detail))
                 // Explicitly delivered facts only. Never infer action meaning from display labels.
                 for (key in listOf("privatePayload", "sourceName", "targetNames")) event.payload[key]?.let { put(key, it) }
             }
@@ -142,9 +141,9 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
     }
 
     /** Payload from the native visible-transition recorder. */
-    private fun visibleDelta(event: PolicyHistoryEvent): JsonObject {
+    private fun visibleDelta(event: ObservedEvent): JsonObject {
         val payload = event.payload
-        if (event.kind !in setOf(PolicyHistoryEventKind.PUBLIC_ZONE_TRANSITION, PolicyHistoryEventKind.FORCED_TRANSITION) ||
+        if (event.kind !in setOf(ObservedEventKind.PUBLIC_ZONE_TRANSITION, ObservedEventKind.FORCED_TRANSITION) ||
             !payload.keys.containsAll(setOf("fromObservation", "toObservation", "zoneDelta")) ||
             (payload.keys - setOf("fromObservation", "toObservation", "zoneDelta", "priorityFrom", "priorityTo")).isNotEmpty())
             throw FactualEncodingException("UNTYPED_HISTORY_EVENT")
@@ -166,7 +165,7 @@ class FactualPolicyEncoder(val schema: FactualTensorSchema = FactualTensorSchema
     }
 
     /** Only qualified remembered handles survive between frames; snapshot references remain local. */
-    private fun rememberedAt(history: List<PolicyHistoryEvent>): MutableMap<String, String> {
+    private fun rememberedAt(history: List<ObservedEvent>): MutableMap<String, String> {
         val result = linkedMapOf<String, String>()
         fun visit(value: JsonElement, field: String = "", depth: Int = 0) {
             require(depth <= 64)

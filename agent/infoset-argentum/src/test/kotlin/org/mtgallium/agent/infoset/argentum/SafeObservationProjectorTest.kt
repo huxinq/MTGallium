@@ -43,10 +43,10 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
-import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
-import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
+import org.mtgallium.agent.infoset.core.ObservedEventKind
+import org.mtgallium.agent.infoset.core.ObservedEventDetail
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticChoiceDisplay
 import org.mtgallium.agent.infoset.core.SemanticChoiceKind
@@ -70,8 +70,8 @@ class SafeObservationProjectorTest {
             observation.copy(zones = observation.zones.map { zone ->
                 zone.copy(cards = zone.cards.map { if (it.entityId == card.entityId) card else it })
             })
-        val projector = SafeObservationProjector()
-        fun project(observation: TrainingObservation, previous: SafeObservationProjection? = null,
+        val projector = PlayerObservationProjector()
+        fun project(observation: TrainingObservation, previous: PlayerObservationProjection? = null,
             runtime: ArgentumPolicyRuntimeProjection = ArgentumPolicyRuntimeProjection.EMPTY,
             players: Map<EntityId, String> = aliases) = projector.project(observation, players, runtime, previous = previous)
         val initial = project(original)
@@ -141,14 +141,14 @@ class SafeObservationProjectorTest {
                 player.copy(hasPriority = player.id == next)
             },
         )
-        val projector = SafeObservationProjector()
+        val projector = PlayerObservationProjector()
         val incremental = projector.project(before, aliases).withPriority("p1").observation
         val full = projector.project(after, aliases).observation
 
         assertEquals(full, incremental)
         assertEquals(
-            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), full),
-            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), incremental),
+            CanonicalJson.format.encodeToString(PlayerObservationSnapshot.serializer(), full),
+            CanonicalJson.format.encodeToString(PlayerObservationSnapshot.serializer(), incremental),
         )
     }
 
@@ -159,9 +159,9 @@ class SafeObservationProjectorTest {
         val discardingPlayer = env.playerIds[1]
         val gym = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
-        val projection = SafeObservationProjector().project(gym)
+        val projection = PlayerObservationProjector().project(gym)
 
-        val projected = PerspectiveEventProjector.project(
+        val projected = EventObservationProjector.project(
             eventId = 0,
             event = DiscardRequiredEvent(discardingPlayer, 2),
             viewer = viewer,
@@ -174,8 +174,8 @@ class SafeObservationProjectorTest {
             knownLibraryDrawObject = { false },
         )
 
-        val detail = assertIs<PerspectiveEventDetail.Causal>(assertNotNull(projected).detail)
-        assertEquals(PolicyHistoryEventKind.CAUSAL, projected.kind)
+        val detail = assertIs<ObservedEventDetail.Causal>(assertNotNull(projected).detail)
+        assertEquals(ObservedEventKind.CAUSAL, projected.kind)
         assertEquals("CLEANUP_DISCARD_REQUIRED", detail.eventType)
         assertEquals("p1", detail.actorId)
         assertEquals(2, detail.numericValue)
@@ -202,7 +202,7 @@ class SafeObservationProjectorTest {
             ),
         )
 
-        val safe = SafeObservationProjector().project(original, null, runtime).observation
+        val safe = PlayerObservationProjector().project(original, null, runtime).observation
 
         assertEquals(2, safe.players.single { it.playerId == "p0" }.speed)
         val combat = assertNotNull(safe.combat)
@@ -232,9 +232,9 @@ class SafeObservationProjectorTest {
             ),
         )
 
-        val projected = SafeObservationProjector().project(observation).observation
+        val projected = PlayerObservationProjector().project(observation).observation
         val safeTargets = projected.stack.single().targets
-        val serialized = PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), projected)
+        val serialized = CanonicalJson.format.encodeToString(PlayerObservationSnapshot.serializer(), projected)
 
         assertEquals(listOf("stack-target:0:0", "stack-target:0:0"), safeTargets)
         assertFalse(departedTarget.value in serialized)
@@ -247,11 +247,11 @@ class SafeObservationProjectorTest {
         val viewer = env.playerIds[0]
         val gym = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
-        val projection = SafeObservationProjector().project(gym)
+        val projection = PlayerObservationProjector().project(gym)
         val sourceId = env.state.getHand(viewer).first()
         val abilityId = EntityId.generate()
 
-        val projected = PerspectiveEventProjector.project(
+        val projected = EventObservationProjector.project(
             eventId = 0,
             event = AbilityCounteredEvent(
                 abilityEntityId = abilityId,
@@ -270,8 +270,8 @@ class SafeObservationProjectorTest {
             knownLibraryDrawObject = { false },
         )
 
-        val detail = assertIs<PerspectiveEventDetail.Causal>(assertNotNull(projected).detail)
-        assertEquals(PolicyHistoryEventKind.CAUSAL, projected.kind)
+        val detail = assertIs<ObservedEventDetail.Causal>(assertNotNull(projected).detail)
+        assertEquals(ObservedEventKind.CAUSAL, projected.kind)
         assertEquals("ABILITY_COUNTERED", detail.eventType)
         assertEquals("p0", detail.actorId)
         assertEquals("Hexing Squelcher", detail.sourceName)
@@ -287,9 +287,9 @@ class SafeObservationProjectorTest {
         val projections = env.playerIds.associateWith { viewer ->
             val observation = ObservationBuilder(cardRegistry).build(env.state, viewer, emptyList())
                 .observation as TrainingObservation
-            SafeObservationProjector().project(observation)
+            PlayerObservationProjector().project(observation)
         }
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
         val lookedAt = env.state.getLibrary(actor).take(2)
 
         history.recordEngineEvents(
@@ -324,11 +324,11 @@ class SafeObservationProjectorTest {
         val replacementCard = env.state.getEntity(replacement)!!
             .get<com.wingedsheep.engine.state.components.identity.CardComponent>()!!
         val projections = env.playerIds.associateWith { perspective ->
-            SafeObservationProjector().project(
+            PlayerObservationProjector().project(
                 ObservationBuilder(cardRegistry).build(env.state, perspective, emptyList()).observation as TrainingObservation,
             )
         }
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(HandLookedAtEvent(viewer, opponent, listOf(revealed))),
             actorViewer = viewer,
@@ -378,11 +378,11 @@ class SafeObservationProjectorTest {
         val viewer = env.playerIds[0]
         val opponent = env.playerIds[1]
         val hiddenCard = env.state.getLibrary(opponent).first()
-        val projection = SafeObservationProjector().project(
+        val projection = PlayerObservationProjector().project(
             ObservationBuilder(cardRegistry).build(env.state, viewer, emptyList()).observation as TrainingObservation,
         )
 
-        val projected = PerspectiveEventProjector.project(
+        val projected = EventObservationProjector.project(
             eventId = 0,
             event = CardsDrawnEvent(opponent, 1, listOf(hiddenCard)),
             viewer = viewer,
@@ -395,7 +395,7 @@ class SafeObservationProjectorTest {
             knownLibraryDrawObject = { false },
         )
 
-        val draw = assertIs<PerspectiveEventDetail.Draw>(assertNotNull(projected).detail)
+        val draw = assertIs<ObservedEventDetail.Draw>(assertNotNull(projected).detail)
         assertTrue(draw.knownCardNames.isEmpty())
         assertTrue(draw.knowledgeObjectKeys.isEmpty())
     }
@@ -411,11 +411,11 @@ class SafeObservationProjectorTest {
                 com.wingedsheep.engine.state.components.identity.RevealedToComponent.to(viewer),
             )
         }
-        val projection = SafeObservationProjector().project(
+        val projection = PlayerObservationProjector().project(
             ObservationBuilder(cardRegistry).build(revealedState, viewer, emptyList()).observation as TrainingObservation,
         )
 
-        val projected = PerspectiveEventProjector.project(
+        val projected = EventObservationProjector.project(
             eventId = 0,
             event = CardsDrawnEvent(opponent, 1, listOf(hiddenCard)),
             viewer = viewer,
@@ -429,7 +429,7 @@ class SafeObservationProjectorTest {
             revealIdentityInvalidated = { true },
         )
 
-        val draw = assertIs<PerspectiveEventDetail.Draw>(assertNotNull(projected).detail)
+        val draw = assertIs<ObservedEventDetail.Draw>(assertNotNull(projected).detail)
         assertTrue(draw.knownCardNames.isEmpty())
     }
 
@@ -439,11 +439,11 @@ class SafeObservationProjectorTest {
         val viewer = env.playerIds[0]
         val card = env.state.getLibrary(viewer).first()
         val projections = env.playerIds.associateWith { player ->
-            SafeObservationProjector().project(
+            PlayerObservationProjector().project(
                 ObservationBuilder(cardRegistry).build(env.state, player, emptyList()).observation as TrainingObservation,
             )
         }
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
 
         history.recordEngineEvents(
             listOf(LookedAtCardsEvent(viewer, listOf(card), "Known top")),
@@ -453,7 +453,7 @@ class SafeObservationProjectorTest {
             projections,
             projections,
         )
-        val oldKey = assertIs<PerspectiveEventDetail.Look>(history.forViewer(viewer).last().detail)
+        val oldKey = assertIs<ObservedEventDetail.Look>(history.forViewer(viewer).last().detail)
             .knowledgeObjectKeys.single()
         history.recordEngineEvents(
             listOf(LibraryShuffledEvent(viewer)),
@@ -463,7 +463,7 @@ class SafeObservationProjectorTest {
             projections,
             projections,
         )
-        val shuffle = assertIs<PerspectiveEventDetail.Shuffle>(history.forViewer(viewer).last().detail)
+        val shuffle = assertIs<ObservedEventDetail.Shuffle>(history.forViewer(viewer).last().detail)
         assertEquals(listOf(oldKey), shuffle.invalidatedKnowledgeObjectKeys)
         assertTrue(shuffle.invalidatedKnowledgeObjectKeys.none { card.value in it })
         history.recordEngineEvents(
@@ -475,7 +475,7 @@ class SafeObservationProjectorTest {
             projections,
         )
 
-        val newKey = assertIs<PerspectiveEventDetail.Draw>(history.forViewer(viewer).last().detail)
+        val newKey = assertIs<ObservedEventDetail.Draw>(history.forViewer(viewer).last().detail)
             .knowledgeObjectKeys.single()
         assertNotEquals(oldKey, newKey)
     }
@@ -490,12 +490,12 @@ class SafeObservationProjectorTest {
                 ?.get<com.wingedsheep.engine.state.components.identity.CardComponent>()
         ).name
         fun projected(state: com.wingedsheep.engine.state.GameState) = env.playerIds.associateWith { player ->
-            SafeObservationProjector().project(
+            PlayerObservationProjector().project(
                 ObservationBuilder(cardRegistry).build(state, player, emptyList()).observation as TrainingObservation,
             )
         }
         val beforeProjection = projected(env.state)
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
         history.recordEngineEvents(
             listOf(HandLookedAtEvent(viewer, viewer, listOf(card))),
             viewer,
@@ -504,7 +504,7 @@ class SafeObservationProjectorTest {
             beforeProjection,
             beforeProjection,
         )
-        val oldKey = assertIs<PerspectiveEventDetail.Look>(history.forViewer(viewer).single().detail)
+        val oldKey = assertIs<ObservedEventDetail.Look>(history.forViewer(viewer).single().detail)
             .knowledgeObjectKeys.single()
         val afterState = env.state.copy(
             zones = env.state.zones +
@@ -524,8 +524,8 @@ class SafeObservationProjectorTest {
             projected(afterState),
         )
 
-        val shuffle = assertIs<PerspectiveEventDetail.Shuffle>(history.forViewer(viewer)[1].detail)
-        val zoneChange = assertIs<PerspectiveEventDetail.ZoneChange>(history.forViewer(viewer)[2].detail)
+        val shuffle = assertIs<ObservedEventDetail.Shuffle>(history.forViewer(viewer)[1].detail)
+        val zoneChange = assertIs<ObservedEventDetail.ZoneChange>(history.forViewer(viewer)[2].detail)
         val knownDecks = mapOf(
             "p0" to mapOf("Mountain" to 17, "Raging Goblin" to 3),
             "p1" to mapOf("Mountain" to 17, "Raging Goblin" to 3),
@@ -559,11 +559,11 @@ class SafeObservationProjectorTest {
         )
         val afterState = beforeState.removeEntity(objectId)
         fun projected(state: com.wingedsheep.engine.state.GameState) = env.playerIds.associateWith { player ->
-            SafeObservationProjector().project(
+            PlayerObservationProjector().project(
                 ObservationBuilder(cardRegistry).build(state, player, emptyList()).observation as TrainingObservation,
             )
         }
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
 
         history.recordEngineEvents(
             engineEvents = listOf(
@@ -582,7 +582,7 @@ class SafeObservationProjectorTest {
             after = projected(afterState),
         )
 
-        val detail = assertIs<PerspectiveEventDetail.ZoneChange>(history.forViewer(viewer).single().detail)
+        val detail = assertIs<ObservedEventDetail.ZoneChange>(history.forViewer(viewer).single().detail)
         val historicalKey = assertNotNull(detail.knowledgeObjectKey)
         val knownDecks = mapOf(
             "p0" to mapOf("Mountain" to 17, "Raging Goblin" to 3),
@@ -638,13 +638,13 @@ class SafeObservationProjectorTest {
         val permuted = ObservationBuilder(cardRegistry).build(permutedState, viewer, env.legalActions())
             .observation as TrainingObservation
 
-        val projector = SafeObservationProjector()
+        val projector = PlayerObservationProjector()
         val left = projector.project(original).observation
         val right = projector.project(permuted).observation
 
         assertEquals(
-            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), left),
-            PolicyJson.format.encodeToString(PlayerObservationSnapshot.serializer(), right),
+            CanonicalJson.format.encodeToString(PlayerObservationSnapshot.serializer(), left),
+            CanonicalJson.format.encodeToString(PlayerObservationSnapshot.serializer(), right),
         )
     }
 
@@ -662,7 +662,7 @@ class SafeObservationProjectorTest {
         val reordered = ObservationBuilder(cardRegistry).build(reorderedState, viewer, env.legalActions())
             .observation as TrainingObservation
 
-        val projector = SafeObservationProjector()
+        val projector = PlayerObservationProjector()
 
         assertEquals(projector.project(original).observation, projector.project(reordered).observation)
     }
@@ -704,13 +704,13 @@ class SafeObservationProjectorTest {
             val authorized = ObservationBuilder(cardRegistry).build(state, chooser, emptyList())
                 .observation as TrainingObservation
 
-            val hidden = SafeObservationProjector().project(
+            val hidden = PlayerObservationProjector().project(
                 unauthorized,
                 playerAliases = null,
                 runtime = ArgentumPolicyRuntimeProjection.EMPTY,
                 pendingDecision = state.pendingDecision,
             ).observation.pendingDecision
-            val visible = SafeObservationProjector().project(
+            val visible = PlayerObservationProjector().project(
                 authorized,
                 playerAliases = null,
                 runtime = ArgentumPolicyRuntimeProjection.EMPTY,
@@ -750,7 +750,7 @@ class SafeObservationProjectorTest {
         val viewer = env.playerIds[0]
         val gym = ObservationBuilder(cardRegistry).build(env.state, viewer, env.legalActions())
             .observation as TrainingObservation
-        val safe = SafeObservationProjector().project(gym).observation
+        val safe = PlayerObservationProjector().project(gym).observation
         val rawVisible = gym.zones.flatMap { it.cards }.map { it.entityId.value }.toSet()
 
         assertFalse(safe.zones.flatMap { it.cards }.any { it.objectRef in rawVisible })
@@ -761,7 +761,7 @@ class SafeObservationProjectorTest {
         val env = environment()
         val actor = env.playerIds[0]
         val opponent = env.playerIds[1]
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
         val choice = SemanticChoice.create(
             kind = SemanticChoiceKind.DECISION,
             operationFamily = org.mtgallium.agent.infoset.core.SemanticOperationFamily.MULLIGAN,
@@ -776,21 +776,21 @@ class SafeObservationProjectorTest {
             actor,
             choice,
             privateToActor = true,
-            kind = PolicyHistoryEventKind.MULLIGAN,
+            kind = ObservedEventKind.MULLIGAN,
             strategicallyOptional = false,
         )
 
         val own = history.forViewer(actor).single()
         val hidden = history.forViewer(opponent).single()
-        assertEquals(PolicyHistoryEventKind.MULLIGAN, own.kind)
-        assertEquals(PolicyHistoryEventKind.PRIVATE_DECISION_OCCURRED, hidden.kind)
+        assertEquals(ObservedEventKind.MULLIGAN, own.kind)
+        assertEquals(ObservedEventKind.PRIVATE_DECISION_OCCURRED, hidden.kind)
         assertFalse("privateCard" in hidden.payload)
         assertFalse("Mulligan bottom" in hidden.payload.toString())
         assertFalse("Shock" in hidden.payload.toString())
         assertEquals("DECISION", hidden.payload["choiceKind"]?.jsonPrimitive?.content)
-        assertEquals(false, (own.detail as PerspectiveEventDetail.Choice).strategicallyOptional)
-        assertEquals(null, (hidden.detail as PerspectiveEventDetail.Choice).strategicallyOptional)
-        assertEquals(null, (hidden.detail as PerspectiveEventDetail.Choice).operationFamily)
+        assertEquals(false, (own.detail as ObservedEventDetail.Choice).strategicallyOptional)
+        assertEquals(null, (hidden.detail as ObservedEventDetail.Choice).strategicallyOptional)
+        assertEquals(null, (hidden.detail as ObservedEventDetail.Choice).operationFamily)
     }
 
     @Test
@@ -798,7 +798,7 @@ class SafeObservationProjectorTest {
         val env = environment()
         val actor = env.playerIds[0]
         val opponent = env.playerIds[1]
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
         val choice = SemanticChoice.create(
             kind = SemanticChoiceKind.ACTION,
             operationFamily = org.mtgallium.agent.infoset.core.SemanticOperationFamily.PASS_PRIORITY,
@@ -810,12 +810,12 @@ class SafeObservationProjectorTest {
             actor,
             choice,
             privateToActor = false,
-            kind = PolicyHistoryEventKind.PRIORITY_PASS,
+            kind = ObservedEventKind.PRIORITY_PASS,
             strategicallyOptional = false,
         )
 
-        val own = history.forViewer(actor).single().detail as PerspectiveEventDetail.Choice
-        val observed = history.forViewer(opponent).single().detail as PerspectiveEventDetail.Choice
+        val own = history.forViewer(actor).single().detail as ObservedEventDetail.Choice
+        val observed = history.forViewer(opponent).single().detail as ObservedEventDetail.Choice
         assertEquals(false, own.strategicallyOptional)
         assertEquals(null, observed.strategicallyOptional)
         assertEquals(choice.operationFamily, observed.operationFamily)

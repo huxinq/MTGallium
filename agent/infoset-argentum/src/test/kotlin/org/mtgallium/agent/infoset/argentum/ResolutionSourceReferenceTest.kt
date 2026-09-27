@@ -16,13 +16,13 @@ import com.wingedsheep.mtg.sets.definitions.por.PortalSet
 import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.sdk.model.Deck
 import com.wingedsheep.sdk.model.EntityId
-import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
+import org.mtgallium.agent.infoset.core.ObservedEventDetail
 import kotlin.test.*
 
 /** Authored component states using native transitions/resolution, not a reachable gameplay proof. */
 class ResolutionSourceReferenceTest {
     private val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
-    private val mode = PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
+    private val mode = HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2
     private data class Fixture(val state: GameState, val source: EntityId, val other: EntityId,
         val owner: EntityId, val players: List<EntityId>)
 
@@ -46,19 +46,19 @@ class ResolutionSourceReferenceTest {
     }
 
     private fun projections(state: GameState, f: Fixture) = f.players.associateWith { viewer ->
-        SafeObservationProjector().project(ObservationBuilder(registry)
+        PlayerObservationProjector().project(ObservationBuilder(registry)
             .build(state, viewer, emptyList()).observation as TrainingObservation)
     }
 
     private fun record(f: Fixture, after: GameState, events: List<GameEvent>,
-        history: PerspectiveHistory = PerspectiveHistory(f.players, objectReference = mode),
-        before: GameState = f.state): PerspectiveHistory {
+        history: InformationStateRecorder = InformationStateRecorder(f.players, objectReference = mode),
+        before: GameState = f.state): InformationStateRecorder {
         history.recordEngineEvents(events, f.owner, before, after, projections(before, f), projections(after, f))
         return history
     }
 
-    private fun source(history: PerspectiveHistory, viewer: EntityId) = history.forViewer(viewer)
-        .mapNotNull { it.detail as? PerspectiveEventDetail.Causal }
+    private fun source(history: InformationStateRecorder, viewer: EntityId) = history.forViewer(viewer)
+        .mapNotNull { it.detail as? ObservedEventDetail.Causal }
         .last { it.eventType == "SPELL_OR_ABILITY_RESOLVED" }.sourceObjectRef
 
     @Test fun `native permanent resolution ignores after snapshot ordinal only in explicit new mode`() {
@@ -69,9 +69,9 @@ class ResolutionSourceReferenceTest {
         assertEquals(left.state.objectRef(left.source), move.oldObject)
         assertEquals(a.state.objectRef(left.source), move.newObject)
         assertNotEquals(move.oldObject, move.newObject)
-        for (identity in PerspectiveHistoryObjectReference.entries) {
-            val h1 = record(left, a.state, a.events, PerspectiveHistory(left.players, objectReference = identity))
-            val h2 = record(right, b.state, b.events, PerspectiveHistory(right.players, objectReference = identity))
+        for (identity in HistoryObjectReferencing.entries) {
+            val h1 = record(left, a.state, a.events, InformationStateRecorder(left.players, objectReference = identity))
+            val h2 = record(right, b.state, b.events, InformationStateRecorder(right.players, objectReference = identity))
             for (v in left.players) {
                 assertEquals(projections(left.state, left).getValue(v).observation,
                     projections(right.state, right).getValue(v).observation)
@@ -82,7 +82,7 @@ class ResolutionSourceReferenceTest {
                     assertEquals(h1.commitmentForViewer(v), h2.commitmentForViewer(v))
                     assertEquals("resolution-source-before:v1:0:stack:0", source(h1, v))
                 } else assertNotEquals(source(h1, v), source(h2, v))
-                val zone = h1.forViewer(v).mapNotNull { it.detail as? PerspectiveEventDetail.ZoneChange }.single()
+                val zone = h1.forViewer(v).mapNotNull { it.detail as? ObservedEventDetail.ZoneChange }.single()
                 assertEquals("STACK", zone.fromZone)
                 assertEquals("BATTLEFIELD", zone.toZone)
             }
@@ -92,7 +92,7 @@ class ResolutionSourceReferenceTest {
     @Test fun `distinct admitted pre stack sources are not merged by identical permanent appearance`() {
         val f = fixture(bothStack = true)
         // Two alternative component transitions from the same stack, not two claims of legal top resolution.
-        fun branch(id: EntityId): PerspectiveHistory {
+        fun branch(id: EntityId): InformationStateRecorder {
             val moved = ZoneTransitionService.moveToZone(f.state, id, Zone.BATTLEFIELD)
             return record(f, moved.state, moved.events + ResolvedEvent(id, "Raging Goblin"))
         }
@@ -120,8 +120,8 @@ class ResolutionSourceReferenceTest {
         )
         for (events in variants) {
             val current = record(f, moved.state, events)
-            val old = record(f, moved.state, events, PerspectiveHistory(f.players,
-                objectReference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1))
+            val old = record(f, moved.state, events, InformationStateRecorder(f.players,
+                objectReference = HistoryObjectReferencing.LEGACY_SNAPSHOT_V1))
             for (v in f.players) assertEquals(old.forViewer(v), current.forViewer(v))
         }
         val refs = projections(f.state, f).getValue(f.players[0]).references
@@ -140,7 +140,7 @@ class ResolutionSourceReferenceTest {
         val viewer = f.players[0]
         val raw = ObservationBuilder(registry).build(f.state, viewer, emptyList()).observation as TrainingObservation
         // Deliberately withhold stack admission for this viewer, leaving the trusted state unchanged.
-        val withheld = SafeReferenceMap(raw.copy(stack = emptyList()))
+        val withheld = ObservationReferenceMap(raw.copy(stack = emptyList()))
         assertTrue(qualifiedResolutionSources(events, f.state, moved.state, withheld, 0).isEmpty())
         val admitted = projections(f.state, f).getValue(f.owner).references
         val qualified = qualifiedResolutionSources(events, f.state, moved.state, admitted, 0)
@@ -168,7 +168,7 @@ class ResolutionSourceReferenceTest {
         val tapped = result.state.updateEntity(f.source) { it.with(TappedComponent) }
         record(f, tapped, listOf(TappedEvent(f.source, "Raging Goblin", f.owner)), history, result.state)
         for (v in f.players) {
-            val ref = (history.forViewer(v).last().detail as PerspectiveEventDetail.ObjectState).objectRef!!
+            val ref = (history.forViewer(v).last().detail as ObservedEventDetail.ObjectState).objectRef!!
             assertTrue(ref.startsWith("zone:"), "New permanent must not resurrect an old battlefield handle")
         }
     }

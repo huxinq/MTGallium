@@ -7,7 +7,7 @@ dependencies {
     api(project(":agent:infoset-semantics"))
     api(project(":agent:infoset-planning"))
     api(project(":agent:infoset-argentum"))
-    implementation(project(":agent:mono-red-models"))
+    implementation(project(":agent:value-models"))
     implementation("org.mtgallium.argentum:rules-engine")
     implementation(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test-junit5"))

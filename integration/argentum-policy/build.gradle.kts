@@ -7,7 +7,7 @@ dependencies {
     implementation(platform(libs.spring.boot.dependencies))
     implementation(project(":agent:infoset-argentum"))
     implementation(project(":agent:infoset-planning"))
-    implementation(project(":agent:mono-red-models"))
+    implementation(project(":agent:value-models"))
     implementation(project(":agent:argentum-policy"))
     implementation("org.mtgallium.argentum:ai")
     implementation("org.mtgallium.argentum:game-server")

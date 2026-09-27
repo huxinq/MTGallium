@@ -1,36 +1,33 @@
 package org.mtgallium.agent.argentum.policy
 
-import org.mtgallium.agent.infoset.core.BeliefSnapshot
+import org.mtgallium.agent.infoset.planning.BeliefSnapshot
 import org.mtgallium.agent.infoset.core.BeliefQueryView
 
 import org.mtgallium.agent.monored.ValueEvaluationStop
 import org.mtgallium.agent.monored.ValueEvaluationException
-import org.mtgallium.agent.monored.ValueInputError
 import org.mtgallium.agent.infoset.core.DecisionPolicy
 import org.mtgallium.agent.infoset.core.ActionSelector
-import org.mtgallium.agent.infoset.core.RootActionSelection
-import org.mtgallium.agent.infoset.core.RootActionSelector
-import org.mtgallium.agent.infoset.core.SingletonSelectionConfig
+import org.mtgallium.agent.infoset.planning.RootActionSelection
+import org.mtgallium.agent.infoset.planning.RootActionSelector
+import org.mtgallium.agent.infoset.planning.SingletonMenuShortcutConfig
 
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
-import org.mtgallium.agent.infoset.core.BeliefBatch
+import org.mtgallium.agent.infoset.core.BeliefApproximation
+import org.mtgallium.agent.infoset.planning.ParticleSet
 import org.mtgallium.agent.infoset.core.BeliefDiagnostics
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
-import org.mtgallium.agent.infoset.core.InformationStateEvaluator
-import org.mtgallium.agent.infoset.core.LeafValueSource
-import org.mtgallium.agent.monored.MonoRedInformationEvaluator
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.InformationSetSearchConfig
+import org.mtgallium.agent.infoset.planning.LeafValueSource
+import org.mtgallium.agent.value.MaterialEvaluator
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.PolicyComponent
 import org.mtgallium.agent.infoset.core.OpponentPolicy
-import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
-import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
-import org.mtgallium.agent.infoset.core.SearchWorld
+import org.mtgallium.agent.infoset.planning.RolloutTurnHorizon
+import org.mtgallium.agent.infoset.core.ActionSpaceProfile
+import org.mtgallium.agent.infoset.planning.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.Weighted
-import kotlinx.serialization.Serializable
 
 const val SEARCH_POLICY_UNPROFILED_RUNTIME_ID: String = "unprofiled-search-teacher-o02-v1"
 
@@ -41,9 +38,9 @@ data class SearchPolicyConfig(
     val maxPolicyDecisions: Int,
     val explorationConstant: Double,
     val leaf: LeafEvaluationConfig,
-    val actionSpaceProfile: SearchActionSpaceProfile,
+    val actionSpaceProfile: ActionSpaceProfile,
     val beliefMode: BeliefMode = BeliefMode.CONSISTENCY_ONLY_V1,
-    val beliefArchitecture: BeliefArchitecture = BeliefArchitecture.SEQUENTIAL_B_V1,
+    val beliefArchitecture: BeliefApproximation = BeliefApproximation.SEQUENTIAL_B_V1,
     val baseSeed: Long,
     val profileId: String = SEARCH_POLICY_UNPROFILED_RUNTIME_ID,
     val initialExpansionLimit: Int = 64,
@@ -51,7 +48,7 @@ data class SearchPolicyConfig(
     val wideningLimits: List<Int> = listOf(128, 256, 512),
     val maxQuiescenceDecisions: Int = 32,
     val maxQuiescenceForcedPasses: Int = 256,
-    val singletonSelection: SingletonSelectionConfig = SingletonSelectionConfig(),
+    val singletonSelection: SingletonMenuShortcutConfig = SingletonMenuShortcutConfig(),
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
 ) {
     init {
@@ -77,16 +74,16 @@ data class SearchPolicyConfig(
 
     /** The host must admit every root action reachable by this search budget. */
     internal fun decisionView(
-        prior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
+        prior: org.mtgallium.agent.infoset.planning.SearchPrior? = null,
         widen: Boolean = true,
-    ): org.mtgallium.agent.infoset.core.DecisionView {
-        if (prior != null) return org.mtgallium.agent.infoset.core.DecisionView(
+    ): org.mtgallium.agent.infoset.core.MenuRequest {
+        if (prior != null) return org.mtgallium.agent.infoset.core.MenuRequest(
             limit = prior.candidateLimit, admission = prior.admission)
-        if (!widen) return org.mtgallium.agent.infoset.core.DecisionView()
+        if (!widen) return org.mtgallium.agent.infoset.core.MenuRequest()
         val reachableLimit = wideningThresholds.zip(wideningLimits)
             .filter { (visits, _) -> visits < simulations }
             .fold(initialExpansionLimit) { limit, (_, widened) -> maxOf(limit, widened) }
-        return org.mtgallium.agent.infoset.core.DecisionView(
+        return org.mtgallium.agent.infoset.core.MenuRequest(
             limit = reachableLimit.takeUnless { it == 64 && initialExpansionLimit == 64 })
     }
 
@@ -95,7 +92,7 @@ data class SearchPolicyConfig(
         opponentPolicy: PolicyComponent,
         rootRolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         opponentRolloutPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-        valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
+        valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
     ): PolicyBehaviorSpecification = PolicyIdentity.specification(
         parameters = this,
         knownDecks = knownDecks,
@@ -110,7 +107,7 @@ data class SearchPolicyConfig(
         opponentPolicy: PolicyComponent,
         rootRolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         opponentRolloutPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-        valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
+        valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
     ): String = PolicyIdentity.identity(
         behaviorSpecification(
             knownDecks = knownDecks,
@@ -132,21 +129,21 @@ class SearchPolicySession private constructor(
     private val gameId: String,
     private val rolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
     private val rolloutOpponentPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-    private val valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
+    private val valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
     private val beliefProposalAuditSink: ArgentumBeliefProposalAuditSink =
         ArgentumBeliefProposalAuditSink.NONE,
     private val directRootSelectionPolicy: DecisionPolicy? = null,
-    private val searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
+    private val searchPrior: org.mtgallium.agent.infoset.planning.SearchPrior? = null,
     forkedFrom: SearchPolicySession?,
 ) {
     constructor(root: ArgentumSearchWorld, viewer: String, knownDecks: Map<String, Map<String, Int>>,
         parameters: SearchPolicyConfig, opponentPolicy: OpponentPolicy, gameId: String,
         rolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         rolloutOpponentPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-        valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
+        valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
         beliefProposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
         directRootSelectionPolicy: DecisionPolicy? = null,
-        searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null) :
+        searchPrior: org.mtgallium.agent.infoset.planning.SearchPrior? = null) :
         this(root, viewer, knownDecks, parameters, opponentPolicy, gameId, rolloutPolicy, rolloutOpponentPolicy,
             valueSource, beliefProposalAuditSink, directRootSelectionPolicy, searchPrior, null)
 
@@ -160,15 +157,15 @@ class SearchPolicySession private constructor(
             valueSource = valueSource,
             actionExpansion = root.semanticExpansionSpecification(),
         ).copy(historyEventOrder = root.historyEventOrder.takeUnless {
-            it == org.mtgallium.agent.infoset.argentum.PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1
+            it == org.mtgallium.agent.infoset.argentum.HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1
         }?.name, historyObjectReference = root.historyObjectReference.takeUnless {
-            it == org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1
+            it == org.mtgallium.agent.infoset.argentum.HistoryObjectReferencing.LEGACY_SNAPSHOT_V1
         }?.name, directRootSelectionId = directRootSelectionPolicy?.configurationId?.also { require(it.isNotBlank()) },
-            searchPriorId = searchPrior?.let { "puct-v1:${it.configurationId}:limit=${it.candidateLimit}:admission=${it.admission}:c=${it.explorationConstant}" })
+            searchPriorId = searchPrior?.let { "puct-v1:${it.configurationId}:limit=${it.candidateLimit}:admission=${it.admission.name}:c=${it.explorationConstant}" })
     init {
         require(forkedFrom == null || behaviorSpecification == forkedFrom.behaviorSpecification)
     }
-    private val belief: ArgentumParticleBeliefBackend = forkedFrom?.belief?.fork(root) ?: ArgentumParticleBeliefBackend(
+    private val belief: ArgentumParticleFilter = forkedFrom?.belief?.fork(root) ?: ArgentumParticleFilter(
         root = root,
         viewer = viewer,
         knownDecks = knownDecks,
@@ -200,7 +197,7 @@ class SearchPolicySession private constructor(
 
     val latestBeliefDiagnostics: BeliefDiagnostics get() = belief.latestDiagnostics
     /** Host admission includes progressive widening and an optional wider search prior. */
-    val decisionView: org.mtgallium.agent.infoset.core.DecisionView
+    val decisionView: org.mtgallium.agent.infoset.core.MenuRequest
         get() = parameters.decisionView(searchPrior,
             widen = directRootSelectionPolicy == null)
     val beliefDiagnosticsHistory: List<BeliefDiagnostics> get() = belief.diagnosticsHistory
@@ -218,12 +215,12 @@ class SearchPolicySession private constructor(
 
     fun beliefQueries(actual: ArgentumSearchWorld? = null): BeliefQueryView = beliefSnapshot(actual).queries
 
-    fun beliefBatch(actual: ArgentumSearchWorld? = null): BeliefBatch<Weighted<SearchWorld>> {
+    fun beliefBatch(actual: ArgentumSearchWorld? = null): ParticleSet<Weighted<SearchWorld>> {
         actual?.let { belief.synchronize(it, acceptedDecisionCount) }
         return profiledBeliefBatch()
     }
 
-    private fun profiledBeliefBatch(): BeliefBatch<Weighted<SearchWorld>> =
+    private fun profiledBeliefBatch(): ParticleSet<Weighted<SearchWorld>> =
         belief.snapshot().hypotheses.materialize().batch
 
     fun select(

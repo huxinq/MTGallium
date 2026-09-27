@@ -14,12 +14,13 @@ import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.sdk.model.Deck
 import com.wingedsheep.sdk.model.EntityId
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 import kotlin.test.*
 
 /** Small authored initialized/component fixtures, independent of retained research replay material. */
 class ExactObservedCorrespondenceTest {
     private val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
-    private val mode = PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
+    private val mode = HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2
     private fun environment(): GameEnvironment = GameEnvironment.create(registry).also {
         val deck = Deck.of("Raging Goblin" to 8, "Goblin Bully" to 8, "Mountain" to 24)
         it.reset(GameConfig(players = listOf(PlayerConfig("Alice", deck), PlayerConfig("Bob", deck)),
@@ -28,7 +29,7 @@ class ExactObservedCorrespondenceTest {
 
     @Test fun `observed native handling never expands proposals even when configured expansion fails`() {
         val env = environment()
-        val expander = UnifiedSemanticExpander(maxResponses = 1, maxAttempts = 1)
+        val expander = ArgentumActionGenerator(maxResponses = 1, maxAttempts = 1)
         val world = ArgentumSearchWorld.create(env, "no-proposal-dependency", 21L, 42613L,
             expander = expander, historyObjectReference = mode)
         assertFailsWith<IllegalArgumentException> { world.expandChoices(64) }
@@ -36,26 +37,26 @@ class ExactObservedCorrespondenceTest {
         val native = PassPriority(requireNotNull(env.state.priorityPlayerId))
         val expected = env.fork()
         assertIs<com.wingedsheep.gym.ExactlyOneSubmissionResult.Applied>(expected.stepExactlyOne(native))
-        val before = world.epistemicState("p0")
+        val before = world.informationStateWithoutMenu("p0")
         assertTrue(world.applyObservedAction(native).result.accepted)
         assertEquals(attempts, expander.expansionAttempts)
         assertEquals(0, world.observedProposalExpansionAttempts())
-        assertEquals(ArgentumStateFingerprint.of(expected.state), world.authoritativeFingerprint())
-        assertNotEquals(before.historyCommitment, world.epistemicState("p0").historyCommitment)
+        assertEquals(ArgentumStateFingerprint.of(expected.state), world.stateFingerprint())
+        assertNotEquals(before.historyCommitment, world.informationStateWithoutMenu("p0").historyCommitment)
     }
     private data class Fixture(val world: ArgentumSearchWorld, val attacker: EntityId,
         val blockers: List<EntityId>, val players: List<EntityId>, val attackers: List<EntityId>)
 
     private fun fixture(reverse: Boolean = false,
-        reference: PerspectiveHistoryObjectReference = mode, twoAttackers: Boolean = false,
+        reference: HistoryObjectReferencing = mode, twoAttackers: Boolean = false,
         beforeAttack: Boolean = false): Fixture {
         val env = environment()
         val players = env.playerIds
-        val history = PerspectiveHistory(players, objectReference = reference)
+        val history = InformationStateRecorder(players, objectReference = reference)
         var state = env.state
         fun projections(s: GameState) = players.associateWith { viewer ->
             val observation = ObservationBuilder(registry).build(s, viewer, emptyList()).observation as TrainingObservation
-            SafeObservationProjector().project(observation, null,
+            PlayerObservationProjector().project(observation, null,
                 ArgentumPolicyRuntimeProjector.project(s, viewer, registry, observation),
                 qualifiedBattlefieldHandles = if (reference == mode) history.qualifiedBattlefieldBindings(viewer, s) else emptyMap(),
                 canonicalCombatRows = reference == mode)
@@ -89,8 +90,8 @@ class ExactObservedCorrespondenceTest {
 
     private fun advanceTo(world: ArgentumSearchWorld, step: Step) {
         repeat(64) {
-            if (world.authoritativeStateForHost().step == step) return
-            val state = world.authoritativeStateForHost()
+            if (world.trueState().step == step) return
+            val state = world.trueState()
             assertNull(state.pendingDecision, "No unrelated decisions may be consumed by this fixture")
             assertTrue(world.applyObservedAction(PassPriority(requireNotNull(state.priorityPlayerId))).result.accepted)
         }
@@ -109,13 +110,13 @@ class ExactObservedCorrespondenceTest {
         val omittedId = a.blockers.single { it !in oneBlock.second.blockers }
         val declaration = mutableMapOf(omittedId to listOf(a.attacker))
         val action = DeclareBlockers(a.players[1], declaration)
-        val capture = a.world.captureObservedActionForHost("p0", action)
+        val capture = a.world.recordObservedAction("p0", action)
         assertEquals(oneBlock.first, capture.searchGroup)
         assertEquals("p1", capture.actingSite.actor)
-        assertEquals("p0", capture.observerInformation.perspectivePlayerId)
-        val local = assertIs<ArgentumActionCorrespondence.Matched>(a.world.correspondObservedActionForHost(capture))
+        assertEquals("p0", capture.observerInformation.viewerId)
+        val local = assertIs<ObservedActionMatch.Matched>(a.world.matchObservedAction(capture))
         assertEquals(0.0, local.memberProbability)
-        val mapped = assertIs<ArgentumActionCorrespondence.Matched>(b.world.correspondObservedActionForHost(capture))
+        val mapped = assertIs<ObservedActionMatch.Matched>(b.world.matchObservedAction(capture))
         assertNotEquals(action, mapped.action)
         val frozen = capture.observerInformation
         declaration.clear()
@@ -125,8 +126,8 @@ class ExactObservedCorrespondenceTest {
         assertEquals(a.world.informationState("p0"), b.world.informationState("p0"),
             "Compare the complete snapshot, history, commitment and knowledge, not one event")
         assertEquals(frozen, capture.observerInformation)
-        assertNotEquals(frozen, a.world.epistemicState("p0"))
-        val detail = a.world.informationState("p0").history.mapNotNull { it.detail as? PerspectiveEventDetail.Combat }
+        assertNotEquals(frozen, a.world.informationStateWithoutMenu("p0"))
+        val detail = a.world.informationState("p0").history.mapNotNull { it.detail as? ObservedEventDetail.Combat }
             .last { it.declaration == "BLOCKERS" }
         val expectedHandle = capture.bindings.single { it.nativeId == omittedId }.observerHandle
         assertEquals(setOf("history-object:v1:$expectedHandle"), detail.assignments.keys)
@@ -135,7 +136,7 @@ class ExactObservedCorrespondenceTest {
     private fun assertNativeAndSearchSuccessors(root: ArgentumSearchWorld,
         expectedOptionality: Boolean? = null, accept: (GameAction) -> Boolean) {
         val actor = requireNotNull(root.actorToAct())
-        val state = root.authoritativeStateForHost()
+        val state = root.trueState()
         val pair = root.expandChoices().candidates.map { choice -> choice to when (val resolved = root.resolveChoice(choice)) {
             is ArgentumResolvedChoice.Action -> resolved.value
             is ArgentumResolvedChoice.Decision -> SubmitDecision(requireNotNull(state.pendingDecision).playerId, resolved.value)
@@ -145,16 +146,16 @@ class ExactObservedCorrespondenceTest {
         assertTrue(selected.step(pair.first).accepted)
         assertTrue(observed.applyObservedAction(pair.second).result.accepted)
         assertEquals(expectedOptionality, selected.informationState(actor).history
-            .mapNotNull { it.detail as? PerspectiveEventDetail.Choice }.last().strategicallyOptional)
+            .mapNotNull { it.detail as? ObservedEventDetail.Choice }.last().strategicallyOptional)
         for (viewer in listOf("p0", "p1")) assertEquals(selected.informationState(viewer), observed.informationState(viewer),
             "Native and search submission must agree for actor=$actor, observer=$viewer")
 
         fun advanceAgainst(factual: ArgentumSearchWorld, exact: ExactObservedAction? = null) {
             val expected = factual.informationState(actor)
-            val belief = ParticleBelief.from(BeliefBatch<Weighted<SearchWorld>>(
+            val belief = ParticleBelief.from(ParticleSet<Weighted<SearchWorld>>(
                 listOf(Weighted(root.fork(), 1.0)), BeliefDiagnostics(BeliefMode.POLICY_CONDITIONED_V1,
                     1, 1, 0, 1.0, 1.0, 0.0, 0)), BeliefMode.POLICY_CONDITIONED_V1)
-            val update = belief.advance(actor, pair.first.signature, updateSeed = 17L, exactAction = exact,
+            val update = belief.propagateAndReweight(actor, pair.first.signature, updateSeed = 17L, exactAction = exact,
                 observation = ParticleObservationCondition(expected.knowledge.knowledgeDigest) {
                     it.informationState(actor) == expected
                 })
@@ -163,15 +164,15 @@ class ExactObservedCorrespondenceTest {
         }
         // Direct factual submission -> signature-based search propagation, including decisions.
         advanceAgainst(observed)
-        val capture = assertNotNull(selected.lastObservedActionCaptureForHost(actor))
+        val capture = assertNotNull(selected.lastObservedActionCapture(actor))
         assertEquals(pair.second, capture.action)
-        assertNull((selected.fork() as ArgentumSearchWorld).lastObservedActionCaptureForHost(actor),
+        assertNull((selected.fork() as ArgentumSearchWorld).lastObservedActionCapture(actor),
             "A derived world must not retain its parent's predecessor")
         if (pair.second is SubmitDecision) {
             // Native decision execution is covered above; qualified decision transport is not
             // implemented and must not gain an artificial match solely for this regression.
             assertEquals(ArgentumCorrespondenceRefusal.UNSUPPORTED_ACTION_FAMILY,
-                assertIs<ArgentumActionCorrespondence.Unsupported>(root.correspondObservedActionForHost(capture)).reason)
+                assertIs<ObservedActionMatch.Unsupported>(root.matchObservedAction(capture)).reason)
         } else {
             // Search factual submission -> exact observed-member propagation.
             advanceAgainst(selected, capture.particleAction())
@@ -185,7 +186,7 @@ class ExactObservedCorrespondenceTest {
     }
 
     @Test fun `historical search retains menu optionality while direct observation declares its changed behavior`() {
-        val root = fixture(reference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1).world
+        val root = fixture(reference = HistoryObjectReferencing.LEGACY_SNAPSHOT_V1).world
         val menu = root.expandChoices()
         assertTrue(menu.candidates.size > 1)
         val choice = menu.candidates.first {
@@ -199,13 +200,13 @@ class ExactObservedCorrespondenceTest {
         assertTrue(root.step(choice).accepted)
         assertTrue(observed.applyObservedAction(native).result.accepted)
         fun optionality(world: ArgentumSearchWorld) = world.informationState(actor).history
-            .mapNotNull { it.detail as? PerspectiveEventDetail.Choice }.last().strategicallyOptional
+            .mapNotNull { it.detail as? ObservedEventDetail.Choice }.last().strategicallyOptional
         assertEquals(true, optionality(root))
         assertNull(optionality(observed))
-        assertNull(root.observedChoicePropagationForHost(actor, choice), "Search retains historical provenance")
-        assertNull((observed.fork() as ArgentumSearchWorld).observedChoicePropagationForHost(actor, choice),
+        assertNull(root.observedChoicePropagation(actor, choice), "Search retains historical provenance")
+        assertNull((observed.fork() as ArgentumSearchWorld).observedChoicePropagation(actor, choice),
             "Derived worlds must not inherit the last accepted observation's origin")
-        val propagation = assertNotNull(observed.observedChoicePropagationForHost(actor, choice))
+        val propagation = assertNotNull(observed.observedChoicePropagation(actor, choice))
         assertTrue(propagation(propagated, choice).accepted)
         assertEquals(observed.informationState(actor), propagated.informationState(actor))
         assertFailsWith<IllegalArgumentException> { propagation(propagated, choice) }
@@ -221,12 +222,12 @@ class ExactObservedCorrespondenceTest {
         assertTrue(block.world.applyObservedAction(DeclareBlockers(block.players[1],
             block.blockers.associateWith { listOf(block.attacker) })).result.accepted)
         repeat(64) {
-            if (block.world.authoritativeStateForHost().pendingDecision != null) {
+            if (block.world.trueState().pendingDecision != null) {
                 assertNativeAndSearchSuccessors(block.world) { it is SubmitDecision }
                 return
             }
             assertTrue(block.world.applyObservedAction(PassPriority(requireNotNull(
-                block.world.authoritativeStateForHost().priorityPlayerId))).result.accepted)
+                block.world.trueState().priorityPlayerId))).result.accepted)
         }
         error("No genuine pending decision")
     }
@@ -273,11 +274,11 @@ class ExactObservedCorrespondenceTest {
         assertNotEquals(a.informationState("p0"), c.informationState("p0"))
         // Independently pin the projection's ordered blocker list: sorting declaration rows
         // must not sort a list whose order can be used for damage assignment.
-        val state = a.authoritativeStateForHost()
-        val reordered = a.withSampledState(state.updateEntity(f.attacker) {
+        val state = a.trueState()
+        val reordered = a.withDeterminizedState(state.updateEntity(f.attacker) {
             it.with(com.wingedsheep.engine.state.components.combat.BlockedComponent(f.blockers.reversed()))
         }, 72L)
-        assertNotEquals(a.epistemicState("p0").observation.combat, reordered.epistemicState("p0").observation.combat)
+        assertNotEquals(a.informationStateWithoutMenu("p0").observation.combat, reordered.informationStateWithoutMenu("p0").observation.combat)
     }
 
     @Test fun `wrong actors and illegal declarations cannot advance history`() {
@@ -289,7 +290,7 @@ class ExactObservedCorrespondenceTest {
         val illegal = f.world.applyObservedAction(DeclareBlockers(f.players[1], mapOf(f.attacker to listOf(f.blockers[0]))))
         assertFalse(illegal.result.accepted)
         assertEquals(before, f.world.informationState("p0"))
-        assertEquals(before.observation, f.world.epistemicState("p0").observation)
+        assertEquals(before.observation, f.world.informationStateWithoutMenu("p0").observation)
     }
 
     @Test fun `pending decision ids rebind while wrong responders refuse`() {
@@ -297,7 +298,7 @@ class ExactObservedCorrespondenceTest {
         assertTrue(f.world.applyObservedAction(DeclareBlockers(f.players[1],
             f.blockers.associateWith { listOf(f.attacker) })).result.accepted)
         repeat(64) {
-            val pending = f.world.authoritativeStateForHost().pendingDecision
+            val pending = f.world.trueState().pendingDecision
             if (pending != null) {
                 assertIs<CombatResolutionDecision>(pending)
                 val choice = f.world.expandChoices().candidates.first()
@@ -311,7 +312,7 @@ class ExactObservedCorrespondenceTest {
                 assertTrue(f.world.applyObservedAction(SubmitDecision(pending.playerId, response)).result.accepted)
                 return
             }
-            assertTrue(f.world.applyObservedAction(PassPriority(requireNotNull(f.world.authoritativeStateForHost().priorityPlayerId))).result.accepted)
+            assertTrue(f.world.applyObservedAction(PassPriority(requireNotNull(f.world.trueState().priorityPlayerId))).result.accepted)
         }
         error("Combat resolution decision was not reached")
     }
@@ -323,17 +324,17 @@ class ExactObservedCorrespondenceTest {
             native?.takeIf { it.blockers.size == 1 }?.let { choice to it }
         }.single()
         val omitted = DeclareBlockers(f.players[1], mapOf(f.blockers.single { it !in selected.blockers } to listOf(f.attacker)))
-        val exact = f.world.captureObservedActionForHost("p0", omitted)
-        fun belief() = ParticleBelief.from(BeliefBatch<Weighted<SearchWorld>>(
+        val exact = f.world.recordObservedAction("p0", omitted)
+        fun belief() = ParticleBelief.from(ParticleSet<Weighted<SearchWorld>>(
             listOf(Weighted(f.world, 1.0)), BeliefDiagnostics(BeliefMode.POLICY_CONDITIONED_V1,
                 1, 1, 0, 1.0, 1.0, 0.0, 0)), BeliefMode.POLICY_CONDITIONED_V1)
         val depleted = assertFailsWith<ExactObservationDepletionException> {
-            belief().advance("p1", group.signature, UniformOpponentPolicy, 7L, exactAction = exact.particleAction())
+            belief().propagateAndReweight("p1", group.signature, UniformOpponentPolicy, 7L, exactAction = exact.particleAction())
         }
         assertEquals(ExactObservationFailureKind.EXACT_MEMBER_ZERO_MASS, depleted.report.kind)
         assertEquals(ExactObservationFailureCounts(1, exactMemberZeroMass = 1), depleted.report.counts)
         val unsupported = assertFailsWith<UnsupportedObservedActionException> {
-            belief().advance("p1", group.signature, UniformOpponentPolicy, 7L,
+            belief().propagateAndReweight("p1", group.signature, UniformOpponentPolicy, 7L,
                 exactAction = ExactObservedAction { ExactObservedActionResolution.Unsupported("MISSING_BINDING") })
         }
         assertEquals(ExactObservationFailureCounts(1, unavailableCorrespondence = 1), unsupported.report?.counts)
@@ -342,7 +343,7 @@ class ExactObservedCorrespondenceTest {
         assertTrue(expected.applyObservedAction(omitted).result.accepted)
         // Without an opponent likelihood this is an observed own/consistency action, not a
         // claim that the omitted member has positive probability under the opponent model.
-        val update = belief().advance("p1", group.signature, updateSeed = 7L,
+        val update = belief().propagateAndReweight("p1", group.signature, updateSeed = 7L,
             exactAction = exact.particleAction(), observation = ParticleObservationCondition(expected.informationState("p0").knowledge.knowledgeDigest) {
                 (it as ArgentumSearchWorld).knowledgeConsistencyFailure("p0", expected.informationState("p0")) == null
             })
@@ -351,56 +352,56 @@ class ExactObservedCorrespondenceTest {
 
     @Test fun `qualified join refuses missing ambiguous and changed incarnations without native equality fallback`() {
         val f = fixture()
-        val capture = f.world.captureObservedActionForHost("p0",
+        val capture = f.world.recordObservedAction("p0",
             DeclareBlockers(f.players[1], mapOf(f.blockers[0] to listOf(f.attacker))))
         val bindings = capture.bindings
         assertTrue(bindings.all { it.observerIncarnationQualified })
         assertEquals(ArgentumCorrespondenceRefusal.MISSING_BINDING,
-            QualifiedObservedObjectCorrespondence.bind(bindings, emptyList()).second)
+            ObservedObjectCorrespondence.bind(bindings, emptyList()).second)
         assertEquals(ArgentumCorrespondenceRefusal.AMBIGUOUS_BINDING,
-            QualifiedObservedObjectCorrespondence.bind(bindings, bindings + bindings.first()).second)
+            ObservedObjectCorrespondence.bind(bindings, bindings + bindings.first()).second)
         assertEquals(ArgentumCorrespondenceRefusal.INCARNATION_MISMATCH,
-            QualifiedObservedObjectCorrespondence.bind(bindings, bindings.map { it.copy(observerIncarnationQualified = false) }).second)
-        val state = f.world.authoritativeStateForHost()
+            ObservedObjectCorrespondence.bind(bindings, bindings.map { it.copy(observerIncarnationQualified = false) }).second)
+        val state = f.world.trueState()
         val id = f.blockers[0]
         val stamp = state.objectIdentities.getValue(id)
-        val changed = f.world.withSampledState(state.copy(objectIdentities = state.objectIdentities +
+        val changed = f.world.withDeterminizedState(state.copy(objectIdentities = state.objectIdentities +
             (id to stamp.copy(generation = stamp.generation + 1000))), 93L)
-        assertIs<ArgentumActionCorrespondence.Unsupported>(changed.correspondObservedActionForHost(capture))
+        assertIs<ObservedActionMatch.Unsupported>(changed.matchObservedAction(capture))
     }
 
     @Test fun `behavior modes preserve historical defaults and explicit representative mass`() {
         val f = fixture()
         val group = f.world.expandChoices().candidates.first { it.operationFamily == SemanticOperationFamily.DECLARE_BLOCKERS }
         val native = assertIs<ArgentumResolvedChoice.Action>(f.world.resolveChoice(group)).value
-        val capture = f.world.captureObservedActionForHost("p0", native)
-        val result = assertIs<ArgentumActionCorrespondence.Matched>(f.world.correspondObservedActionForHost(capture))
+        val capture = f.world.recordObservedAction("p0", native)
+        val result = assertIs<ObservedActionMatch.Matched>(f.world.matchObservedAction(capture))
         assertEquals(1.0, result.memberProbability)
-        assertEquals(ArgentumActionCorrespondence.REPRESENTATIVE_ONLY, result.memberSelectionBehaviorId)
+        assertEquals(ObservedActionMatch.REPRESENTATIVE_ONLY, result.memberSelectionBehaviorId)
         assertEquals(f.world.observedActionBehaviorId(), capture.behaviorId)
-        val old = fixture(reference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
+        val old = fixture(reference = HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
         assertEquals(old.world.expandChoices(), f.world.expandChoices())
         assertNotEquals(old.world.exactRevision(), f.world.exactRevision())
         val env = environment()
-        assertEquals(PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,
+        assertEquals(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1,
             ArgentumSearchWorld.create(env, "legacy", 1, 1).historyObjectReference)
     }
 
     @Test fun `genuine alternate private draw still refuses complete observer information`() {
         val env = environment()
         val original = ArgentumSearchWorld.create(env, "wrong-draw", 3, 3, historyObjectReference = mode)
-        val state = original.authoritativeStateForHost()
+        val state = original.trueState()
         val viewer = env.playerIds[1]
         val library = state.getLibrary(viewer)
         val other = library.indexOfFirst { state.getEntity(it)!!.get<CardComponent>()!!.name !=
             state.getEntity(library.first())!!.get<CardComponent>()!!.name }
         assertTrue(other > 0)
         val swapped = library.toMutableList().apply { val first = this[0]; this[0] = this[other]; this[other] = first }
-        val hypothesis = original.withSampledState(state.copy(zones = state.zones + (ZoneKey(viewer, Zone.LIBRARY) to swapped)), 44L)
+        val hypothesis = original.withDeterminizedState(state.copy(zones = state.zones + (ZoneKey(viewer, Zone.LIBRARY) to swapped)), 44L)
         assertEquals(original.informationState("p1"), hypothesis.informationState("p1"))
         val handSize = state.getHand(viewer).size
         repeat(96) {
-            if (original.authoritativeStateForHost().getHand(viewer).size > handSize) {
+            if (original.trueState().getHand(viewer).size > handSize) {
                 assertNotNull(hypothesis.knowledgeConsistencyFailure("p1", original.informationState("p1")))
                 return
             }

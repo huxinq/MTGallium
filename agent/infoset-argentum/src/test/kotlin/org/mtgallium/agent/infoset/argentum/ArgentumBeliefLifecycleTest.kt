@@ -102,7 +102,7 @@ class ArgentumBeliefLifecycleTest {
         }
         assertTrue(alternatives.size >= 2)
 
-        val history = PerspectiveHistory(fixture.environment.playerIds)
+        val history = InformationStateRecorder(fixture.environment.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(HandLookedAtEvent(viewer, opponent, listOf(revealed))),
             actorViewer = viewer,
@@ -116,7 +116,7 @@ class ArgentumBeliefLifecycleTest {
         assertTrue(expected.knowledge.knownObjects.any { it.cardName == revealedName && it.zone == "HAND" })
 
         alternatives.take(4).forEach { alternative ->
-            val contradictory = world.withSampledState(
+            val contradictory = world.withDeterminizedState(
                 swapCardIdentities(state, revealed, alternative),
                 futureChanceStreamIdentity = 11_101L,
             )
@@ -126,6 +126,7 @@ class ArgentumBeliefLifecycleTest {
     }
 
     @Test
+
     fun `a completely remembered hidden hand is pinned during rebuild and rejuvenation`() {
         val uniqueDeck = PortalSet.cards.asSequence()
             .map { it.name }
@@ -153,7 +154,7 @@ class ArgentumBeliefLifecycleTest {
         val viewer = environment.playerIds[0]
         val opponent = environment.playerIds[1]
         val rememberedHand = environment.state.getHand(opponent)
-        val history = PerspectiveHistory(environment.playerIds)
+        val history = InformationStateRecorder(environment.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(HandLookedAtEvent(viewer, opponent, rememberedHand)),
             actorViewer = viewer,
@@ -182,10 +183,10 @@ class ArgentumBeliefLifecycleTest {
         rebuilt.particles.forEach { weighted ->
             val sampled = assertIs<ArgentumSearchWorld>(weighted.value)
             rememberedNames.forEach { (objectId, cardName) ->
-                assertEquals(cardName, this.cardName(sampled.authoritativeState(), objectId))
+                assertEquals(cardName, this.cardName(sampled.trueState(), objectId))
                 assertEquals(
                     environment.state.getEntity(objectId)?.get<RevealedToComponent>(),
-                    sampled.authoritativeState().getEntity(objectId)?.get<RevealedToComponent>(),
+                    sampled.trueState().getEntity(objectId)?.get<RevealedToComponent>(),
                 )
             }
             assertNull(sampled.knowledgeConsistencyFailure("p0", expected))
@@ -199,16 +200,17 @@ class ArgentumBeliefLifecycleTest {
             )
         )
         rememberedNames.forEach { (objectId, cardName) ->
-            assertEquals(cardName, this.cardName(rejuvenated.authoritativeState(), objectId))
+            assertEquals(cardName, this.cardName(rejuvenated.trueState(), objectId))
             assertEquals(
                 environment.state.getEntity(objectId)?.get<RevealedToComponent>(),
-                rejuvenated.authoritativeState().getEntity(objectId)?.get<RevealedToComponent>(),
+                rejuvenated.trueState().getEntity(objectId)?.get<RevealedToComponent>(),
             )
         }
         assertNull(rejuvenated.knowledgeConsistencyFailure("p0", expected))
     }
 
     @Test
+
     fun `known library prefix survives rebuild and refresh across sampled orders`() {
         val fixture = fixture(seed = 1_102L)
         val viewer = fixture.environment.playerIds[0]
@@ -220,7 +222,7 @@ class ArgentumBeliefLifecycleTest {
         }
         assertTrue(alternatives.isNotEmpty())
 
-        val history = PerspectiveHistory(fixture.environment.playerIds)
+        val history = InformationStateRecorder(fixture.environment.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(LookedAtCardsEvent(viewer, knownTop, "belief property known top")),
             actorViewer = viewer,
@@ -243,17 +245,17 @@ class ArgentumBeliefLifecycleTest {
             val contradictoryState = state.copy(
                 zones = state.zones + (ZoneKey(viewer, Zone.LIBRARY) to reordered),
             )
-            val contradictory = world.withSampledState(
+            val contradictory = world.withDeterminizedState(
                 contradictoryState,
                 futureChanceStreamIdentity = 11_102L,
             )
             assertEquals("LIBRARY_ORDER_MISMATCH", contradictory.knowledgeConsistencyFailure("p0", expected))
         }
         repeat(4) { trial ->
-            val permutation = world.permuteHiddenTruthForHost("p0", trial.toLong())
+            val permutation = world.forkPermutingHiddenCards("p0", trial.toLong())
             val child = assertNotNull(permutation.world, permutation.rejection)
-            assertEquals(knownTop, child.authoritativeState().getLibrary(viewer).take(3))
-            knownTop.forEach { assertEquals(state.getEntity(it), child.authoritativeState().getEntity(it)) }
+            assertEquals(knownTop, child.trueState().getLibrary(viewer).take(3))
+            knownTop.forEach { assertEquals(state.getEntity(it), child.trueState().getEntity(it)) }
             assertNull(child.knowledgeConsistencyFailure("p0", expected))
         }
         verifyRebuildAndRefresh(world, fixture.registry, "p0", "library-order reveal")
@@ -277,7 +279,7 @@ class ArgentumBeliefLifecycleTest {
                 (ZoneKey(opponent, Zone.GRAVEYARD) to (beforeState.getGraveyard(opponent) + revealed)),
         )
 
-        val history = PerspectiveHistory(fixture.environment.playerIds)
+        val history = InformationStateRecorder(fixture.environment.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(HandLookedAtEvent(viewer, opponent, listOf(revealed))),
             actorViewer = viewer,
@@ -322,7 +324,7 @@ class ArgentumBeliefLifecycleTest {
             (ZoneKey(opponent, replacementZone) to zoneIds(afterState, opponent, replacementZone).map {
                 if (it == replacement) revealed else it
             })
-        val contradictory = world.withSampledState(
+        val contradictory = world.withDeterminizedState(
             afterState.copy(zones = contradictoryZones),
             futureChanceStreamIdentity = 11_103L,
         )
@@ -343,7 +345,7 @@ class ArgentumBeliefLifecycleTest {
             stack = beforeState.stack + spell,
         )
 
-        val history = PerspectiveHistory(fixture.environment.playerIds)
+        val history = InformationStateRecorder(fixture.environment.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(
                 SpellCastEvent(
@@ -380,19 +382,19 @@ class ArgentumBeliefLifecycleTest {
     fun `private choice survives entitled refresh without entering the opponents knowledge`() {
         val fixture = fixture(seed = 1_104L, skipMulligans = false)
         val actor = fixture.environment.playerIds[0]
-        val firstHistory = PerspectiveHistory(fixture.environment.playerIds)
-        val secondHistory = PerspectiveHistory(fixture.environment.playerIds)
+        val firstHistory = InformationStateRecorder(fixture.environment.playerIds)
+        val secondHistory = InformationStateRecorder(fixture.environment.playerIds)
         firstHistory.recordChoice(
             actor,
             privateChoice("bottom-mountain", "Mountain"),
             privateToActor = true,
-            kind = org.mtgallium.agent.infoset.core.PolicyHistoryEventKind.MULLIGAN,
+            kind = org.mtgallium.agent.infoset.core.ObservedEventKind.MULLIGAN,
         )
         secondHistory.recordChoice(
             actor,
             privateChoice("bottom-goblin", "Raging Goblin"),
             privateToActor = true,
-            kind = org.mtgallium.agent.infoset.core.PolicyHistoryEventKind.MULLIGAN,
+            kind = org.mtgallium.agent.infoset.core.ObservedEventKind.MULLIGAN,
         )
         val firstWorld = fixture.world.withRememberedHistoryForVerification(firstHistory)
         val secondWorld = fixture.world.withRememberedHistoryForVerification(secondHistory)
@@ -451,6 +453,7 @@ class ArgentumBeliefLifecycleTest {
     }
 
     @Test
+
     fun `hidden permutations preserve remembered hand identities visible cards and engine chance`() {
         val fixture = fixture(seed = 1107L)
         val environment = fixture.environment
@@ -459,7 +462,7 @@ class ArgentumBeliefLifecycleTest {
         val hand = environment.state.getHand(opponent)
         val remembered = hand.take(2)
         val state = environment.state
-        val history = PerspectiveHistory(environment.playerIds)
+        val history = InformationStateRecorder(environment.playerIds)
         history.recordEngineEvents(
             engineEvents = listOf(HandLookedAtEvent(viewer, opponent, remembered)),
             actorViewer = viewer, beforeState = state, afterState = state,
@@ -472,20 +475,21 @@ class ArgentumBeliefLifecycleTest {
         val pinned = remembered + state.getHand(viewer)
         var accepted = 0
         repeat(8) { trial ->
-            val proposal = world.permuteHiddenTruthForHost("p0", trial.toLong())
+            val proposal = world.forkPermutingHiddenCards("p0", trial.toLong())
             val child = assertNotNull(proposal.world, proposal.rejection)
             accepted++
             assertTrue(proposal.changedObjects > 0)
-            assertEquals(state.rng, child.authoritativeState().rng)
+            assertEquals(state.rng, child.trueState().rng)
             assertEquals(expected.informationStateDigest, child.informationState("p0").informationStateDigest)
-            pinned.forEach { assertEquals(state.getEntity(it), child.authoritativeState().getEntity(it)) }
-            assertEquals(child.authoritativeState(), world.permuteHiddenTruthForHost("p0", trial.toLong()).world!!.authoritativeState())
+            pinned.forEach { assertEquals(state.getEntity(it), child.trueState().getEntity(it)) }
+            assertEquals(child.trueState(), world.forkPermutingHiddenCards("p0", trial.toLong()).world!!.trueState())
         }
         assertEquals(8, accepted)
-        assertEquals(state, world.authoritativeState())
+        assertEquals(state, world.trueState())
     }
 
     @Test
+
     fun `selectively revealed source is refused without moving any card`() {
         val fixture = fixture(seed = 1107L)
         val environment = fixture.environment
@@ -495,10 +499,10 @@ class ArgentumBeliefLifecycleTest {
         environment.restore(state, environment.playerIds, environment.stepCount)
         val world = ArgentumSearchWorld.create(environment, "revealed-permutation", 1107L,
             effectiveSetupSeed = 1107L, knownDecks = knownDecks)
-        val proposal = world.permuteHiddenTruthForHost("p0", 1L)
+        val proposal = world.forkPermutingHiddenCards("p0", 1L)
         assertNull(proposal.world)
         assertEquals("UNSUPPORTED_SOURCE_INFORMATION", proposal.rejection)
-        assertEquals(state, world.authoritativeState())
+        assertEquals(state, world.trueState())
     }
 
     private fun fixture(seed: Long, skipMulligans: Boolean = true): Fixture {
@@ -538,7 +542,7 @@ class ArgentumBeliefLifecycleTest {
         cardRegistry: CardRegistry,
     ) = players.associateWith { viewer ->
         val observation = ObservationBuilder(cardRegistry).build(state, viewer, emptyList()).observation as TrainingObservation
-        SafeObservationProjector().project(observation)
+        PlayerObservationProjector().project(observation)
     }
 
     private fun swapCardIdentities(state: GameState, first: EntityId, second: EntityId): GameState {

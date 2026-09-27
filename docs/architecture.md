@@ -25,13 +25,16 @@ player decision; see [simulation](architecture/information-and-decisions.md#live
 
 ## Module responsibilities
 
+The planning module uses `org.mtgallium.agent.infoset.planning`. Semantics uses
+`org.mtgallium.agent.infoset.core`, so a type’s package identifies its layer.
+
 | Location | Responsibility |
 | --- | --- |
 | `agent/infoset-semantics` | Player information, history, semantic actions, and the contracts policies see. |
 | `agent/infoset-planning` | Planning algorithms and root selection. |
 | `agent/infoset-argentum` | Trusted Argentum projections, engine-backed worlds, and transitions. |
-| `agent/mono-red-models` | Mono-Red features and value evaluators. |
-| `agent/neural-policy` | Factual tensor encoding. |
+| `agent/value-models` | Mono-Red features and value evaluators. |
+| `agent/neural-policy` | Byte-token tensor encoding. |
 | `agent/argentum-policy` | Argentum policy lifecycle, defaults, and search/leaf composition. |
 | `research/workbench` | Direct games, Python bridge, native policies and the provider hook for other builds, feature/kernel routines, and CLI entry points. |
 | `integration/argentum-policy` | Argentum application integration. |

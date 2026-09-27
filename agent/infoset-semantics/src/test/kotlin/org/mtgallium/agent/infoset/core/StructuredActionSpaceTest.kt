@@ -26,7 +26,7 @@ class StructuredActionSpaceTest {
 
     private data class Bits(val value: String)
 
-    private class BinarySpace : StructuredActionSpace<Bits, Char, String> {
+    private class BinarySpace : FactoredActionSpace<Bits, Char, String> {
         override fun start() = Bits("")
         override fun legalExtensions(partial: Bits) = sequenceOf('0', '1')
         override fun extend(partial: Bits, extension: Char) = Bits(partial.value + extension)
@@ -42,7 +42,7 @@ class StructuredActionSpaceTest {
 
     private data class Routed(val depth: Int, val value: String)
 
-    private class DuplicateRouteSpace : StructuredActionSpace<Routed, String, String> {
+    private class DuplicateRouteSpace : FactoredActionSpace<Routed, String, String> {
         override fun start() = Routed(0, "")
         override fun legalExtensions(partial: Routed) = when (partial.depth) {
             0 -> sequenceOf("left", "right")

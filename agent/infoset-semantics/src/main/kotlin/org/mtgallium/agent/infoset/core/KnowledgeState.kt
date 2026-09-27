@@ -15,8 +15,8 @@ const val KNOWLEDGE_SCHEMA_CURRENT: Int = KNOWLEDGE_SCHEMA_V2
  * These records describe what the viewer was entitled to learn. They are not serialized engine
  * events and must never contain authoritative entity ids, hidden card identities, or engine RNG.
  */
-@Serializable
-sealed interface PerspectiveEventDetail {
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PerspectiveEventDetail")
+sealed interface ObservedEventDetail {
     val schemaVersion: Int
 
     @Serializable
@@ -36,7 +36,7 @@ sealed interface PerspectiveEventDetail {
         val libraryBottomCardNames: List<String> = emptyList(),
         /** Stable perspective-local bindings corresponding to [libraryBottomCardNames]. */
         val libraryBottomKnowledgeObjectKeys: List<String> = emptyList(),
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("zone_change")
@@ -57,7 +57,7 @@ sealed interface PerspectiveEventDetail {
          * true preserves the meaning of already-persisted zone-change records.
          */
         val continuesAsCurrentObject: Boolean = true,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("draw")
@@ -68,7 +68,7 @@ sealed interface PerspectiveEventDetail {
         /** Contains only cards whose identities the viewer was entitled to know. */
         val knownCardNames: List<String> = emptyList(),
         val knowledgeObjectKeys: List<String> = emptyList(),
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("reveal")
@@ -78,7 +78,7 @@ sealed interface PerspectiveEventDetail {
         val zone: String?,
         val cardNames: List<String>,
         val knowledgeObjectKeys: List<String> = emptyList(),
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("look")
@@ -91,7 +91,7 @@ sealed interface PerspectiveEventDetail {
         val knowledgeObjectKeys: List<String> = emptyList(),
         val ordered: Boolean,
         val fromTop: Boolean,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("library_reorder")
@@ -100,7 +100,7 @@ sealed interface PerspectiveEventDetail {
         val playerId: String,
         /** Top card first. Empty is permitted only when the identities were not observable. */
         val orderedCardNames: List<String>,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("shuffle")
@@ -113,7 +113,7 @@ sealed interface PerspectiveEventDetail {
          * after this shuffle. Empty preserves the behavior of schema-v1 records.
          */
         val invalidatedKnowledgeObjectKeys: List<String> = emptyList(),
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("life_change")
@@ -123,7 +123,7 @@ sealed interface PerspectiveEventDetail {
         val oldLife: Int,
         val newLife: Int,
         val reason: String,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("damage")
@@ -135,7 +135,7 @@ sealed interface PerspectiveEventDetail {
         val targetObjectRef: String?,
         val amount: Int,
         val combat: Boolean,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("counter_change")
@@ -145,7 +145,7 @@ sealed interface PerspectiveEventDetail {
         val objectName: String,
         val counterType: String,
         val delta: Int,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("object_state")
@@ -160,7 +160,7 @@ sealed interface PerspectiveEventDetail {
         @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
         @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
         val knowledgeObjectKey: String? = null,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     /** Public cause-and-result structure that is not recoverable from a later board snapshot. */
     @Serializable
@@ -179,7 +179,7 @@ sealed interface PerspectiveEventDetail {
         val sourceKnowledgeObjectKey: String? = null,
         val sourceOwnerId: String? = null,
         val sourceZoneAfter: String? = null,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     /** A visible resource change such as mana being added or spent. */
     @Serializable
@@ -192,7 +192,7 @@ sealed interface PerspectiveEventDetail {
         val reason: String?,
         val sourceName: String? = null,
         val sourceObjectRef: String? = null,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     /** A visible characteristic change whose cause matters even if it later expires. */
     @Serializable
@@ -204,7 +204,7 @@ sealed interface PerspectiveEventDetail {
         val characteristic: String,
         val value: String,
         val sourceName: String?,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("combat")
@@ -216,7 +216,7 @@ sealed interface PerspectiveEventDetail {
         val assignments: Map<String, List<String>> = emptyMap(),
         /** Named, perspective-safe relationships used by replay and future policy consumers. */
         val subjects: List<PerspectiveCombatSubject> = emptyList(),
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("turn_structure")
@@ -227,7 +227,7 @@ sealed interface PerspectiveEventDetail {
         val step: String?,
         val activePlayerId: String?,
         val priorityPlayerId: String?,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     @Serializable
     @SerialName("terminal")
@@ -235,7 +235,7 @@ sealed interface PerspectiveEventDetail {
         override val schemaVersion: Int = PERSPECTIVE_EVENT_SCHEMA_V1,
         val winnerId: String?,
         val reason: String,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 
     /**
      * A safe snapshot changed but the transition family is outside the supported event vocabulary.
@@ -248,7 +248,7 @@ sealed interface PerspectiveEventDetail {
         override val schemaVersion: Int = PERSPECTIVE_EVENT_SCHEMA_V1,
         val engineEventType: String,
         val reason: String,
-    ) : PerspectiveEventDetail
+    ) : ObservedEventDetail
 }
 
 @Serializable
@@ -261,8 +261,8 @@ data class PerspectiveCombatSubject(
     val amountsByRelatedObjectRef: Map<String, Int> = emptyMap(),
 )
 
-@Serializable
-data class PolicyZoneKnowledge(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyZoneKnowledge")
+data class ZoneKnowledge(
     val ownerId: String,
     val zone: String,
     val size: Int,
@@ -270,16 +270,16 @@ data class PolicyZoneKnowledge(
     val knownCardCounts: Map<String, Int> = emptyMap(),
 )
 
-@Serializable
-data class PolicyKnownObject(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyKnownObject")
+data class KnownObject(
     val knowledgeObjectKey: String,
     val ownerId: String,
     val zone: String,
     val cardName: String,
 )
 
-@Serializable
-data class PolicyKnownLibraryOrder(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyKnownLibraryOrder")
+data class KnownLibraryOrder(
     val playerId: String,
     val shuffleEpoch: Int,
     /** Top card first; null entries are positions whose identity remains unknown. */
@@ -292,18 +292,18 @@ data class PolicyKnownLibraryOrder(
  * Deterministic facts recoverable from the known decklists and the viewer's safe event ledger.
  * Probabilities and sampled worlds deliberately do not live in this DTO.
  */
-@Serializable
-data class PolicyKnowledgeState(
+@Serializable @SerialName("org.mtgallium.agent.infoset.core.PolicyKnowledgeState")
+data class PlayerKnowledge(
     val schemaVersion: Int = KNOWLEDGE_SCHEMA_CURRENT,
-    val perspectivePlayerId: String,
+    @kotlinx.serialization.SerialName("perspectivePlayerId") val viewerId: String,
     val deckCardCounts: Map<String, Map<String, Int>> = emptyMap(),
-    val zones: List<PolicyZoneKnowledge> = emptyList(),
-    val knownObjects: List<PolicyKnownObject> = emptyList(),
-    val knownLibraryOrders: List<PolicyKnownLibraryOrder> = emptyList(),
+    val zones: List<ZoneKnowledge> = emptyList(),
+    val knownObjects: List<KnownObject> = emptyList(),
+    val knownLibraryOrders: List<KnownLibraryOrder> = emptyList(),
     /** Known-deck cards not assigned to a viewer-known identity in a particular zone. */
     val unlocatedCardCounts: Map<String, Map<String, Int>> = emptyMap(),
     /** False means at least one visible transition could not be represented safely and exactly. */
-    val epistemicallyComplete: Boolean = true,
+    @kotlinx.serialization.SerialName("epistemicallyComplete") val isComplete: Boolean = true,
     val unsupportedReasons: List<String> = emptyList(),
     val knowledgeDigest: String,
 ) {
@@ -312,15 +312,15 @@ data class PolicyKnowledgeState(
         require(zones.all { it.size >= 0 })
         require(deckCardCounts.values.flatMap { it.values }.all { it >= 0 })
         require(unlocatedCardCounts.values.flatMap { it.values }.all { it >= 0 })
-        require(epistemicallyComplete || unsupportedReasons.isNotEmpty())
+        require(isComplete || unsupportedReasons.isNotEmpty())
     }
 
     companion object {
-        fun empty(perspectivePlayerId: String): PolicyKnowledgeState = PolicyKnowledgeState(
-            perspectivePlayerId = perspectivePlayerId,
-            epistemicallyComplete = false,
+        fun empty(viewerId: String): PlayerKnowledge = PlayerKnowledge(
+            viewerId = viewerId,
+            isComplete = false,
             unsupportedReasons = listOf("known deck and safe event ledger were not supplied"),
-            knowledgeDigest = PolicyJson.sha256("empty-knowledge:$perspectivePlayerId"),
+            knowledgeDigest = CanonicalJson.sha256("empty-knowledge:$viewerId"),
         )
     }
 }
@@ -328,12 +328,12 @@ data class PolicyKnowledgeState(
 /**
  * Forkable event-derived knowledge state used during ordinary forward play.
  *
- * [PolicyKnowledgeReducer] remains the replay oracle: it constructs a fresh accumulator and applies
+ * [KnowledgeReplay] remains the replay oracle: it constructs a fresh accumulator and applies
  * the complete safe prefix. Production worlds keep one accumulator per perspective and append each
  * event once.
  */
-class PolicyKnowledgeAccumulator private constructor(
-    private val knownObjects: LinkedHashMap<String, PolicyKnownObject>,
+class KnowledgeTracker private constructor(
+    private val knownObjects: LinkedHashMap<String, KnownObject>,
     private val shuffleEpochs: LinkedHashMap<String, Int>,
     private val knownOrders: LinkedHashMap<String, MutableList<String?>>,
     private val knownBottomOrders: LinkedHashMap<String, MutableList<String?>>,
@@ -341,7 +341,7 @@ class PolicyKnowledgeAccumulator private constructor(
 ) {
     constructor() : this(linkedMapOf(), linkedMapOf(), linkedMapOf(), linkedMapOf(), mutableListOf())
 
-    fun fork(): PolicyKnowledgeAccumulator = PolicyKnowledgeAccumulator(
+    fun fork(): KnowledgeTracker = KnowledgeTracker(
         knownObjects = LinkedHashMap(knownObjects),
         shuffleEpochs = LinkedHashMap(shuffleEpochs),
         knownOrders = LinkedHashMap(knownOrders.mapValues { (_, order) -> order.toMutableList() }),
@@ -349,10 +349,10 @@ class PolicyKnowledgeAccumulator private constructor(
         unsupported = unsupported.toMutableList(),
     )
 
-    fun append(event: PolicyHistoryEvent) {
+    fun append(event: ObservedEvent) {
         when (val detail = event.detail) {
             null -> Unit // Legacy compatibility; snapshot data still supplies current facts.
-            is PerspectiveEventDetail.Choice -> {
+            is ObservedEventDetail.Choice -> {
                 if (detail.libraryBottomCardNames.isNotEmpty()) {
                     require(detail.libraryBottomCardNames.size == detail.libraryBottomKnowledgeObjectKeys.size)
                     val owner = requireNotNull(event.actor) { "Library-bottom knowledge requires an actor" }
@@ -361,15 +361,15 @@ class PolicyKnowledgeAccumulator private constructor(
                         .toMutableList()
                     detail.libraryBottomCardNames.forEachIndexed { index, name ->
                         val key = detail.libraryBottomKnowledgeObjectKeys[index]
-                        knownObjects[key] = PolicyKnownObject(key, owner, "LIBRARY", name)
+                        knownObjects[key] = KnownObject(key, owner, "LIBRARY", name)
                     }
                 }
             }
-            is PerspectiveEventDetail.ZoneChange -> {
+            is ObservedEventDetail.ZoneChange -> {
                 if (!detail.continuesAsCurrentObject) {
                     detail.knowledgeObjectKey?.let(knownObjects::remove)
                 } else if (detail.cardName != null && detail.knowledgeObjectKey != null) {
-                    knownObjects[detail.knowledgeObjectKey] = PolicyKnownObject(
+                    knownObjects[detail.knowledgeObjectKey] = KnownObject(
                         detail.knowledgeObjectKey,
                         detail.ownerId,
                         detail.toZone,
@@ -389,16 +389,16 @@ class PolicyKnowledgeAccumulator private constructor(
                     }
                 }
             }
-            is PerspectiveEventDetail.Causal -> {
+            is ObservedEventDetail.Causal -> {
                 val key = detail.sourceKnowledgeObjectKey
                 val owner = detail.sourceOwnerId
                 val zone = detail.sourceZoneAfter
                 val name = detail.sourceName
                 if (key != null && owner != null && zone != null && name != null) {
-                    knownObjects[key] = PolicyKnownObject(key, owner, zone, name)
+                    knownObjects[key] = KnownObject(key, owner, zone, name)
                 }
             }
-            is PerspectiveEventDetail.ObjectState -> {
+            is ObservedEventDetail.ObjectState -> {
                 // A face change preserves the remembered object's owner, zone and continuity.
                 // Display references are observation-local and cannot identify historical objects.
                 val key = detail.knowledgeObjectKey
@@ -408,10 +408,10 @@ class PolicyKnowledgeAccumulator private constructor(
                     }
                 }
             }
-            is PerspectiveEventDetail.Draw -> {
+            is ObservedEventDetail.Draw -> {
                 detail.knownCardNames.forEachIndexed { index, name ->
                     val key = detail.knowledgeObjectKeys.getOrNull(index) ?: return@forEachIndexed
-                    knownObjects[key] = PolicyKnownObject(key, detail.playerId, "HAND", name)
+                    knownObjects[key] = KnownObject(key, detail.playerId, "HAND", name)
                 }
                 val order = knownOrders[detail.playerId]
                 if (order != null) {
@@ -419,10 +419,10 @@ class PolicyKnowledgeAccumulator private constructor(
                     if (order.isEmpty()) knownOrders.remove(detail.playerId)
                 }
             }
-            is PerspectiveEventDetail.Reveal -> {
+            is ObservedEventDetail.Reveal -> {
                 detail.cardNames.forEachIndexed { index, name ->
                     val key = detail.knowledgeObjectKeys.getOrNull(index) ?: return@forEachIndexed
-                    knownObjects[key] = PolicyKnownObject(
+                    knownObjects[key] = KnownObject(
                         key,
                         detail.ownerId,
                         detail.zone ?: "UNKNOWN",
@@ -430,19 +430,19 @@ class PolicyKnowledgeAccumulator private constructor(
                     )
                 }
             }
-            is PerspectiveEventDetail.Look -> {
+            is ObservedEventDetail.Look -> {
                 detail.cardNames.forEachIndexed { index, name ->
                     val key = detail.knowledgeObjectKeys.getOrNull(index) ?: return@forEachIndexed
-                    knownObjects[key] = PolicyKnownObject(key, detail.ownerId, detail.zone, name)
+                    knownObjects[key] = KnownObject(key, detail.ownerId, detail.zone, name)
                 }
                 if (detail.zone == "LIBRARY" && detail.ordered && detail.fromTop) {
                     knownOrders[detail.ownerId] = detail.cardNames.map { it as String? }.toMutableList()
                 }
             }
-            is PerspectiveEventDetail.LibraryReorder -> {
+            is ObservedEventDetail.LibraryReorder -> {
                 knownOrders[detail.playerId] = detail.orderedCardNames.map { it as String? }.toMutableList()
             }
-            is PerspectiveEventDetail.Shuffle -> {
+            is ObservedEventDetail.Shuffle -> {
                 shuffleEpochs.compute(detail.playerId) { _, epoch -> (epoch ?: 0) + 1 }
                 knownOrders.remove(detail.playerId)
                 knownBottomOrders.remove(detail.playerId)
@@ -451,20 +451,20 @@ class PolicyKnowledgeAccumulator private constructor(
                     known.ownerId == detail.playerId && known.zone == "LIBRARY"
                 }
             }
-            is PerspectiveEventDetail.UnsupportedVisibleTransition -> {
+            is ObservedEventDetail.UnsupportedVisibleTransition -> {
                 unsupported += "${detail.engineEventType}: ${detail.reason}"
             }
             else -> Unit
         }
     }
 
-    fun append(events: Iterable<PolicyHistoryEvent>) = events.forEach(::append)
+    fun append(events: Iterable<ObservedEvent>) = events.forEach(::append)
 
     fun snapshot(
-        perspectivePlayerId: String,
+        viewerId: String,
         knownDecks: Map<String, Map<String, Int>>,
         currentObservation: PlayerObservationSnapshot,
-    ): PolicyKnowledgeState {
+    ): PlayerKnowledge {
         val zoneSizes = linkedMapOf<Pair<String, String>, Int>()
         val knownByZone = linkedMapOf<Pair<String, String>, MutableMap<String, Int>>()
         currentObservation.zones.forEach { zone ->
@@ -481,7 +481,7 @@ class PolicyKnowledgeAccumulator private constructor(
         }
 
         val zones = zoneSizes.entries.sortedWith(compareBy({ it.key.first }, { it.key.second })).map { (key, size) ->
-            PolicyZoneKnowledge(
+            ZoneKnowledge(
                 ownerId = key.first,
                 zone = key.second,
                 size = size,
@@ -499,7 +499,7 @@ class PolicyKnowledgeAccumulator private constructor(
         }.toSortedMap()
         val orders = knownDecks.keys.sorted().map { player ->
             val librarySize = zoneSizes[player to "LIBRARY"] ?: 0
-            PolicyKnownLibraryOrder(
+            KnownLibraryOrder(
                 playerId = player,
                 shuffleEpoch = shuffleEpochs[player] ?: 0,
                 top = knownOrders[player].orEmpty(),
@@ -508,36 +508,36 @@ class PolicyKnowledgeAccumulator private constructor(
                 bottom = knownBottomOrders[player].orEmpty().takeLast(librarySize),
             )
         }
-        val provisional = PolicyKnowledgeState(
-            perspectivePlayerId = perspectivePlayerId,
+        val provisional = PlayerKnowledge(
+            viewerId = viewerId,
             deckCardCounts = knownDecks.mapValues { it.value.toSortedMap() }.toSortedMap(),
             zones = zones,
             knownObjects = knownObjects.values.sortedBy { it.knowledgeObjectKey },
             knownLibraryOrders = orders,
             unlocatedCardCounts = unlocated,
-            epistemicallyComplete = unsupported.isEmpty(),
+            isComplete = unsupported.isEmpty(),
             unsupportedReasons = unsupported.distinct().sorted(),
             knowledgeDigest = "",
         )
-        val element = PolicyJson.format.encodeToJsonElement(PolicyKnowledgeState.serializer(), provisional)
-        return provisional.copy(knowledgeDigest = PolicyJson.digest(element))
+        val element = CanonicalJson.format.encodeToJsonElement(PlayerKnowledge.serializer(), provisional)
+        return provisional.copy(knowledgeDigest = CanonicalJson.digest(element))
     }
 
     companion object {
-        fun replay(history: Iterable<PolicyHistoryEvent>): PolicyKnowledgeAccumulator =
-            PolicyKnowledgeAccumulator().also { it.append(history) }
+        fun replay(history: Iterable<ObservedEvent>): KnowledgeTracker =
+            KnowledgeTracker().also { it.append(history) }
     }
 }
 
 /** Pure full-prefix replay oracle for deterministic deck-local knowledge. */
-object PolicyKnowledgeReducer {
+object KnowledgeReplay {
     fun reduce(
-        perspectivePlayerId: String,
+        viewerId: String,
         knownDecks: Map<String, Map<String, Int>>,
         currentObservation: PlayerObservationSnapshot,
-        history: List<PolicyHistoryEvent>,
-    ): PolicyKnowledgeState = PolicyKnowledgeAccumulator.replay(history).snapshot(
-        perspectivePlayerId = perspectivePlayerId,
+        history: List<ObservedEvent>,
+    ): PlayerKnowledge = KnowledgeTracker.replay(history).snapshot(
+        viewerId = viewerId,
         knownDecks = knownDecks,
         currentObservation = currentObservation,
     )

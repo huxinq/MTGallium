@@ -4,11 +4,12 @@ import com.wingedsheep.engine.state.components.identity.CardComponent
 import java.util.Collections
 import kotlin.math.abs
 import org.mtgallium.agent.infoset.core.OpponentHandBeliefQueries
-import org.mtgallium.agent.infoset.core.ParticleBelief
+import org.mtgallium.agent.infoset.planning.ParticleBelief
 import org.mtgallium.agent.infoset.core.Weighted
 
 /** Trusted projection of supplied hypotheses. The caller owns their provenance and perspective consistency. */
 object ArgentumHandBeliefQueries {
+
     fun snapshot(belief: ParticleBelief, viewerAlias: String): OpponentHandBeliefQueries {
         require(viewerAlias.isNotBlank()) { "A belief query needs a viewer alias" }
         val hands = belief.weightedWorlds().map { weighted ->
@@ -16,7 +17,7 @@ object ArgentumHandBeliefQueries {
                 ?: throw IllegalArgumentException("Hand belief queries require Argentum hypothetical worlds")
             val viewer = world.rawPlayerIds()[viewerAlias]
                 ?: throw IllegalArgumentException("Unknown belief query viewer: $viewerAlias")
-            val state = world.authoritativeState()
+            val state = world.trueState()
             val counts = state.turnOrder.filter { it != viewer }
                 .flatMap { state.getHand(it) }
                 .mapNotNull { state.getEntity(it)?.get<CardComponent>()?.name }

@@ -26,7 +26,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
+import org.mtgallium.agent.infoset.core.ObservedEventDetail
 
 class RememberedTransformKnowledgeTest {
     @Test
@@ -57,11 +57,11 @@ class RememberedTransformKnowledgeTest {
         val temple = toTemple.state
         assertEquals("Temple of Power", temple.getEntity(objectId)?.get<CardComponent>()?.name)
         fun projections(state: GameState) = env.playerIds.associateWith { viewer ->
-            SafeObservationProjector().project(
+            PlayerObservationProjector().project(
                 ObservationBuilder(registry).build(state, viewer, emptyList()).observation as TrainingObservation)
         }
         val before = projections(temple)
-        val history = PerspectiveHistory(env.playerIds)
+        val history = InformationStateRecorder(env.playerIds)
         // A public battlefield entry establishes the exact Temple object before its later transform.
         history.recordEngineEvents(listOf(ZoneChangeEvent(entityId = objectId, entityName = "Temple of Power",
             fromZone = null, toZone = Zone.BATTLEFIELD, ownerId = owner)), owner,
@@ -83,7 +83,7 @@ class RememberedTransformKnowledgeTest {
             // The retained failure is reachable without a stochastic game: the old name contradicts the transformed state.
             assertEquals("KNOWN_OBJECT_CARD_MISMATCH",
                 ArgentumRememberedFactSupport.failure(toOjer.state, aliases, binding, prior))
-            val detail = assertIs<PerspectiveEventDetail.ObjectState>(history.forViewer(viewer).last().detail)
+            val detail = assertIs<ObservedEventDetail.ObjectState>(history.forViewer(viewer).last().detail)
             assertNotNull(detail.knowledgeObjectKey)
             assertEquals(prior.knownObjects.single().knowledgeObjectKey, detail.knowledgeObjectKey)
             assertNotEquals(objectId.value, detail.knowledgeObjectKey)

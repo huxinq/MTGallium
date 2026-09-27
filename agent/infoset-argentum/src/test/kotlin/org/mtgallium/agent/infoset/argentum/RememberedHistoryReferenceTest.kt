@@ -13,20 +13,20 @@ import com.wingedsheep.mtg.sets.definitions.por.PortalSet
 import com.wingedsheep.sdk.core.Zone
 import com.wingedsheep.sdk.model.Deck
 import com.wingedsheep.sdk.model.EntityId
-import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
+import org.mtgallium.agent.infoset.core.ObservedEventDetail
 import kotlin.test.*
 
 /** Authored component fixtures. Legal gameplay is separately qualified by a native retained witness. */
 class RememberedHistoryReferenceTest {
     private val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
-    private val mode = PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
-    private data class Fixture(val history: PerspectiveHistory, val state: GameState,
+    private val mode = HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2
+    private data class Fixture(val history: InformationStateRecorder, val state: GameState,
         val source: EntityId, val other: EntityId, val owner: EntityId, val players: List<EntityId>,
         val template: ArgentumSearchWorld)
     private fun projections(s: GameState, players: List<EntityId>) = players.associateWith { viewer ->
-        SafeObservationProjector().project(ObservationBuilder(registry).build(s,viewer,emptyList()).observation as TrainingObservation)
+        PlayerObservationProjector().project(ObservationBuilder(registry).build(s,viewer,emptyList()).observation as TrainingObservation)
     }
-    private fun fixture(reverse: Boolean=false, identity: PerspectiveHistoryObjectReference=mode): Fixture {
+    private fun fixture(reverse: Boolean=false, identity: HistoryObjectReferencing=mode): Fixture {
         val env=GameEnvironment.create(registry)
         val deck=Deck.of("Mountain" to 24,"Raging Goblin" to 36)
         env.reset(GameConfig(players=listOf(PlayerConfig("Alice",deck),PlayerConfig("Bob",deck)),seed=817L,
@@ -35,7 +35,7 @@ class RememberedHistoryReferenceTest {
         val ids=env.state.getLibrary(owner).filter { env.state.getEntity(it)?.get<CardComponent>()?.name=="Mountain" }
             .sortedBy { it.value }.take(2).let { if(reverse) it.reversed() else it }
         assertEquals(2,ids.size)
-        val history=PerspectiveHistory(env.playerIds,objectReference=identity)
+        val history=InformationStateRecorder(env.playerIds,objectReference=identity)
         var state=env.state
         for(id in ids) {
             val before=state
@@ -45,15 +45,15 @@ class RememberedHistoryReferenceTest {
         }
         state=state.updateEntity(ids[1]) { it.with(TappedComponent) }
         val template=ArgentumSearchWorld.create(env,"reference-components",817L,817L,historyObjectReference=identity)
-            .withSampledState(state,817L)
+            .withDeterminizedState(state,817L)
         return Fixture(history,state,ids[0],ids[1],owner,env.playerIds,template)
     }
-    private fun record(f:Fixture, h:PerspectiveHistory=f.history, before:GameState=f.state,
+    private fun record(f:Fixture, h:InformationStateRecorder=f.history, before:GameState=f.state,
         after:GameState=before.updateEntity(f.source) { it.with(TappedComponent) },
         events:List<GameEvent> = listOf(TappedEvent(f.source,"Mountain",f.owner))) {
         h.recordEngineEvents(events,f.owner,before,after,projections(before,f.players),projections(after,f.players))
     }
-    private fun lastRef(h:PerspectiveHistory,v:EntityId) = (h.forViewer(v).last().detail as PerspectiveEventDetail.ObjectState).objectRef
+    private fun lastRef(h:InformationStateRecorder,v:EntityId) = (h.forViewer(v).last().detail as ObservedEventDetail.ObjectState).objectRef
 
     @Test fun `coalescing descriptors preserve existing historical identity across raw ordering`() {
         val left=fixture();val right=fixture(reverse=true)
@@ -65,8 +65,8 @@ class RememberedHistoryReferenceTest {
             assertTrue(lastRef(left.history,v)!!.startsWith("history-object:v1:knowledge-object-"))
         }
         assertEquals(beforeKeys,left.history.knowledgeObjectBindingsForViewer(left.players[0]).keys)
-        val oldLeft=fixture(identity=PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
-        val oldRight=fixture(reverse=true,identity=PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
+        val oldLeft=fixture(identity=HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
+        val oldRight=fixture(reverse=true,identity=HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
         record(oldLeft);record(oldRight)
         assertNotEquals(lastRef(oldLeft.history,oldLeft.players[0]),lastRef(oldRight.history,oldRight.players[0]))
     }
@@ -86,7 +86,7 @@ class RememberedHistoryReferenceTest {
         }
     }
     @Test fun `reference lookup never acquires an unseen handle and forks preserve eligibility`() {
-        val f=fixture();val blank=PerspectiveHistory(f.players,objectReference=mode)
+        val f=fixture();val blank=InformationStateRecorder(f.players,objectReference=mode)
         record(f,blank)
         for(v in f.players) {
             assertTrue(blank.knowledgeObjectBindingsForViewer(v).isEmpty())
@@ -94,7 +94,7 @@ class RememberedHistoryReferenceTest {
         }
         val fork=f.history.fork();record(f,fork);record(f)
         for(v in f.players) assertEquals(f.history.forViewer(v),fork.forViewer(v))
-        assertEquals(PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,PerspectiveHistory(f.players).objectReference)
+        assertEquals(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1,InformationStateRecorder(f.players).objectReference)
     }
     @Test fun `missing or changed incarnations and new appearances are ineligible`() {
         val f=fixture();val v=f.players[0]
@@ -103,7 +103,7 @@ class RememberedHistoryReferenceTest {
         val remembered=RememberedHistoryReferences();remembered.bindBoundary(f.state,refs,handles)
         val stamp=f.state.objectIdentities.getValue(f.source)
         val changed=f.state.copy(objectIdentities=f.state.objectIdentities+(f.source to stamp.copy(generation=stamp.generation+10_000)))
-        remembered.bindBoundary(changed,refs,handles) // Must not bind the old handle to the new incarnation.
+        remembered.bindBoundary(changed,refs,handles) // Must not bind the old handle to the new object (CR 400.7).
         val otherOrigins=RememberedHistoryReferences().also { it.bindBoundary(changed,refs,handles) }
         assertNotEquals(remembered.trustedState(),otherOrigins.trustedState(),"Eligibility affects future output and must enter new-mode cache identity")
         assertEquals(remembered.trustedState(),remembered.fork().trustedState())
@@ -127,10 +127,11 @@ class RememberedHistoryReferenceTest {
         record(f,before=returned,after=returned)
         for(v in f.players) assertTrue(lastRef(f.history,v)!!.startsWith("zone:"),"Old handle cannot be rebound on a later batch")
     }
+
     @Test fun `same-mode cache reuse distinguishes retained origins with an identical board and ledger prefix`() {
         val f=fixture();val leftHistory=f.history.fork();val rightHistory=f.history.fork()
         // Controlled retained-state injection, not a claim of another legal gameplay trajectory.
-        val field=PerspectiveHistory::class.java.getDeclaredField("rememberedReferences").apply { isAccessible=true }
+        val field=InformationStateRecorder::class.java.getDeclaredField("rememberedReferences").apply { isAccessible=true }
         @Suppress("UNCHECKED_CAST")
         val rightOrigins=field.get(rightHistory) as MutableMap<EntityId,RememberedHistoryReferences>
         for(v in f.players) {
@@ -144,7 +145,7 @@ class RememberedHistoryReferenceTest {
         }
         val left=f.template.withRememberedHistoryForVerification(leftHistory)
         val right=f.template.withRememberedHistoryForVerification(rightHistory)
-        assertEquals(left.authoritativeFingerprint(),right.authoritativeFingerprint())
+        assertEquals(left.stateFingerprint(),right.stateFingerprint())
         assertNotEquals(left.exactRevision(),right.exactRevision())
         assertFalse(right.copyDerivedCachesFrom(left))
         assertTrue((left.fork() as ArgentumSearchWorld).copyDerivedCachesFrom(left))

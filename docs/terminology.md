@@ -12,10 +12,10 @@ experiment terms.
 | State | The complete game configuration, including hidden cards, library order and the engine's random generator. | Argentum `GameState` |
 | Chance | Randomness: the deal, shuffles, die rolls, coin flips and random discards. A shuffle is a single chance action. | `GameState.rng` |
 | Player choice | Anything the rules ask a player to decide, including targets, ordering, blockers and mulligans. A transition runs automatic rules processing until the next choice. | `SearchWorld.step` |
-| Observation | What one step discloses to one player; possibly nothing. | `PolicyHistoryEvent` |
+| Observation | What one step discloses to one player; possibly nothing. | `ObservedEvent` |
 | Information state | Everything one player has observed, in order, including their own choices. | represented by `InformationStateRepresentation` |
 | Information set | The histories a player cannot rule out given their information state. | — |
-| Knowledge | A fact true in every history of the information set. Only knowledge excludes histories on logical grounds; a belief can give a compatible history zero probability under its model. | `PolicyKnowledgeState` |
+| Knowledge | A fact true in every history of the information set. Only knowledge excludes histories on logical grounds; a belief can give a compatible history zero probability under its model. | `PlayerKnowledge` |
 | World | A state together with both players' information states. Continuing a game requires a world, not just a state. | `SearchWorld` |
 
 ## Belief and value
@@ -40,15 +40,15 @@ experiment terms.
 | Root player | The player the search chooses for. | `rootPlayer` |
 | Determinization | A complete world sampled from a belief. | `SearchWorld` |
 | Strategy fusion | Choosing differently in worlds the player cannot tell apart, for example by solving each determinization separately. It overvalues the position. | — |
-| Tree node | One root-player information state with its admitted menu. Opponent and chance steps are sampled inside the world and add no node. | `PlanningContextKey` |
+| Tree node | One root-player information state with its admitted menu. Opponent and chance steps are sampled inside the world and add no node. | `TreeNodeKey` |
 | Simulation | One pass: sample a world, descend the tree by UCT, settle a leaf, back up the value. | `InformationSetSearch` |
 | Leaf | The position where tree descent stops for one simulation. | — |
 | Rollout | Continued play under separate rollout policies for each seat, up to a decision or turn limit. | `LeafEvaluationConfig`, `RolloutTurnHorizon` |
 | Quiet position | A condition: empty stack, no combat in progress, no pending combat-damage or ordering decision, no creature with lethal damage marked. It does not mean tactics have played out. | `isVolatile` in `InformationSetSearch` |
 | Forced pass | A priority pass when passing is the only legal action. Search reaches a quiet position by taking only forced passes; optional variants also take profile-forced passes or rollout choices. | `QuiescencePassRule`, `RolloutCutoff` |
-| Settlement | The single value one simulation backs up (adds to every edge it took), from the root player's perspective. | `SearchSettlement` |
-| Settlement origin | Terminal payoff, heuristic settlement, learned outcome estimate or neutral (0). | `SearchSettlementOrigin` |
-| Visits, search mean | Settlements added to an edge, and their average. The mean mixes changing later choices and settlement kinds, so it need not estimate the chosen action's terminal payoff. | `SearchCandidateStatistics` |
+| Settlement | The single value one simulation backs up (adds to every edge it took), from the root player's perspective. | `SimulationReturn` |
+| Settlement origin | Terminal payoff, heuristic settlement, learned outcome estimate or neutral (0). | `ReturnSource` |
+| Visits, search mean | Settlements added to an edge, and their average. The mean mixes changing later choices and settlement kinds, so it need not estimate the chosen action's terminal payoff. | `RootActionStatistics` |
 | Root value | The visit-weighted mean over all root edges; it describes the actions searched, not the one chosen. | `InformationSetSearchResult.rootValue` |
 | Chance stream | The seed for a hypothetical world's future randomness, drawn from search randomness and never from the referee's generator. Simulations of the same particle within one search replay it. | `futureChanceStreamIdentity` |
 | Perspective safety | Design rule: the chosen action depends on the actual game only through the root player's information state. An information boundary, not a claim about accuracy. | [information boundaries](architecture/information-and-decisions.md) |
@@ -61,7 +61,7 @@ experiment terms.
 | Safe, complete, sufficient | Computed from the information state alone; loses nothing; keeps what one task needs. Complete implies sufficient for every task. | — |
 | Semantic choice | An action described in terms the player can observe. | `SemanticChoice` |
 | Rebinding | Resolving a semantic choice to the corresponding native action in one world. | — |
-| Legal, proposed, admitted, accepted | Allowed by the rules; produced by action generation; on the menu considered; applied by the engine. | `PolicyExpansion` |
+| Legal, proposed, admitted, accepted | Allowed by the rules; produced by action generation; on the menu considered; applied by the engine. | `ActionMenu` |
 
 ## Former names
 
@@ -69,6 +69,87 @@ Older notes and results may use these names.
 
 | Former | Current |
 | --- | --- |
+| `LuckCorrection` / `LuckCorrectionConfig` | `ChanceControlVariate` / `ChanceControlVariateConfig` (historical config descriptor and Python keys unchanged) |
+| `LuckEvent.weightedLuck` | `LuckEvent.controlVariateTerm` (serialized key stays `weightedLuck`; thinning still retains unweighted terms) |
+| `*ForHost` | Suffix dropped; privileged operations remain host-only |
+| `authoritativeState` / `authoritativeStateForHost` | `trueState` |
+| `authoritativeFingerprint` | `stateFingerprint` |
+| `permuteHiddenTruthForHost` | `forkPermutingHiddenCards` |
+| `forkForHypotheticalSearch` / `withSampledState` | `forkWithChanceStream` / `withDeterminizedState` |
+| `captureObservedActionForHost` / `correspondObservedActionForHost` | `recordObservedAction` / `matchObservedAction` |
+| `LinearValueLink.CLIP` | `InverseLink.CLIPPED_IDENTITY` (historical JSON and identity text pinned) |
+| `rawScore` / `deployedValue` | `linearPredictor` / `value` (linear estimate and material-score APIs) |
+| `ReturnSource.LEARNED_OUTCOME_ESTIMATE` | `ReturnSource.MODEL_ESTIMATE` (historical wire token pinned) |
+| `perspectivePlayerId` | `viewerId` (MTGallium properties; serialized key and native engine field unchanged) |
+| `epistemicallyComplete` | `isComplete` (serialized key unchanged) |
+| `expansion` (an `ActionMenu` property, parameter, or local) | `menu` (generation results and specifications keep their names) |
+| `requiresProductionAdmission` | `requiresArgentumAiChoiceOnMenu` (recorded JSON key unchanged) |
+| `requiresPolicyAnnotations` | `requiresArgentumAiChoiceTag` |
+| `epistemicState()` | `informationStateWithoutMenu()` (retained transcript label unchanged) |
+| `PolicyKnownLibraryOrder` | `KnownLibraryOrder` |
+| `PolicyAttackerView` | `AttackerView` |
+| `PolicyBlockerView` | `BlockerView` |
+| `PolicyManaPool` | `ManaPoolView` |
+| `PolicyRestrictedMana` | `RestrictedManaView` |
+| `PolicyAudience` | `EventAudience` |
+| `PolicyAudienceScope` | `EventAudienceScope` |
+| `PolicyExpansionOmissionReason` | `ActionOmissionReason` |
+| `PolicyRecentEventWindow` | `RecentEventWindow` |
+| `SafeObservationProjection` | `PlayerObservationProjection` |
+| `UnifiedSemanticExpansionSpecification` | `ActionGenerationSpecification` |
+| `UnifiedExpansionResult` | `ActionGenerationResult` |
+| `QualifiedObservedObjectCorrespondence` | `ObservedObjectCorrespondence` |
+| `BoundedPolicyInputConfig` | `PolicyInputLimits` |
+| `BoundedPolicyInputCompiler` | `PolicyInputCompiler` |
+| `ConfiguredInformationStateEvaluator` | `ParameterizedInformationStateEvaluator` |
+| `BoundedRolloutObserver` | `RolloutObserver` |
+| `DecisionAdmission` | `MenuSource` |
+| `SearchActionSpaceProfile` | `ActionSpaceProfile` |
+| `BeliefArchitecture` | `BeliefApproximation` |
+| `LeafStateSource` | `LeafEvaluationMethod` |
+| `PerspectiveHistoryEventOrder` | `HistoryEventOrdering` |
+| `PerspectiveHistoryObjectReference` | `HistoryObjectReferencing` |
+| `UnifiedSemanticExpander` | `ArgentumActionGenerator` |
+| `BoundedDecisionResponseProposer` | `DecisionResponseGenerator` |
+| `BlockStructuredActionSpace` | `BlockerDeclarationSpace` |
+| `StructuredActionSpace` | `FactoredActionSpace` |
+| `SafeObservationProjector` | `PlayerObservationProjector` |
+| `SafeReferenceMap` | `ObservationReferenceMap` |
+| `PerspectiveEventProjector` | `EventObservationProjector` |
+| `PerspectiveHistory` | `InformationStateRecorder` |
+| `ArgentumHeuristicAnnotator` | `ArgentumAiChoiceLabeler` |
+| `ArgentumActionCorrespondence` | `ObservedActionMatch` |
+| `PolicyKnowledgeState` | `PlayerKnowledge` |
+| `PolicyZoneKnowledge` | `ZoneKnowledge` |
+| `PolicyKnownObject` | `KnownObject` |
+| `PolicyKnowledgeAccumulator` | `KnowledgeTracker` |
+| `PolicyKnowledgeReducer` | `KnowledgeReplay` |
+| `PolicyPlayerView` | `PlayerView` |
+| `PolicyZoneView` | `ZoneView` |
+| `PolicyCardView` | `ObjectView` |
+| `PolicyStackItemView` | `StackObjectView` |
+| `PolicyPendingDecisionView` | `PendingDecisionView` |
+| `PolicyCombatView` | `CombatView` |
+| `PolicyDecisionChoiceSpec` | `PendingDecisionOptions` |
+| `PolicyHistoryEvent` | `ObservedEvent` |
+| `PolicyHistoryEventKind` | `ObservedEventKind` |
+| `PerspectiveEventDetail` | `ObservedEventDetail` |
+| `PolicyHistorySnapshot` | `ObservationHistory` |
+| `PolicyHistoryCommitment` | `HistoryHashChain` |
+| `PolicyExpansion` | `ActionMenu` |
+| `DecisionSiteRequest` | `DecisionContext` |
+| `DecisionSite` | `DecisionPoint` |
+| `DecisionView` | `MenuRequest` |
+| `AdmittedMenuRefinement` | `MenuWidening` |
+| `EpistemicState` | `InformationState` |
+| `PolicyJson` | `CanonicalJson` |
+| `SearchSettlement` | `SimulationReturn` |
+| `SearchSettlementOrigin` | `ReturnSource` |
+| `SearchSettlementCounts` | `ReturnSourceCounts` |
+| `SearchCandidateStatistics` | `RootActionStatistics` |
+| `PlanningContextKey` | `TreeNodeKey` |
+| `SingletonSelectionConfig` | `SingletonMenuShortcutConfig` |
+| `selectedSearchWinnerOrNull` | `mostVisitedActionOrNull` |
 | Player history | Information state |
 | Compatible histories, compatibility class | Information set |
 | Full epistemic state | World |
@@ -76,3 +157,51 @@ Older notes and results may use these names.
 | State evaluator | Information-state evaluator |
 | Value target | Target |
 | Search-conditioned response | Not used: search models the opponent with a fixed policy |
+| `RootActionStatistics.policyProbability` | `RootActionStatistics.visitFraction` (recorded JSON key unchanged) |
+| `unsettledLeafEvaluations` | `nonQuietLeafEvaluations` (recorded JSON key unchanged) |
+| `settleStaticLeaf` / `settleWithRolloutPolicies` | `evaluateStaticLeaf` / `evaluateWithRolloutPolicies` |
+| `isVolatile` | `isQuiet` (predicate and consumers invert together) |
+| `QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1` | `QuiescencePassRule.PROFILE_FORCED_WHEN_NOT_QUIET` (historical wire token pinned) |
+| `agent/mono-red-models`, `org.mtgallium.agent.monored` | `agent/value-models`, `org.mtgallium.agent.value` |
+| `MonoRedInformationEvaluator` / `ConfiguredMonoRedInformationEvaluator` | `MaterialEvaluator` |
+| `MonoRedVisibleEvaluatorConfig` / `MonoRedVisibleFeatures` / `MonoRedVisiblePermanentFeatures` | `MaterialWeights` / `MaterialFeatures` / `MaterialPermanentFeatures` |
+| `NativePolicyProvider` | `JvmPolicyProvider` (live service descriptor filename follows the interface) |
+| `NativeValueProvider` | `JvmValueModelProvider` (live service descriptor filename follows the interface) |
+| `NativePolicy` | `JvmPolicy` |
+| `NativePolicy.Direct` | `JvmPolicy.Memoryless` |
+| `NativePolicy.Search` | `JvmPolicy.SearchSession` |
+| Trusted binding `incarnation` | `objectRef` (new object, CR 400.7) |
+| `Research.kt` / `ResearchKt` | `ResearchCli.kt` / `ResearchCliKt` (live CLI entrypoint) |
+| `PythonResearch` / `PythonResearch.kt` | `GameServer` / `GameServer.kt` (live server entrypoint) |
+| `PythonResearchConnection` | `GameServerConnection` |
+| Workbench `Player` | `GameAgent` (engine and visible-reference player types unchanged) |
+| `productionChoice` | `argentumAiChoice` (policy key `production` unchanged) |
+| Evaluation `Probes.kt` | `Checks.kt` |
+
+Retained names (compatibility aliases deliberately omitted):
+
+| Existing name | Proposed spelling omitted | Reason |
+| --- | --- | --- |
+| `game.ai.search-teacher` | `game.ai.information-set-search` | Keep the deployed Spring key; no dual-key binder. |
+| `factual`, `Decision.factual` | `byte_tokens`, `Decision.byte_tokens` | Keep the Python keyword and field; no alias wrapper. |
+| `evaluate`, `setups` | `compare_policies`, `pairs` | Keep the Python call signature; no alias wrapper. |
+| `FactualEncodingException` | `ByteTokenEncodingException` | The JVM name is the structured error type. |
+| `org.mtgallium.agent.monored.ValueEvaluationException`, `ValueEvaluationStop` | `org.mtgallium.agent.value` package | Keep structured error names without a mapper. |
+| `SEMANTIC` | `GENERATED` | Preserve enum text and seed inputs without adapters. |
+| `PRODUCTION` | `WITH_ARGENTUM_AI_CHOICE` | Preserve enum text and seed inputs without adapters. |
+| `RULES_EXACT_V1` | `ALL_LEGAL_ACTIONS` | Preserve enum text and seed inputs without adapters. |
+| `MONO_RED_FAST_MANA_PRUNED_V1` | `OMIT_STANDALONE_MANA_ABILITIES` | Preserve enum text and seed inputs without adapters. |
+| `SNAPSHOT_A_V1` | `INDEPENDENT_DETERMINIZATIONS` | Preserve enum text and seed inputs without adapters. |
+| `SEQUENTIAL_B_V1` | `SEQUENTIAL_PARTICLE_FILTER` | Preserve enum text and seed inputs without adapters. |
+| `PRIVILEGED_O_V1` | `CLAIRVOYANT_TRUE_STATE` | Preserve enum text and seed inputs without adapters. |
+| `CONSISTENCY_ONLY_V1` | `UNIFORM_CONSISTENT_DEALS` | Preserve enum text and seed inputs without adapters. |
+| `POLICY_CONDITIONED_V1` | `OPPONENT_MODEL_POSTERIOR` | Preserve enum text and seed inputs without adapters. |
+| `CURRENT_INFORMATION_STATE` | `STATIC` | Preserve enum text and seed inputs without adapters. |
+| `BOUNDED_ROLLOUT` | `TRUNCATED_ROLLOUT` | Preserve enum text and seed inputs without adapters. |
+| `LEGACY_ENGINE_ORDER_V1` | `ENGINE_EMISSION_ORDER` | Preserve enum text and seed inputs without adapters. |
+| `QUALIFIED_TURN_UNTAP_V2` | `UNTAP_STEP_CANONICAL_ORDER` | Preserve enum text and seed inputs without adapters. |
+| `LEGACY_SNAPSHOT_V1` | `OBSERVATION_SCOPED_REFERENCES` | Preserve enum text and seed inputs without adapters. |
+| `QUALIFIED_OBSERVED_OBJECTS_V2` | `PERSISTENT_OBJECT_REFERENCES` | Preserve enum text and seed inputs without adapters. |
+| `PROFILE_FORCED_WHILE_VOLATILE_V1` | `PROFILE_FORCED_WHEN_NOT_QUIET` | Preserve enum text and seed inputs without adapters. |
+| `LEARNED_OUTCOME_ESTIMATE` | `MODEL_ESTIMATE` | Preserve enum text and seed inputs without adapters. |
+| `CLIP` | `CLIPPED_IDENTITY` | Preserve enum text and seed inputs without adapters. |

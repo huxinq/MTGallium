@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.CanonicalJson
 
 /** Full-truth digest for trusted live/shadow synchronization checks. */
 object ArgentumStateFingerprint {
@@ -23,7 +23,7 @@ object ArgentumStateFingerprint {
 
     fun of(state: GameState): String {
         val semanticState = routingNormalizedState(state)
-        return PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), semanticState))
+        return CanonicalJson.sha256(json.encodeToString(JsonElement.serializer(), semanticState))
     }
 
     /** Exact full-state equality modulo only established ephemeral routing-nonce spellings. */
@@ -48,7 +48,7 @@ object ArgentumStateFingerprint {
 
     private fun componentDigests(semanticState: JsonObject): Map<String, String> =
         semanticState.entries.sortedBy { it.key }.associate { (key, value) ->
-            key to PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), value))
+            key to CanonicalJson.sha256(json.encodeToString(JsonElement.serializer(), value))
         }
 
     private fun routingNormalizedState(state: GameState): JsonElement =

@@ -13,6 +13,7 @@ import com.wingedsheep.sdk.model.Deck
 import com.wingedsheep.sdk.model.GameRng
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 import kotlin.test.*
 
 /**
@@ -57,9 +58,9 @@ class SequentialBeliefHiddenInputTest {
             "independent-selection-coordinate", 71L, 42613L, knownDecks = decks)
         val left = wrap(original)
         val right = wrap(altered)
-        fun prepare(world: ArgentumSearchWorld) = ArgentumParticleBeliefBackend(world, viewer, decks,
-            BeliefConfig(8, BeliefMode.CONSISTENCY_ONLY_V1, BeliefArchitecture.SEQUENTIAL_B_V1,
-                ObservedBeliefConditioning.HISTORICAL_GROUP_SIGNATURE_V1),
+        fun prepare(world: ArgentumSearchWorld) = ArgentumParticleFilter(world, viewer, decks,
+            BeliefConfig(8, BeliefMode.CONSISTENCY_ONLY_V1, BeliefApproximation.SEQUENTIAL_B_V1,
+                ObservedActionLikelihood.HISTORICAL_GROUP_SIGNATURE_V1),
             defaultMonoRedOpponentPolicy(), "declared-u0-coordinate-not-source-rng",
             org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink.NONE)
         assertEquals(left.informationState(viewer), right.informationState(viewer))
@@ -67,6 +68,7 @@ class SequentialBeliefHiddenInputTest {
         val rightBelief = prepare(right)
         var inheritedHistoryDifferences = 0
         val production = PolicyDefaults.rootRolloutPolicy()
+
         fun compareAt(cursor: Int) {
             assertEquals(left.informationState(viewer), right.informationState(viewer), "Legitimate prefix $viewer/$cursor")
             val a = leftBelief.apply { synchronize(left, cursor) }.batch()
@@ -75,17 +77,17 @@ class SequentialBeliefHiddenInputTest {
             for (index in a.particles.indices) {
                 val x = a.particles[index].value as ArgentumSearchWorld
                 val y = b.particles[index].value as ArgentumSearchWorld
-                assertEquals(x.authoritativeStateForHost(), y.authoritativeStateForHost(), "Hypothesis state $viewer/$cursor/$index")
+                assertEquals(x.trueState(), y.trueState(), "Hypothesis state $viewer/$cursor/$index")
                 for (player in listOf("p0", "p1")) {
                     val xi = x.informationState(player)
                     val yi = y.informationState(player)
                     val coordinate = "$viewer/$cursor/$index/$player"
                     assertEquals(xi.observation, yi.observation, "Observation $coordinate")
                     assertEquals(xi.knowledge, yi.knowledge, "Knowledge $coordinate")
-                    assertTrue(xi.knowledge.epistemicallyComplete)
+                    assertTrue(xi.knowledge.isComplete)
                     assertEquals(xi.candidates, yi.candidates, "Candidates $coordinate")
-                    assertEquals(PolicyHistoryCommitment.replay(xi.history), xi.historyCommitment)
-                    assertEquals(PolicyHistoryCommitment.replay(yi.history), yi.historyCommitment)
+                    assertEquals(HistoryHashChain.replay(xi.history), xi.historyCommitment)
+                    assertEquals(HistoryHashChain.replay(yi.history), yi.historyCommitment)
                     if (xi == yi) continue
                     // Diagnose, rather than discard, the failed full-information invariant.
                     assertNotEquals(viewer, player, "Observer information must remain exactly equal")
@@ -101,8 +103,8 @@ class SequentialBeliefHiddenInputTest {
                     assertEquals(4, differing.first(), "First differing observation-hash event")
                     val xe = xi.history[54]
                     val ye = yi.history[54]
-                    assertEquals(PolicyHistoryEventKind.PUBLIC_ZONE_TRANSITION, xe.kind)
-                    assertEquals(PolicyAudience(PolicyAudienceScope.ENTITLED_PLAYERS, setOf(player)), xe.audience)
+                    assertEquals(ObservedEventKind.PUBLIC_ZONE_TRANSITION, xe.kind)
+                    assertEquals(EventAudience(EventAudienceScope.ENTITLED_PLAYERS, setOf(player)), xe.audience)
                     assertNotNull(xe.payload["zoneDelta"])
                     assertNotNull(ye.payload["zoneDelta"])
                     assertNotEquals(xe.payload["zoneDelta"], ye.payload["zoneDelta"],
@@ -120,7 +122,7 @@ class SequentialBeliefHiddenInputTest {
                         val yc = nextY.decisionContext(production.decisionView(64))
                         actors += xc.actor
                         assertEquals(xc.actor, yc.actor)
-                        assertEquals(xc.expansion, yc.expansion)
+                        assertEquals(xc.menu, yc.menu)
                         val policySeed = ComponentSeeds.derive("independent-continuation", decision, "policy")
                         val sampleSeed = ComponentSeeds.derive("independent-continuation", decision, "sample")
                         val xd = production.select(xc, policySeed, sampleSeed)
@@ -130,7 +132,7 @@ class SequentialBeliefHiddenInputTest {
                         assertTrue(nextX.step(xd.choice).accepted && nextY.step(yd.choice).accepted)
                         assertNull(nextX.terminalPayoff(viewer))
                         assertNull(nextY.terminalPayoff(viewer))
-                        assertEquals(nextX.authoritativeStateForHost(), nextY.authoritativeStateForHost())
+                        assertEquals(nextX.trueState(), nextY.trueState())
                     }
                     assertEquals(setOf("p0", "p1"), actors)
                 }
@@ -140,7 +142,7 @@ class SequentialBeliefHiddenInputTest {
         // Preserve the actual observation route, including automatic changes and private draws.
         // These nonterminal passes exercise sequential updates, not fixed retained U0 means.
         repeat(32) { index ->
-            assertFalse(left.epistemicState(viewer).terminated)
+            assertFalse(left.informationStateWithoutMenu(viewer).terminated)
             val actor = assertNotNull(left.actorToAct())
             assertEquals(actor, right.actorToAct())
             val menu = left.expandChoices().candidates

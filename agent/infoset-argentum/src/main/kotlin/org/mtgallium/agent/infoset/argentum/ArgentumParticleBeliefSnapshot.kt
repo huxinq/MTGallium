@@ -2,6 +2,7 @@ package org.mtgallium.agent.infoset.argentum
 
 import kotlinx.serialization.encodeToString
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 
 /** Finite-particle belief snapshot. */
 class ArgentumParticleBeliefSnapshot private constructor(
@@ -9,9 +10,9 @@ class ArgentumParticleBeliefSnapshot private constructor(
     information: InformationStateRepresentation,
     private val diagnosticBytes: String,
     inferenceModelIdentity: String,
-) : BeliefSnapshot(information.observation.perspectivePlayerId,
-    EpistemicState.capture(information).epistemicDigest, inferenceModelIdentity) {
-    private val viewer = information.observation.perspectivePlayerId
+) : BeliefSnapshot(information.observation.viewerId,
+    InformationState.capture(information).epistemicDigest, inferenceModelIdentity) {
+    private val viewer = information.observation.viewerId
     private val estimates: OpponentHandBeliefQueries = ArgentumHandBeliefQueries.snapshot(frozen, viewer)
 
     init {
@@ -20,16 +21,16 @@ class ArgentumParticleBeliefSnapshot private constructor(
     }
 
     override fun handQueries(): OpponentHandBeliefQueries = estimates
-    override fun generateHypotheses(): BeliefBatch<Weighted<SearchWorld>> = BeliefBatch(
+    override fun generateHypotheses(): ParticleSet<Weighted<SearchWorld>> = ParticleSet(
         // Retain represented worlds' weights, order, and chance streams without drawing cards.
         frozen.weightedWorlds().map { Weighted(it.value.fork(), it.weight) },
-        PolicyJson.format.decodeFromString<BeliefDiagnostics>(diagnosticBytes),
+        CanonicalJson.format.decodeFromString<BeliefDiagnostics>(diagnosticBytes),
     )
 
     companion object {
         fun capture(belief: ParticleBelief, information: InformationStateRepresentation,
             diagnostics: BeliefDiagnostics, inferenceModelIdentity: String): ArgentumParticleBeliefSnapshot =
             ArgentumParticleBeliefSnapshot(belief.fork(), information,
-                PolicyJson.format.encodeToString(diagnostics), inferenceModelIdentity)
+                CanonicalJson.format.encodeToString(diagnostics), inferenceModelIdentity)
     }
 }

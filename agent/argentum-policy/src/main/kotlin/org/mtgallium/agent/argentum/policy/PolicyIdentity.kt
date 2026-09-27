@@ -1,34 +1,33 @@
 package org.mtgallium.agent.argentum.policy
 
 import kotlinx.serialization.SerialName
-import org.mtgallium.agent.infoset.core.SingletonSelectionConfig
+import org.mtgallium.agent.infoset.planning.SingletonMenuShortcutConfig
 import org.mtgallium.agent.infoset.core.ActionSelector
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.encodeToJsonElement
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
+import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
+import org.mtgallium.agent.infoset.argentum.ActionGenerationSpecification
 import org.mtgallium.agent.infoset.core.BOUNDED_POLICY_INPUT_SCHEMA_CURRENT
 import org.mtgallium.agent.infoset.core.CANDIDATE_SCHEMA_CURRENT
-import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
+import org.mtgallium.agent.infoset.planning.InformationSetSearchConfig
 import org.mtgallium.agent.infoset.core.KNOWLEDGE_SCHEMA_CURRENT
-import org.mtgallium.agent.infoset.core.LeafValueSource
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.RolloutCutoff
+import org.mtgallium.agent.infoset.planning.LeafValueSource
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.RolloutCutoff
 import org.mtgallium.agent.infoset.core.PolicyComponent
 import org.mtgallium.agent.infoset.core.OpponentPolicyBehaviorSpecification
 import org.mtgallium.agent.infoset.core.POLICY_HISTORY_COMMITMENT_ALGORITHM
 import org.mtgallium.agent.infoset.core.POLICY_SCHEMA_CURRENT
-import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.monored.MonoRedInformationEvaluator
+import org.mtgallium.agent.infoset.core.CanonicalJson
+import org.mtgallium.agent.value.MaterialEvaluator
 
 const val SEARCH_POLICY_BEHAVIOR_SCHEMA_V2: Int = 2
 const val SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX: String =
     "search-teacher-behavior-v2-sha256"
 
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.KnownDeckCardSpecification")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.KnownDeckCardSpecification")
 data class KnownDeckCardSpecification(
     val cardName: String,
     val count: Int,
@@ -39,8 +38,7 @@ data class KnownDeckCardSpecification(
     }
 }
 
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.KnownDeckSpecification")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.KnownDeckSpecification")
 data class KnownDeckSpecification(
     val playerId: String,
     val cards: List<KnownDeckCardSpecification>,
@@ -52,8 +50,7 @@ data class KnownDeckSpecification(
     }
 }
 
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.SearchTeacherInputSchemaSpecification")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.SearchTeacherInputSchemaSpecification")
 data class InputSchemaSpecification(
     val playerInformationSchema: Int = POLICY_SCHEMA_CURRENT,
     val candidateSchema: Int = CANDIDATE_SCHEMA_CURRENT,
@@ -62,13 +59,12 @@ data class InputSchemaSpecification(
     val historyCommitmentAlgorithm: String = POLICY_HISTORY_COMMITMENT_ALGORITHM,
 )
 
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.SearchTeacherActionSpaceSpecification")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.SearchTeacherActionSpaceSpecification")
 data class ActionSpaceSpecification(
     val profileId: String,
     val rulesEquivalent: Boolean,
     val suppressesStandaloneManaAbilities: Boolean,
-    val expansion: UnifiedSemanticExpansionSpecification,
+    val expansion: ActionGenerationSpecification,
 ) {
     init {
         require(profileId == expansion.actionSpaceProfile.profileId)
@@ -80,8 +76,7 @@ data class ActionSpaceSpecification(
     }
 }
 
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.SearchTeacherEvaluatorSpecification")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.SearchTeacherEvaluatorSpecification")
 data class EvaluatorSpecification(
     val evaluatorId: String,
     val evaluatorConfigurationId: String,
@@ -90,8 +85,7 @@ data class EvaluatorSpecification(
 )
 
 /** Every session-bound input that this policy layer can observe and that may change behavior. */
-@Serializable
-@SerialName("org.mtgallium.agent.searchteacher.SearchTeacherBehaviorSpecification")
+@Serializable @SerialName("org.mtgallium.agent.searchteacher.SearchTeacherBehaviorSpecification")
 data class PolicyBehaviorSpecification(
     val schemaVersion: Int = SEARCH_POLICY_BEHAVIOR_SCHEMA_V2,
     val declaredProfileId: String,
@@ -110,7 +104,7 @@ data class PolicyBehaviorSpecification(
     // An absent field retains the previous behavior and its canonical identity on re-encoding.
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
-    val singletonSelection: SingletonSelectionConfig = SingletonSelectionConfig(),
+    val singletonSelection: SingletonMenuShortcutConfig = SingletonMenuShortcutConfig(),
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val directRootSelectionId: String? = null,
@@ -143,9 +137,9 @@ object PolicyIdentity {
         opponentPolicy: PolicyComponent,
         rootRolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         opponentRolloutPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-        valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-        actionExpansion: UnifiedSemanticExpansionSpecification =
-            UnifiedSemanticExpander.defaultBehaviorSpecification(parameters.actionSpaceProfile),
+        valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
+        actionExpansion: ActionGenerationSpecification =
+            ArgentumActionGenerator.defaultBehaviorSpecification(parameters.actionSpaceProfile),
     ): PolicyBehaviorSpecification {
         require(actionExpansion.actionSpaceProfile == parameters.actionSpaceProfile) {
             "Policy action-space profile does not match the world's candidate generator"
@@ -176,11 +170,11 @@ object PolicyIdentity {
     }
 
     fun identity(specification: PolicyBehaviorSpecification): String {
-        val element = PolicyJson.format.encodeToJsonElement(
+        val element = CanonicalJson.format.encodeToJsonElement(
             PolicyBehaviorSpecification.serializer(),
             specification,
         )
-        return "$SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX:${PolicyJson.digest(element)}"
+        return "$SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX:${CanonicalJson.digest(element)}"
     }
 
     fun identity(
@@ -189,9 +183,9 @@ object PolicyIdentity {
         opponentPolicy: PolicyComponent,
         rootRolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         opponentRolloutPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-        valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-        actionExpansion: UnifiedSemanticExpansionSpecification =
-            UnifiedSemanticExpander.defaultBehaviorSpecification(parameters.actionSpaceProfile),
+        valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
+        actionExpansion: ActionGenerationSpecification =
+            ArgentumActionGenerator.defaultBehaviorSpecification(parameters.actionSpaceProfile),
     ): String = identity(
         specification(
             parameters = parameters,

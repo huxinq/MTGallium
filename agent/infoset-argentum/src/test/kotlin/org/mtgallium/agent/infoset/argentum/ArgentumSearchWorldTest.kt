@@ -26,16 +26,16 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import org.mtgallium.agent.infoset.core.InformationSetSearch
-import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.LeafValueSource
-import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
-import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
+import org.mtgallium.agent.infoset.planning.InformationSetSearch
+import org.mtgallium.agent.infoset.planning.InformationSetSearchConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.LeafValueSource
+import org.mtgallium.agent.infoset.core.ObservedEventKind
+import org.mtgallium.agent.infoset.core.ActionSpaceProfile
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
+import org.mtgallium.agent.infoset.core.BeliefApproximation
 
 class ArgentumSearchWorldTest {
     private val deck = mapOf("Mountain" to 12, "Raging Goblin" to 8)
@@ -49,8 +49,8 @@ class ArgentumSearchWorldTest {
             for (viewer in listOf("p0", "p1")) {
                 val view = world.informationState(viewer).observation
                 val blank = view.copy(observationDigest = "")
-                assertEquals(org.mtgallium.agent.infoset.core.PolicyJson.digest(
-                    org.mtgallium.agent.infoset.core.PolicyJson.format.encodeToJsonElement(
+                assertEquals(org.mtgallium.agent.infoset.core.CanonicalJson.digest(
+                    org.mtgallium.agent.infoset.core.CanonicalJson.format.encodeToJsonElement(
                         org.mtgallium.agent.infoset.core.PlayerObservationSnapshot.serializer(), blank)), view.observationDigest)
             }
             if (world.actorToAct() == null) return@repeat
@@ -79,10 +79,6 @@ class ArgentumSearchWorldTest {
         assertTrue(SemanticOperationFamily.CAST_SPELL in seen)
         assertTrue(SemanticOperationFamily.PASS_PRIORITY in seen)
     }
-
-
-
-
 
     private fun registry() = CardRegistry().apply {
         register(PortalSet.cards)
@@ -122,13 +118,13 @@ class ArgentumSearchWorldTest {
         val result = world.step(pass)
 
         assertTrue(result.accepted)
-        assertEquals(listOf(PolicyHistoryEventKind.TURN_STRUCTURE), result.forcedTransitions.map { it.kind })
+        assertEquals(listOf(ObservedEventKind.TURN_STRUCTURE), result.forcedTransitions.map { it.kind })
         assertEquals(
-            listOf(PolicyHistoryEventKind.PRIORITY_PASS, PolicyHistoryEventKind.TURN_STRUCTURE),
+            listOf(ObservedEventKind.PRIORITY_PASS, ObservedEventKind.TURN_STRUCTURE),
             world.informationState("p0").history.drop(beforeP0).map { it.kind },
         )
         assertEquals(
-            listOf(PolicyHistoryEventKind.PRIORITY_PASS, PolicyHistoryEventKind.TURN_STRUCTURE),
+            listOf(ObservedEventKind.PRIORITY_PASS, ObservedEventKind.TURN_STRUCTURE),
             world.informationState("p1").history.drop(beforeP1).map { it.kind },
         )
     }
@@ -168,22 +164,23 @@ class ArgentumSearchWorldTest {
     }
 
     @Test
+
     fun `live resolution does not step and an observed raw action advances exactly once`() {
         val env = environment()
         val world = ArgentumSearchWorld.create(
             env, "live-resolution", 92L,
             effectiveSetupSeed = 811L,
         )
-        val before = world.authoritativeFingerprint()
+        val before = world.stateFingerprint()
         val choice = world.expandChoices().candidates.first()
 
         val resolved = world.resolveChoice(choice) as ArgentumResolvedChoice.Action
-        assertEquals(before, world.authoritativeFingerprint())
+        assertEquals(before, world.stateFingerprint())
 
         val observed = world.applyObservedAction(resolved.value)
         assertEquals(choice.signature, observed.choice.signature)
         assertTrue(observed.result.accepted)
-        assertNotEquals(before, world.authoritativeFingerprint())
+        assertNotEquals(before, world.stateFingerprint())
         assertEquals(1, env.stepCount)
     }
 
@@ -301,15 +298,15 @@ class ArgentumSearchWorldTest {
 
         repeat(12) {
             if (sawBottom) return@repeat
-            val expansion = world.expandChoices()
+            val menu = world.expandChoices()
             val picked = if (!tookMulligan) {
-                expansion.candidates.firstOrNull {
+                menu.candidates.firstOrNull {
                     (world.resolveChoice(it) as? ArgentumResolvedChoice.Action)?.value is TakeMulligan
                 }?.also { tookMulligan = true }
             } else null
-            val choice = picked ?: expansion.candidates.firstOrNull {
+            val choice = picked ?: menu.candidates.firstOrNull {
                 (world.resolveChoice(it) as? ArgentumResolvedChoice.Action)?.value is BottomCards
-            } ?: expansion.candidates.first { it.display.label.contains("Keep", ignoreCase = true) }
+            } ?: menu.candidates.first { it.display.label.contains("Keep", ignoreCase = true) }
             val resolved = world.resolveChoice(choice) as ArgentumResolvedChoice.Action
             val observed = world.applyObservedAction(resolved.value)
             assertEquals(choice.signature, observed.choice.signature)
@@ -380,7 +377,7 @@ class ArgentumSearchWorldTest {
                 simulations = 32,
                 maxPolicyDecisions = 6,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_INFORMATION_STATE,
+                    LeafEvaluationMethod.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -472,8 +469,6 @@ class ArgentumSearchWorldTest {
         assertEquals(GameRng.seeded(919_191L), alternateEnv.state.rng)
     }
 
-
-
     @Test
     fun `unsupported visibility states fail before policy projection`() {
         val env = environment()
@@ -516,7 +511,7 @@ class ArgentumSearchWorldTest {
                 simulations = 64,
                 maxPolicyDecisions = 8,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_INFORMATION_STATE,
+                    LeafEvaluationMethod.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -580,19 +575,17 @@ class ArgentumSearchWorldTest {
         assertEquals(annotated, exact.expandChoicesWithPolicyAnnotations(64))
         assertEquals(diagnosis, exact.determinizedHeuristicChoiceDiagnosis(64))
         assertEquals(1, resolutions.size)
-        val hypothetical = world.forkForHypotheticalSearch(933L)
+        val hypothetical = world.forkWithChanceStream(933L)
         assertEquals(information, hypothetical.informationState("p0"))
         hypothetical.expandChoicesWithPolicyAnnotations(64)
         assertEquals(2, resolutions.size)
-        val reprofiled = world.withActionSpaceProfile(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1)
-        assertEquals(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+        val reprofiled = world.withActionSpaceProfile(ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1)
+        assertEquals(ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
             reprofiled.semanticExpansionSpecification().actionSpaceProfile)
         reprofiled.expandChoicesWithPolicyAnnotations(64)
         assertEquals(3, resolutions.size)
         assertEquals(information, world.informationState("p0"))
     }
-
-
 
     @Test
     fun `determinized heuristic tag is information-safe and unique`() {
@@ -642,7 +635,7 @@ class ArgentumSearchWorldTest {
         // These uncached hypothetical worlds retain the root's annotator and factory. Alternate
         // hidden assignments so earlier annotations cannot supply decision memory to later ones.
         repeat(3) { index ->
-            val sampled = root.withSampledState(
+            val sampled = root.withDeterminizedState(
                 if (index % 2 == 0) permuted else before,
                 futureChanceStreamIdentity = 100L + index,
             )
@@ -672,8 +665,8 @@ class ArgentumSearchWorldTest {
                     environment = env.fork(),
                     gameId = "attack-anchor",
                     seedBase = 101L,
-                    expander = UnifiedSemanticExpander(
-                        actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+                    expander = ArgentumActionGenerator(
+                        actionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
                     ),
                     effectiveSetupSeed = 811L,
                     knownDecks = knownDecks,
@@ -720,7 +713,7 @@ class ArgentumSearchWorldTest {
     private fun takeMulliganShufflePermutation(world: ArgentumSearchWorld): List<Int> {
         val actorAlias = requireNotNull(world.actorToAct())
         val actor = world.rawPlayerIds().getValue(actorAlias)
-        val before = world.authoritativeState()
+        val before = world.trueState()
         val inputOrder = before.getLibrary(actor) + before.getHand(actor)
         val inputIndices = inputOrder.withIndex().associate { (index, id) -> id to index }
         val takeMulligan = world.expandChoices().candidates.single { choice ->
@@ -729,7 +722,7 @@ class ArgentumSearchWorldTest {
 
         assertTrue(world.step(takeMulligan).accepted)
 
-        val after = world.authoritativeState()
+        val after = world.trueState()
         val outputOrder = after.getHand(actor) + after.getLibrary(actor)
         assertEquals(inputOrder.size, outputOrder.size)
         return outputOrder.map(inputIndices::getValue)
