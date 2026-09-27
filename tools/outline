@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Read-only declaration outline. Python uses AST; Kotlin/JS use lexical ranges.
+
+Kotlin/JS output is a navigation aid, not a compiler symbol table: declarations
+must start a line, and expression bodies end at the next declaration or line.
+Strings, comments and JavaScript regex literals are masked before matching.
+Ambiguous JavaScript slash expressions are rejected instead of guessing ranges.
+JavaScript methods and arrow-function bodies are not resolved.
+"""
+import argparse
+import ast
+import json
+from pathlib import Path
+import re
+import sys
+
+
+def skip_kotlin_comment(source, start):
+    if source.startswith("//", start):
+        end = source.find("\n", start)
+        return len(source) if end < 0 else end
+    depth, i = 1, start + 2
+    while i < len(source) and depth:
+        if source.startswith("/*", i):
+            depth += 1
+            i += 2
+        elif source.startswith("*/", i):
+            depth -= 1
+            i += 2
+        else:
+            i += 1
+    if depth:
+        raise ValueError("unterminated Kotlin comment")
+    return i
+
+
+def skip_kotlin_template(source, start):
+    depth, i = 1, start
+    while i < len(source):
+        if source.startswith(("//", "/*"), i):
+            i = skip_kotlin_comment(source, i)
+        elif source[i] in '\"\'`':
+            i = skip_kotlin_quote(source, i)
+        elif source[i] == "{":
+            depth += 1
+            i += 1
+        elif source[i] == "}":
+            depth -= 1
+            i += 1
+            if depth == 0:
+                return i
+        else:
+            i += 1
+    raise ValueError("unterminated Kotlin template expression")
+
+
+def skip_kotlin_quote(source, start):
+    char = source[start]
+    delimiter = '\"\"\"' if source.startswith('\"\"\"', start) else char
+    i = start + len(delimiter)
+    while i < len(source):
+        if source.startswith(delimiter, i):
+            return i + len(delimiter)
+        if char == '\"' and source.startswith("${", i):
+            i = skip_kotlin_template(source, i + 2)
+        elif source[i] == "\\" and delimiter not in ('\"\"\"', '`'):
+            i += 2
+        else:
+            i += 1
+    raise ValueError("unterminated Kotlin string or quoted name")
+
+
+def mask(source, javascript=False):
+    """Preserve offsets/newlines while hiding strings and nested comments."""
+    out = list(source)
+    i = 0
+    while i < len(source):
+        start = i
+        if source.startswith("//", i):
+            i = source.find("\n", i)
+            if i < 0:
+                i = len(source)
+        elif source.startswith("/*", i):
+            depth = 1
+            i += 2
+            while i < len(source) and depth:
+                if source.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif source.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+        elif javascript and source[i] == "/":
+            prefix = source[:i].rstrip()
+            # A slash after an expression opener begins a regular expression.
+            # Other slash contexts need a JS parser to disambiguate; fail loudly.
+            if prefix and prefix[-1] not in "=(:,[!&|?;{}" and not re.search(r"\b(?:return|throw|case|yield)\s*$", prefix):
+                raise ValueError("ambiguous JavaScript slash expression; use a parser for this file")
+            i += 1
+            in_class = False
+            while i < len(source):
+                char = source[i]
+                if char == "\\":
+                    i += 2
+                    continue
+                if char == "\n":
+                    raise ValueError("unterminated JavaScript regular expression")
+                if char == "[":
+                    in_class = True
+                elif char == "]":
+                    in_class = False
+                elif char == "/" and not in_class:
+                    i += 1
+                    while i < len(source) and source[i].isalpha():
+                        i += 1
+                    break
+                i += 1
+            else:
+                raise ValueError("unterminated JavaScript regular expression")
+        elif not javascript and source[i] == "`":
+            i = skip_kotlin_quote(source, i)
+            for j in range(start + 1, i - 1):
+                if source[j] in "{}":
+                    out[j] = " "
+            continue
+        elif not javascript and source[i] in '\"\'':
+            i = skip_kotlin_quote(source, i)
+        elif source[i] in '\"\'`':
+            quote = source[i]
+            delimiter = quote * 3 if source.startswith(quote * 3, i) else quote
+            i += len(delimiter)
+            while i < len(source):
+                if source.startswith(delimiter, i):
+                    i += len(delimiter)
+                    break
+                if source[i] == "\\" and len(delimiter) == 1:
+                    i += 2
+                else:
+                    i += 1
+        else:
+            i += 1
+            continue
+        for j in range(start, min(i, len(source))):
+            if source[j] != "\n":
+                out[j] = " "
+    return "".join(out)
+
+
+def doc_before(source, start):
+    before = source[:start].rstrip()
+    if not before.endswith("*/"):
+        return ""
+    begin = before.rfind("/**")
+    if begin < 0 or "*/" in before[begin + 3:-2] or "/*" in before[begin + 3:-2]:
+        return ""
+    lines = before[begin + 3:-2].splitlines()
+    return next((line.strip().lstrip("*").strip() for line in lines
+                 if line.strip().lstrip("*").strip()), "")
+
+
+PATTERN = re.compile(
+    r"(?m)^[ \t]*(?:@[A-Za-z_][\w.]*(?:\([^\n)]*\))?[ \t]*(?:\n[ \t]*)?)*"
+    r"(?:(?:public|private|protected|internal|open|abstract|final|"
+    r"data|sealed|enum|annotation|inline|suspend|override|tailrec|operator|"
+    r"infix|external|expect|actual|export|default|async|static|const|lateinit)\s+)*"
+    r"(?P<kind>class|interface|object|typealias|fun|function|val|var|let|const)\s+"
+    r"(?:<[^>\n]+>\s*)?(?P<name>`[^`\n]+`|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)"
+)
+
+
+def outline(path):
+    source = path.read_text(encoding="utf-8")
+    if path.suffix == ".py":
+        tree = ast.parse(source, filename=str(path))
+        rows = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node) or ""
+                rows.append(dict(kind="class" if isinstance(node, ast.ClassDef) else "fun",
+                                 name=node.name, start=node.lineno, end=node.end_lineno,
+                                 doc=doc.splitlines()[0] if doc else ""))
+        return sorted(rows, key=lambda row: (row["start"], row["name"]))
+    if path.suffix not in {".kt", ".kts", ".js", ".mjs", ".cjs"}:
+        raise ValueError(f"unsupported file type: {path}")
+    code = mask(source, javascript=path.suffix in {".js", ".mjs", ".cjs"})
+    matches = list(PATTERN.finditer(code))
+    declaration_starts = {match.start() for match in matches}
+    pairs, stack = {}, []
+    for index, char in enumerate(code):
+        if char == "{":
+            stack.append(index)
+        elif char == "}" and stack:
+            pairs[stack.pop()] = index
+    rows = []
+    for index, match in enumerate(matches):
+        tail = code[match.end():]
+        # A body can span lines, but must precede a terminating semicolon or
+        # an enclosing closing brace. An expression body has no owned block.
+        end = code.find("\n", match.end())
+        if end < 0:
+            end = len(code)
+        depth = 0
+        for offset, char in enumerate(tail):
+            if match.end() + offset in declaration_starts and depth == 0:
+                break
+            if char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+                if depth == 0:
+                    end = max(end, match.end() + offset)
+            elif depth == 0 and char in "{};=":
+                if char == "{":
+                    opening = match.end() + offset
+                    end = pairs.get(opening, end)
+                break
+        rows.append(dict(kind=match["kind"], name=source[match.start("name"):match.end("name")],
+                         start=code.count("\n", 0, match.start()) + 1,
+                         end=code.count("\n", 0, end) + 1,
+                         doc=doc_before(source, match.start())))
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("files", nargs="+", type=Path)
+    parser.add_argument("--json", action="store_true", help="emit a JSON array")
+    args = parser.parse_args()
+    rows = []
+    try:
+        for path in args.files:
+            rows.extend(dict(file=str(path), **row) for row in outline(path))
+    except (OSError, UnicodeError, SyntaxError, ValueError) as error:
+        parser.exit(2, f"outline: {error}\n")
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+    else:
+        for row in rows:
+            print(f"{row['file']}:{row['start']}-{row['end']} "
+                  f"{row['kind']} {row['name']}" +
+                  (f" — {row['doc']}" if row['doc'] else ""))
+
+
+if __name__ == "__main__":
+    main()

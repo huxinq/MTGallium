@@ -9,6 +9,8 @@ model, or interpretation of retained results.
 
 ## Read for the task
 
+Before reading a large Kotlin, Python or JavaScript file, run `tools/outline FILE`; ambiguous JavaScript syntax may require a parser.
+
 | Task | Guidance |
 | --- | --- |
 | Implement or review code | [Contributing](CONTRIBUTING.md); [architecture](docs/architecture.md) for affected boundaries |
