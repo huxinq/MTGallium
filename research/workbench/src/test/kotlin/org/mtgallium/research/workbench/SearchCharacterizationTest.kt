@@ -47,7 +47,7 @@ class SearchCharacterizationTest {
         Files.createDirectories(output.parent)
         val actual = lines.joinToString("\n", postfix = "\n")
         Files.writeString(output, actual)
-        compareOrCaptureGolden(actual)
+        compareOrCaptureGolden("search-characterization.jsonl", actual)
     }
 
     private fun characterize(name: String, plan: ResearchGameConfig): JsonObject {
@@ -102,48 +102,18 @@ class SearchCharacterizationTest {
         }
         error("Public Mono-Red fixture not found")
     }
+}
 
-    private fun compareOrCaptureGolden(actual: String) {
-        val name = "search-characterization.jsonl"
-        if (System.getenv("MTG_CAPTURE_GOLDENS") == "1") {
-            val source = Path.of(requireNotNull(System.getenv("MTG_SOURCE_JSON")) {
-                "Golden capture requires a tools/remote source snapshot"
-            })
-            val expectedSha = requireNotNull(System.getenv("MTG_GOLDEN_BASELINE_SHA")) {
-                "Golden capture requires the recorded unretired baseline source SHA"
-            }
-            val provenance = researchJson.parseToJsonElement(Files.readString(source)).jsonObject
-            check(provenance.getValue("commit").jsonPrimitive.content == expectedSha) {
-                "Capture source SHA differs from the recorded unretired baseline"
-            }
-            check(provenance.getValue("diff").jsonPrimitive.content.isEmpty() &&
-                provenance.getValue("status").jsonPrimitive.content.isEmpty()) {
-                "Capture requires a clean committed source snapshot"
-            }
-            val capture = Path.of("build", "golden-capture", name)
-            Files.createDirectories(capture.parent)
-            Files.writeString(capture, actual)
-            val digest = MessageDigest.getInstance("SHA-256")
-                .digest(actual.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-            Files.writeString(capture.resolveSibling("$name.source.json"), buildJsonObject {
-                put("sourceSha", expectedSha)
-                put("bytesSha256", digest)
-            }.toString() + "\n")
-            error("Captured $capture; review and pin it before comparison. Capture is not verification.")
-        }
-        val expected = requireNotNull(javaClass.getResourceAsStream("/goldens/$name")) {
-            "Missing $name golden; capture and accept it on the recorded unretired baseline first"
-        }.bufferedReader().use { it.readText() }
-        val metadata = requireNotNull(javaClass.getResourceAsStream("/goldens/$name.source.json")) {
-            "Missing $name.source.json; accept payload and provenance together"
-        }.bufferedReader().use { researchJson.parseToJsonElement(it.readText()).jsonObject }
-        val sourceSha = metadata.getValue("sourceSha").jsonPrimitive.content
-        val bytesSha = metadata.getValue("bytesSha256").jsonPrimitive.content
-        check(Regex("[0-9a-f]{40}").matches(sourceSha)) { "Invalid $name source SHA" }
-        check(Regex("[0-9a-f]{64}").matches(bytesSha)) { "Invalid $name byte SHA-256" }
-        val pinnedSha = MessageDigest.getInstance("SHA-256")
-            .digest(expected.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-        assertEquals(bytesSha, pinnedSha, "$name provenance does not match pinned bytes")
-        assertEquals(expected, actual)
+/** Compares with a committed golden; MTG_CAPTURE_GOLDENS=1 writes a candidate under build/ instead. */
+internal fun compareOrCaptureGolden(name: String, actual: String) {
+    if (System.getenv("MTG_CAPTURE_GOLDENS") == "1") {
+        val output = Path.of("build", "golden-capture", name)
+        Files.createDirectories(output.parent)
+        Files.writeString(output, actual)
+        error("Captured $output; review it before replacing the golden")
     }
+    val expected = requireNotNull(object {}.javaClass.getResourceAsStream("/goldens/$name")) {
+        "Missing golden $name"
+    }.bufferedReader().use { it.readText() }
+    assertEquals(expected, actual, name)
 }

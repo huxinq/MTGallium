@@ -9,7 +9,7 @@ model, or interpretation of retained results.
 
 ## Read for the task
 
-Before reading a large Kotlin, Python or JavaScript file, run `tools/outline FILE`; ambiguous JavaScript syntax may require a parser.
+Before reading a large Kotlin, Python or JavaScript file, run `tools/outline FILE`; `tools/outline --map --name TEXT` finds the file that declares a type.
 
 | Task | Guidance |
 | --- | --- |
