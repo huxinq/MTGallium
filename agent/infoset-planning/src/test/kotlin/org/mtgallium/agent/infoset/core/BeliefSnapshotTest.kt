@@ -87,7 +87,6 @@ class BeliefSnapshotTest {
         override fun step(choice: SemanticChoice): SearchStepResult = error("No decisions in fixture")
         override fun fork(): SearchWorld = PresenceWorld(present)
         override fun terminalPayoff(rootPlayer: String) = if (present) 1.0 else -1.0
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String) = error("Terminal fixture")
     }
     companion object {
         private fun batch(worlds: List<Weighted<SearchWorld>>) = BeliefBatch(worlds,

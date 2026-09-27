@@ -35,12 +35,6 @@ key order, then clips to `[-1, 1]` by default. Pass `LinearValueLink.TANH` to us
 `tanh(score)` for logistic-outcome deployments. `evaluateDetailed` returns both
 the raw score and deployed value.
 
-`ResidualValueEvaluator` adds its linear score to `MonoRedInformationEvaluator`
-before clipping. Residual coefficients accumulate in UTF-8 byte order. An
-all-zero residual returns the heuristic directly, preserving its exact result
-and avoiding feature extraction. Detailed results include the heuristic,
-residual, sum and clipped value. Nonfinite arithmetic raises an exception.
-
 ## Search use
 
 `FactualPolicyEncoder.view(information)` exposes the same factual view bytes as
@@ -53,18 +47,17 @@ nonacting player. Omitting the schema preserves the original snapshot fields.
 
 Pass the leaf route directly to `createSearch` or `SearchPolicySession` as
 `valueSource`: `LeafValueSource.Information(evaluator)` evaluates the root
-player's represented information, while `LeafValueSource.SampledWorld(id)` asks
-the trusted sampled-world route for the named evaluation. Search returns terminal
+player's represented information. Search returns terminal
 payoffs directly and records every backed-up value's origin.
 `observedEvaluationBy` attaches a callback to the detailed calculation for
 diagnostics.
 
-`LeafEvaluationConfig` selects `CURRENT_INFORMATION_STATE`,
-`CURRENT_SAMPLED_WORLD`, or `BOUNDED_ROLLOUT` as its `stateSource`. Its `cutoff`
-is `EVALUATE`, `QUIESCENCE`, or `POLICY_QUIESCENCE`; the latter two require a
-bounded rollout. `unresolved` is explicit: `EVALUATE` evaluates an unresolved
-leaf and `BACK_UP_NEUTRAL` records a neutral settlement. The workbench defaults to
-`LeafEvaluationConfig(BOUNDED_ROLLOUT)`, with `EVALUATE` for both cutoff and unresolved handling.
+`LeafEvaluationConfig` selects `CURRENT_INFORMATION_STATE` or `BOUNDED_ROLLOUT`
+as its `stateSource`. Its `cutoff` is `EVALUATE`, `QUIESCENCE`, or
+`POLICY_QUIESCENCE`; the latter two require a bounded rollout. An unresolved
+leaf is evaluated. The workbench defaults to `LeafEvaluationConfig(BOUNDED_ROLLOUT)`
+with the `EVALUATE` cutoff. Recorded diagnostics retain historical leaf settings
+as data so older records can still be decoded.
 
 Quiescence passes a lone priority pass without making it a search decision.
 `quiescencePasses` selects which passes qualify. `RULES_FORCED_V1`, the default,

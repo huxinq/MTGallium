@@ -287,18 +287,10 @@ class UnifiedSemanticExpanderTest {
         val fast = UnifiedSemanticExpander(
             actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
         ).expand(env, registry, proposalSeed = 41L)
-        val experimental = UnifiedSemanticExpander(
-            actionSpaceProfile = SearchActionSpaceProfile.EXPERIMENTAL_STANDALONE_MANA_TIMING_V1,
-        ).expand(env, registry, proposalSeed = 41L)
+
 
         assertTrue(exact.policy.candidates.any { it.operationFamily == SemanticOperationFamily.MANA_ABILITY })
         assertTrue(exact.policy.isExhaustive)
-        assertEquals(exact.policy.candidates, experimental.policy.candidates)
-        assertTrue(experimental.policy.isExhaustive)
-        assertTrue(experimental.policy.isProfileExhaustive)
-        assertTrue(experimental.policy.omissionReasons.isEmpty())
-        assertFalse(SearchActionSpaceProfile.EXPERIMENTAL_STANDALONE_MANA_TIMING_V1.rulesEquivalent)
-        assertTrue(experimental.policy.proposalVersion.endsWith("experimental-standalone-mana-timing-v1"))
         assertEquals(
             listOf(SemanticOperationFamily.PASS_PRIORITY),
             fast.policy.candidates.map { it.operationFamily },

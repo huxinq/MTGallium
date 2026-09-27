@@ -1,5 +1,9 @@
 package org.mtgallium.agent.argentum.policy
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.core.BeliefSnapshot
@@ -10,7 +14,6 @@ import org.mtgallium.agent.infoset.argentum.ArgentumParticleBeliefSnapshot
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefSupport
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.argentum.ArgentumConditionalRejuvenator
-import org.mtgallium.agent.infoset.argentum.ArgentumHybridBeliefWorldSource
 import org.mtgallium.agent.infoset.argentum.ArgentumKnownDeckBeliefWorldSource
 import org.mtgallium.agent.infoset.argentum.ArgentumParticleDiagnostics
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
@@ -30,6 +33,28 @@ import org.mtgallium.agent.infoset.core.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.Weighted
 import org.mtgallium.agent.infoset.core.decisionView
+
+/** An explicit diagnostic choice, independent of the represented history format. */
+@Serializable
+enum class ObservedBeliefConditioning { HISTORICAL_GROUP_SIGNATURE_V1, QUALIFIED_SUPPORTED_FAMILIES_V1 }
+
+/** Inputs actually used by the shared belief tracker, independently of tree execution. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("org.mtgallium.agent.searchteacher.SearchTeacherBeliefConfiguration")
+data class BeliefConfig(
+    val particles: Int,
+    val beliefMode: BeliefMode = BeliefMode.CONSISTENCY_ONLY_V1,
+    val beliefArchitecture: BeliefArchitecture = BeliefArchitecture.SEQUENTIAL_B_V1,
+    /** Absent preserves historical bytes and the host's representation-bound default. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val observedConditioning: ObservedBeliefConditioning? = null,
+) {
+    init { require(particles > 0) }
+}
+
+internal fun SearchPolicyConfig.beliefConfiguration() =
+    BeliefConfig(particles, beliefMode, beliefArchitecture)
 
 /** Immutable, read-only counters for one production belief lifecycle. */
 data class BeliefUpdateDiagnostics(
@@ -251,10 +276,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
             expected,
         )
         var unsupportedParticles = supportFailures.values.sum()
-        val rootRefresh = parameters.beliefArchitecture in setOf(
-            BeliefArchitecture.SNAPSHOT_A_V1,
-            BeliefArchitecture.HYBRID_C_V1,
-        )
+        val rootRefresh = parameters.beliefArchitecture == BeliefArchitecture.SNAPSHOT_A_V1
         if (digestMismatches == 0 && supportFailures.isEmpty() && !rootRefresh && !pendingDepletion) {
             val knowledgeChanged = latestDiagnostics.knowledgeDigest != expected.knowledge.knowledgeDigest
             if (expectedInformation != expected || knowledgeChanged) capturedSnapshot = null
@@ -370,11 +392,7 @@ internal class ArgentumParticleBeliefBackend private constructor(
             require(parameters.beliefArchitecture == BeliefArchitecture.SEQUENTIAL_B_V1)
             exactObservedConditioningUsed = true
         }
-        if (parameters.beliefArchitecture in setOf(
-                BeliefArchitecture.SNAPSHOT_A_V1,
-                BeliefArchitecture.HYBRID_C_V1,
-            )
-        ) {
+        if (parameters.beliefArchitecture == BeliefArchitecture.SNAPSHOT_A_V1) {
             rebuildPopulation(
                 actual = actual,
                 expected = expected,
@@ -565,12 +583,6 @@ internal class ArgentumParticleBeliefBackend private constructor(
                         diagnostics = batch.diagnostics.copy(architecture = parameters.beliefArchitecture),
                     )
                 }
-            BeliefArchitecture.HYBRID_C_V1 -> ArgentumHybridBeliefWorldSource(
-                actual,
-                proposalAuditSink,
-                "$viewer:$purpose",
-            )
-                .sample(information, knownDecks, seed, parameters.particles)
             BeliefArchitecture.PRIVILEGED_O_V1 -> BeliefBatch(
                 particles = List(parameters.particles) { particleIndex ->
                     Weighted(

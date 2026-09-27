@@ -14,7 +14,7 @@ class InformationSetSearchTest {
         class Traced(private val world: SearchWorld) : SearchWorld by world {
             override fun fork(): SearchWorld = Traced(world.fork())
             override fun decisionContext(view: DecisionView): DecisionSiteRequest {
-                limits += view.limit
+                if (world.informationState("p0").observation.turnNumber > 0) limits += view.limit
                 return world.decisionContext(view)
             }
         }
@@ -22,12 +22,13 @@ class InformationSetSearchTest {
             override val configurationId = "tree-only"
             override val candidateLimit = 256
             override val explorationConstant = 1.0
-            override fun probabilities(context: DecisionSiteRequest): Map<String, Double> = error("No tree prior in a rollout")
+            override fun probabilities(context: DecisionSiteRequest): Map<String, Double> =
+                context.expansion.candidates.associate { it.signature to 1.0 / context.expansion.candidates.size }
         }
         val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 4,
             leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy,
-            UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.SampledWorld("argentum-board-v1"), prior)
-        search.settleFirstUnvisitedEdge(Traced(FakeWorld(depth = 1, terminalAtDepth = 5)), "p0", 71L, 0)
+            UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.Information(testInformationEvaluator()), prior)
+        search.search("p0", batch(listOf(Traced(FakeWorld(terminalAtDepth = 5)))), 71L)
         assertTrue(limits.isNotEmpty())
         assertTrue(limits.all { it == 64 }, limits.toString())
     }
@@ -45,8 +46,8 @@ class InformationSetSearchTest {
             }
         }
         val search = InformationSetSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy,
-            UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.SampledWorld("argentum-board-v1"), prior)
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)), UniformOpponentPolicy,
+            UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.Information(testInformationEvaluator()), prior)
         val result = search.search("p0", batch(listOf(FakeWorld(candidateCount = 100))), 71L)
         assertEquals("C99", result.chosen.display.label)
         assertEquals(listOf(100), seen)
@@ -64,8 +65,8 @@ class InformationSetSearchTest {
                 override fun probabilities(context: DecisionSiteRequest) = context.expansion.candidates.associate { it.signature to mass }
             }
             val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy,
-                UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.SampledWorld("argentum-board-v1"), prior)
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)), UniformOpponentPolicy,
+                UniformOpponentPolicy, UniformOpponentPolicy, LeafValueSource.Information(testInformationEvaluator()), prior)
             assertFailsWith<IllegalArgumentException> { search.search("p0", batch(listOf(FakeWorld())), 1L) }
         }
     }
@@ -79,10 +80,9 @@ class InformationSetSearchTest {
         }
         val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 4,
             leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy,
-            schedule, schedule, LeafValueSource.SampledWorld("argentum-board-v1"))
+            schedule, schedule, LeafValueSource.Information(testInformationEvaluator()))
         repeat(2) {
-            val child = FakeWorld(depth = 1, terminalAtDepth = 5)
-            search.settleFirstUnvisitedEdge(child, "p0", 71L, it)
+            search.search("p0", batch(listOf(FakeWorld(terminalAtDepth = 5))), 71L)
         }
         assertEquals(listOf(0, 1, 2, 0, 1, 2), seen)
     }
@@ -92,22 +92,19 @@ class InformationSetSearchTest {
     fun `leaf scores reject nonfinite values before clipping`() {
         val config = InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
             leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT))
-        fun settle(score: Double, sampled: Boolean): SearchSettlement {
-            val source = if (sampled) LeafValueSource.SampledWorld("argentum-board-v1")
-                else LeafValueSource.Information(object : InformationStateEvaluator {
-                    override val id = "constant-test-score"
-                    override fun evaluate(information: InformationStateRepresentation, rootPlayer: String) = score
-                })
+        fun settle(score: Double): Double {
+            val source = LeafValueSource.Information(object : InformationStateEvaluator {
+                override val id = "constant-test-score"
+                override fun evaluate(information: InformationStateRepresentation, rootPlayer: String) = score
+            })
             return coreSearch(config, UniformOpponentPolicy, valueSource = source)
-                .settleFirstUnvisitedEdge(FakeWorld(depth = 1, valueForA = score, valueForB = score), "p0", 7L, 0)
+                .search("p0", batch(listOf(FakeWorld(valueForA = score, valueForB = score))), 7L).rootValue
         }
-        for (sampled in listOf(false, true)) {
-            for (score in listOf(Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NaN)) {
-                assertFailsWith<IllegalArgumentException>("sampled=$sampled score=$score") { settle(score, sampled) }
-            }
-            for ((score, expected) in listOf(3.0 to 1.0, -3.0 to -1.0, 0.25 to 0.25)) {
-                assertEquals(expected, settle(score, sampled).backedValue)
-            }
+        for (score in listOf(Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NaN)) {
+            assertFailsWith<IllegalArgumentException>("score=$score") { settle(score) }
+        }
+        for ((score, expected) in listOf(3.0 to 1.0, -3.0 to -1.0, 0.25 to 0.25)) {
+            assertEquals(expected, settle(score))
         }
     }
 
@@ -136,7 +133,7 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `bounded and terminal rollouts retain the actual incomplete menu witness`() {
+    fun `bounded rollouts retain the actual incomplete menu witness`() {
         class IncompleteWorld(private val wrapped: SearchWorld) : SearchWorld by wrapped {
             override fun decisionContext(view: DecisionView) = testDecisionContext(this, view)
             override fun fork(): SearchWorld = IncompleteWorld(wrapped.fork())
@@ -158,224 +155,6 @@ class InformationSetSearchTest {
             UniformOpponentPolicy, rolloutPolicy = policy, rolloutOpponentPolicy = policy)
         search.search("p0", batch(listOf(IncompleteWorld(FakeWorld(terminalAtDepth = 5)))), 71L)
         assertTrue(seen.isNotEmpty() && seen.none { it })
-        seen.clear()
-        search.continueFirstUnvisitedEdgeToTerminal(IncompleteWorld(FakeWorld(terminalAtDepth = 3)), "p0", 72L, 0)
-        assertEquals(listOf(false, false, false), seen)
-    }
-
-    @Test
-    fun `root guidance accepts complete declared profiles despite intentional legal action omissions`() {
-        val world = ProfilePrunedWorld(FakeWorld())
-        val expansion = world.expandChoices()
-        assertTrue(!expansion.isExhaustive && expansion.isProfileExhaustive)
-        val guidance = RootSelectionGuidance("profile", world.decisionContext().information().informationStateDigest,
-            expansion.candidates.associate { it.signature to if (it.display.label == "B") 1.0 else -1.0 })
-        val search = coreSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
-        val result = search.search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
-        assertEquals("B", result.chosen.display.label)
-        assertEquals(-.2, result.rootValue)
-        assertEquals(1, result.candidates.sumOf { it.visits })
-    }
-
-    @Test
-    fun `zero root guidance preserves every search result except declared guidance and timing`() {
-        val world = FakeWorld()
-        val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
-        val guidance = RootSelectionGuidance("zero", world.decisionContext().information().informationStateDigest, scores)
-        val search = coreSearch(InformationSetSearchConfig(simulations = 32, maxPolicyDecisions = 3,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
-        for (seed in listOf(1L, 91L, 203L)) {
-            val plain = search.search("p0", batch(listOf(world)), seed)
-            val guided = search.search("p0", batch(listOf(world)), seed, rootSelectionGuidance = guidance)
-            assertEquals(plain.copy(diagnostics = plain.diagnostics.copy(evaluatorNanos = 0)),
-                guided.copy(diagnostics = guided.diagnostics.copy(evaluatorNanos = 0, rootSelectionGuidance = null)))
-            assertEquals(guidance, guided.diagnostics.rootSelectionGuidance)
-        }
-    }
-
-    @Test
-    fun `root bias orders exploration without entering utility or later own choices`() {
-        val trace = mutableListOf<Pair<Int, String>>()
-        val world = TracingWorld(FakeWorld(), trace)
-        val scores = world.expandChoices().candidates.associate { it.signature to if (it.display.label == "B") 1.0 else -1.0 }
-        val guidance = RootSelectionGuidance("prefer-B", world.decisionContext().information().informationStateDigest, scores)
-        fun search(simulations: Int, depth: Int) = coreSearch(InformationSetSearchConfig(simulations = simulations,
-            maxPolicyDecisions = depth, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
-        val first = search(1, 1).search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
-        assertEquals("B", first.chosen.display.label)
-        assertEquals(-.2, first.rootValue)
-        assertEquals(1, first.candidates.sumOf { it.visits })
-        assertEquals(1, first.candidateSettlementCounts.values.sumOf { it.heuristicSettlementBackups })
-        // With no exploration term, bonus changes the third root visit after both edges were tried.
-        val constantWorld = FakeWorld(valueForA = 0.0, valueForB = 0.0)
-        val zeroValue = coreSearch(InformationSetSearchConfig(simulations = 3, maxPolicyDecisions = 1,
-            explorationConstant = 0.0, leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
-            .search("p0", batch(listOf(constantWorld)), 91L, rootSelectionGuidance = guidance)
-        assertEquals(2, zeroValue.candidates.single { it.choice.display.label == "B" }.visits)
-        assertTrue(zeroValue.candidates.all { it.meanValue == 0.0 })
-        trace.clear()
-        val long = search(64, 3).search("p0", batch(listOf(world)), 91L, rootSelectionGuidance = guidance)
-        assertTrue(trace.any { it.first == 2 && it.second == "A" })
-        assertEquals("A", long.chosen.display.label)
-        assertEquals(64, long.candidates.sumOf { it.visits })
-    }
-
-    @Test
-    fun `root guidance refuses wrong states menus nonfinite scores and nonexhaustive roots`() {
-        val world = FakeWorld()
-        val scores = world.expandChoices().candidates.associate { it.signature to 0.0 }
-        val guidance = RootSelectionGuidance("zero", world.decisionContext().information().informationStateDigest, scores)
-        val search = coreSearch(InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 1,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
-        assertFailsWith<IllegalArgumentException> { guidance.copy(scores = scores.mapValues { Double.NaN }) }
-        assertFailsWith<IllegalArgumentException> { guidance.copy(scores = scores.mapValues { 1.1 }) }
-        assertFailsWith<IllegalArgumentException> {
-            search.search("p0", batch(listOf(world)), 1L, rootSelectionGuidance = guidance.copy(informationStateDigest = "wrong"))
-        }
-        assertFailsWith<IllegalArgumentException> {
-            search.search("p0", batch(listOf(world)), 1L, rootSelectionGuidance = guidance.copy(scores = scores.entries.take(1).associate { it.toPair() }))
-        }
-        val wide = FakeWorld(candidateCount = 100)
-        assertFailsWith<IllegalArgumentException> {
-            search.search("p0", batch(listOf(wide)), 1L, rootSelectionGuidance = guidance.copy(
-                informationStateDigest = wide.informationState("p0").informationStateDigest,
-                scores = wide.expandChoices().candidates.associate { it.signature to 0.0 }))
-        }
-    }
-    @Test
-    fun `conditional estimate forces only the first edge and spends every simulation on it`() {
-        val trace = mutableListOf<Pair<Int, String>>()
-        val original = FakeWorld()
-        val world = TracingWorld(original, trace)
-        val belief = batch(listOf(world))
-        val search = coreSearch(InformationSetSearchConfig(simulations = 32, maxPolicyDecisions = 3,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)),
-            UniformOpponentPolicy)
-        val action = world.expandChoices().candidates.single { it.display.label == "B" }
-        val result = search.estimateRootAction("p0", belief, action.signature, 91L)
-        assertEquals(action, result.action)
-        assertEquals(32, result.visits)
-        assertEquals(-.2, result.meanBackedValue, 1e-12)
-        assertEquals(32, result.settlementCounts.heuristicSettlementBackups)
-        assertEquals(0, result.settlementCounts.terminalPayoffBackups)
-        assertTrue(trace.filter { it.first == 0 }.all { it.second == "B" })
-        assertTrue(trace.any { it.first == 1 }) // The opponent's genuine response is reached.
-        assertTrue(trace.any { it.first == 2 && it.second == "A" }) // Later own choices remain free.
-        assertTrue(result.diagnostics.nodes > 1)
-        assertEquals(0, original.depth)
-        assertEquals("A", search.search("p0", belief, 91L).chosen.display.label)
-    }
-
-    @Test
-    fun `conditional estimate preserves paired world schedules and typed settlements`() {
-        val search = coreSearch(InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 1,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)),
-            UniformOpponentPolicy)
-        val belief = batch(listOf(FakeWorld()))
-        val action = belief.particles.first().value.expandChoices().candidates.single { it.display.label == "B" }
-        val worlds = List(8) { if (it < 4) FakeWorld(terminalAtDepth = 1) else FakeWorld() }
-        val result = search.estimateRootAction("p0", belief, action.signature, 91L, SimulationWorldSchedule(worlds))
-        assertEquals(.4, result.meanBackedValue, 1e-12)
-        assertEquals(4, result.settlementCounts.terminalPayoffBackups)
-        assertEquals(4, result.settlementCounts.heuristicSettlementBackups)
-        assertTrue(worlds.all { it.depth == 0 })
-        assertFailsWith<IllegalArgumentException> { search.estimateRootAction("p0", belief, "absent", 91L) }
-        assertFailsWith<IllegalStateException> {
-            search.estimateRootAction("p0", batch(listOf(FakeWorld(rejectAtDepth = 0))), action.signature, 91L)
-        }
-    }
-
-    @Test
-    fun `terminal continuation uses both fixed rollout seats and returns only actual payoff`() {
-        val rootPolicy = RecordingPolicy("root-terminal-policy")
-        val opponentPolicy = RecordingPolicy("opponent-terminal-policy")
-        val search = coreSearch(
-            InformationSetSearchConfig(
-                simulations = 1,
-                maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(
-                    LeafStateSource.BOUNDED_ROLLOUT,
-                    ),
-            ),
-            opponentPolicy = UniformOpponentPolicy,
-            rolloutPolicy = rootPolicy,
-            rolloutOpponentPolicy = opponentPolicy,
-        )
-
-        val continuation = search.continueFirstUnvisitedEdgeToTerminal(
-            childWorld = FakeWorld(terminalAtDepth = 3),
-            rootPlayer = "p0",
-            searchSeed = 17L,
-            simulationIndex = 2,
-        )
-
-        assertEquals(1.0, continuation.payoff)
-        assertEquals(3, continuation.policyDecisions)
-        assertEquals(2, continuation.rootPolicyDecisions.decisions)
-        assertEquals(1, continuation.opponentPolicyDecisions.decisions)
-        assertEquals(listOf<String?>("p0", "p0"), rootPolicy.actors)
-        assertEquals(listOf<String?>("p1"), opponentPolicy.actors)
-    }
-
-    @Test
-    fun `terminal continuation accepts payoff reached on the final permitted decision`() {
-        val search = coreSearch(
-            InformationSetSearchConfig(
-                simulations = 1,
-                maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-            ),
-            opponentPolicy = UniformOpponentPolicy,
-        )
-        val result = search.continueFirstUnvisitedEdgeToTerminal(
-            childWorld = FakeWorld(terminalAtDepth = 1), rootPlayer = "p0",
-            searchSeed = 18L, simulationIndex = 0, maximumContinuationPolicyDecisions = 1,
-        )
-        assertEquals(1.0, result.payoff)
-        assertEquals(1, result.policyDecisions)
-        assertEquals(1, result.rootPolicyDecisions.decisions)
-    }
-
-    @Test
-    fun `terminal continuation exhaustion is a software failure rather than a value`() {
-        val search = coreSearch(
-            InformationSetSearchConfig(
-                simulations = 1,
-                maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(
-                    LeafStateSource.BOUNDED_ROLLOUT,
-                    ),
-            ),
-            opponentPolicy = UniformOpponentPolicy,
-        )
-
-        val failure = assertFailsWith<IllegalStateException> {
-            search.continueFirstUnvisitedEdgeToTerminal(
-                childWorld = FakeWorld(), rootPlayer = "p0", searchSeed = 18L,
-                simulationIndex = 0, maximumContinuationPolicyDecisions = 2,
-            )
-        }
-
-        assertTrue(failure.message.orEmpty().contains("exhausted"))
-    }
-
-    @Test
-    fun `first unvisited edge seam retains the production terminal bypass`() {
-        val search = coreSearch(
-            InformationSetSearchConfig(
-                simulations = 1,
-                maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD),
-            ),
-            opponentPolicy = UniformOpponentPolicy,
-        )
-
-        val settlement = search.settleFirstUnvisitedEdge(
-            childWorld = FakeWorld(terminalAtDepth = 0), rootPlayer = "p0", searchSeed = 17L, simulationIndex = 0,
-        )
-
-        assertEquals(SearchSettlement(1.0, SearchSettlementOrigin.TERMINAL_PAYOFF), settlement)
     }
 
     @Test
@@ -415,7 +194,7 @@ class InformationSetSearchTest {
                 simulations = 32,
                 maxPolicyDecisions = 2,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = AuditedReplacementPolicy(disposition),
@@ -446,7 +225,7 @@ class InformationSetSearchTest {
                 simulations = 64,
                 maxPolicyDecisions = 1,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -465,29 +244,24 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `candidate backup settlement counts classify terminal heuristic and unresolved leaves`() {
+    fun `candidate backup settlement counts classify terminal and heuristic leaves`() {
         fun search(
             world: SearchWorld,
             leaf: LeafEvaluationConfig,
-            valueSource: LeafValueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
-            maxQuiescenceDecisions: Int = 32,
-            maxQuiescenceForcedPasses: Int = 256,
         ) =
             coreSearch(
                 InformationSetSearchConfig(
                     simulations = 4,
                     maxPolicyDecisions = 1,
-                    maxQuiescenceDecisions = maxQuiescenceDecisions,
-                    maxQuiescenceForcedPasses = maxQuiescenceForcedPasses,
                     leaf = leaf,
                 ),
                 UniformOpponentPolicy,
-                valueSource = valueSource,
+                valueSource = LeafValueSource.Information(testInformationEvaluator()),
             ).search("p0", batch(listOf(world)), searchSeed = 701L)
 
         val terminal = search(
             FakeWorld(terminalAtDepth = 1),
-            LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD),
+            LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE),
         )
         assertTrue(terminal.candidateSettlementCounts.values.all {
             it.terminalPayoffBackups == it.successfulBackups && it.heuristicSettlementBackups == 0
@@ -495,42 +269,31 @@ class InformationSetSearchTest {
 
         val heuristic = search(
             FakeWorld(),
-            LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD),
+            LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE),
         )
         assertTrue(heuristic.candidateSettlementCounts.values.all {
             it.heuristicSettlementBackups == it.successfulBackups && it.terminalPayoffBackups == 0
         })
 
-        val unresolved = search(
-            QuiescenceWorld(QuiescenceProbe(), QuiescenceBranch.ENDLESS_PASS),
-            LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE,
-                unresolved = UnresolvedLeafHandling.BACK_UP_NEUTRAL),
-            valueSource = LeafValueSource.Information(testEvaluator()),
-            maxQuiescenceForcedPasses = 1,
-        )
-        assertTrue(unresolved.candidateSettlementCounts.values.all {
-            it.neutralUnresolvedSettlementBackups == it.successfulBackups && it.heuristicSettlementBackups == 0
-        })
     }
 
     @Test
     fun `scorer identity cannot choose the rollout cutoff algorithm`() {
-        for (id in listOf("mono-red-tactical-value-v3", "hand-authored")) {
+        for (id in listOf("test-information-evaluator", "hand-authored")) {
             for (cutoff in listOf(RolloutCutoff.EVALUATE, RolloutCutoff.QUIESCENCE)) {
                 val probe = QuiescenceProbe()
                 val result = coreSearch(
                     InformationSetSearchConfig(simulations = 2, maxPolicyDecisions = 1,
                         maxQuiescenceForcedPasses = 2,
-                        leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
-                            cutoff, UnresolvedLeafHandling.BACK_UP_NEUTRAL)),
+                        leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT, cutoff)),
                     UniformOpponentPolicy,
                     valueSource = LeafValueSource.Information(recordingEvaluator(probe, id)),
                 ).search("p0", batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.ENDLESS_PASS))), 105L)
                 val direct = cutoff == RolloutCutoff.EVALUATE
-                assertEquals(if (direct) 0.25 else 0.0, result.rootValue)
-                assertEquals(if (direct) 2 else 0, result.diagnostics.evaluatorCalls)
+                assertEquals(0.25, result.rootValue)
+                assertEquals(2, result.diagnostics.evaluatorCalls)
                 assertEquals(if (direct) 0 else 4, result.diagnostics.quiescenceForcedPasses)
-                assertEquals(if (direct) 0 else 2, result.diagnostics.quiescenceUnresolvedBackups)
+                assertEquals(0, result.diagnostics.quiescenceUnresolvedBackups)
                 assertEquals(id, result.diagnostics.evaluatorId)
             }
         }
@@ -541,7 +304,7 @@ class InformationSetSearchTest {
         val config = InformationSetSearchConfig(
             simulations = 32,
             maxPolicyDecisions = 1,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD),
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE),
         )
         val first = coreSearch(config, UniformOpponentPolicy).search("p0", batch(listOf(FakeWorld())), 702L)
         val second = coreSearch(config, UniformOpponentPolicy).search("p0", batch(listOf(FakeWorld())), 702L)
@@ -560,7 +323,7 @@ class InformationSetSearchTest {
             simulations = 64,
             maxPolicyDecisions = 1,
             leaf = LeafEvaluationConfig(
-                LeafStateSource.CURRENT_SAMPLED_WORLD,
+                LeafStateSource.CURRENT_INFORMATION_STATE,
                 ),
         )
         val search = coreSearch(config, UniformOpponentPolicy)
@@ -591,7 +354,7 @@ class InformationSetSearchTest {
                 simulations = 1,
                 maxPolicyDecisions = 1,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -612,7 +375,7 @@ class InformationSetSearchTest {
                 simulations = 8,
                 maxPolicyDecisions = 2,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -678,7 +441,7 @@ class InformationSetSearchTest {
 
     @Test
     fun `bounded rollout prefix caching preserves seed-sensitive choices and settlement accounting`() {
-        fun run(cache: Boolean): Pair<InformationSetSearchResult, List<String>> {
+        fun run(): Pair<InformationSetSearchResult, List<String>> {
             val decisions = mutableListOf<String>()
             fun policy(name: String) = object : OpponentPolicy {
                 override val id = name
@@ -700,71 +463,46 @@ class InformationSetSearchTest {
                 }
             }
             val result = coreSearch(InformationSetSearchConfig(simulations = 96, maxPolicyDecisions = 16,
-                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-                cacheSimulationTransitions = cache), UniformOpponentPolicy,
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy,
                 rolloutPolicy = policy("root-seeded"), rolloutOpponentPolicy = policy("opponent-seeded"))
                 .search("p0", batch(List(2) { FakeWorld() }), searchSeed = 7571L)
             return result to decisions
         }
-        val (plain, plainDecisions) = run(false)
-        val (cached, cachedDecisions) = run(true)
-        assertEquals(plainDecisions, cachedDecisions)
-        assertEquals(plain.chosen, cached.chosen)
-        assertEquals(plain.rootValue, cached.rootValue)
-        assertEquals(plain.candidates, cached.candidates)
-        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
-        assertEquals(plain.diagnostics.rootRolloutPolicyDecisions, cached.diagnostics.rootRolloutPolicyDecisions)
-        assertEquals(plain.diagnostics.opponentRolloutPolicyDecisions, cached.diagnostics.opponentRolloutPolicyDecisions)
+        val (cached, decisions) = run()
+        assertTrue(decisions.isNotEmpty())
         assertTrue(cached.diagnostics.rolloutTransitionCacheHits > 0)
-        assertTrue(cached.diagnostics.searchWorldSteps < plain.diagnostics.searchWorldSteps)
-        assertEquals(0, plain.diagnostics.rolloutTransitionCacheSnapshots)
+        assertTrue(cached.diagnostics.rolloutTransitionCacheSnapshots > 0)
     }
 
     @Test
-    fun `bounded rollout cache caps snapshots and continues uncached without changing the result`() {
-        fun run(cache: Boolean) = coreSearch(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 128,
-            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-            cacheSimulationTransitions = cache), UniformOpponentPolicy)
+    fun `bounded rollout cache caps snapshots and continues after the cap`() {
+        val cached = coreSearch(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 128,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy)
             .search("p0", batch(listOf(FakeWorld())), searchSeed = 7572L)
-        val plain = run(false)
-        val cached = run(true)
-        assertEquals(plain.chosen, cached.chosen)
-        assertEquals(plain.rootValue, cached.rootValue)
-        assertEquals(plain.candidates, cached.candidates)
-        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
         assertEquals(4096, cached.diagnostics.rolloutTransitionCacheSnapshots)
         assertTrue(cached.diagnostics.rolloutTransitionCacheBypasses > 0)
     }
 
     @Test
     fun `rollout prefixes remain separate across scheduled worlds and rejected transitions still fail`() {
-        fun search(cache: Boolean) = coreSearch(InformationSetSearchConfig(simulations = 16, maxPolicyDecisions = 8,
-            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-            cacheSimulationTransitions = cache), UniformOpponentPolicy)
+        fun search() = coreSearch(InformationSetSearchConfig(simulations = 16, maxPolicyDecisions = 8,
+            leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy)
         val schedule = SimulationWorldSchedule(List(16) { i ->
             FakeWorld(valueForA = i / 16.0, valueForB = -i / 16.0, terminalAtDepth = if (i % 2 == 0) 4 else null)
         })
-        val plain = search(false).search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
-        val cached = search(true).search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
-        assertEquals(plain.chosen, cached.chosen)
-        assertEquals(plain.rootValue, cached.rootValue)
-        assertEquals(plain.candidates, cached.candidates)
-        assertEquals(plain.candidateSettlementCounts, cached.candidateSettlementCounts)
+        val cached = search().search("p0", batch(listOf(FakeWorld())), 7573L, simulationWorldSchedule = schedule)
         assertEquals(0, cached.diagnostics.rolloutTransitionCacheHits)
-        for (enabled in listOf(false, true)) {
-            assertFailsWith<RejectedSearchTransitionException> {
-                search(enabled).search("p0", batch(listOf(FakeWorld(rejectAtDepth = 3))), 7573L)
-            }
+        assertFailsWith<RejectedSearchTransitionException> {
+            search().search("p0", batch(listOf(FakeWorld(rejectAtDepth = 3))), 7573L)
         }
     }
 
     @Test
     fun `rollout cache prefixes and widening preserve independent search results`() {
-        fun run(cache: Boolean): List<InformationSetSearchResult> {
+        fun run(): List<InformationSetSearchResult> {
             val session = coreSearch(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 10,
                 initialExpansionLimit = 2, wideningThresholds = listOf(2, 4), wideningLimits = listOf(3, 4),
-                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-                cacheSimulationTransitions = cache), UniformOpponentPolicy)
+                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)), UniformOpponentPolicy)
             val roots = List(2) { FakeWorld(candidateCount = 4, hiddenVariant = "same") }
             val first = session.search("p0", batch(roots), 7574L)
             val promoted = roots.map { original -> (original.fork() as FakeWorld).also { world ->
@@ -772,22 +510,16 @@ class InformationSetSearchTest {
             } }
             return listOf(first, session.search("p0", batch(promoted), 7575L))
         }
-        val plain = run(false)
-        val cached = run(true)
+        val cached = run()
         assertTrue(cached.first().diagnostics.wideningEvents > 0)
         assertTrue(cached.first().diagnostics.rolloutTransitionCacheHits > 0)
-        plain.zip(cached).forEach { (a, b) ->
-            assertEquals(a.chosen, b.chosen)
-            assertEquals(a.rootValue, b.rootValue)
-            assertEquals(a.candidates, b.candidates)
-            assertEquals(a.candidateSettlementCounts, b.candidateSettlementCounts)
-        }
+        assertTrue(cached.all { it.candidates.isNotEmpty() })
     }
 
     @Test
     fun `every invocation starts fresh after an earlier search and uses the requested budget`() {
         val config = InformationSetSearchConfig(simulations = 17, maxPolicyDecisions = 4,
-            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD))
+            leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE))
         fun make() = coreSearch(config, UniformOpponentPolicy)
         val reusedObject = make()
         reusedObject.search("p0", batch(List(2) { FakeWorld() }), 41L)
@@ -802,34 +534,21 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `exact semantic prefix cache preserves the search result and removes repeated world steps`() {
-        fun run(cache: Boolean) = coreSearch(
+    fun `exact semantic prefix cache reuses transitions and opponent distributions`() {
+        val cached = coreSearch(
             InformationSetSearchConfig(
                 simulations = 64,
                 maxPolicyDecisions = 6,
-                leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
-                    ),
-                cacheSimulationTransitions = cache,
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE),
             ),
             opponentPolicy = UniformOpponentPolicy,
         ).search("p0", batch(List(2) { FakeWorld() }), searchSeed = 19L)
-
-        val uncached = run(cache = false)
-        val cached = run(cache = true)
-
-        assertEquals(uncached.chosen, cached.chosen)
-        assertEquals(uncached.rootValue, cached.rootValue)
-        assertEquals(uncached.candidates, cached.candidates)
-        assertEquals(0, uncached.diagnostics.transitionCacheHits)
-        assertEquals(0, uncached.diagnostics.transitionCacheSnapshots)
         assertTrue(cached.diagnostics.transitionCacheHits > 0)
-        assertTrue(cached.diagnostics.searchWorldSteps < uncached.diagnostics.searchWorldSteps)
         assertTrue(cached.diagnostics.opponentDistributionCacheHits > 0)
     }
 
     @Test
-    fun `sampled-world source can deliberately project back to the visible evaluator`() {
+    fun `information source uses the visible evaluator`() {
         var visibleEvaluations = 0
         val visible = object : InformationStateEvaluator {
             override val id = "mono-red-visible-board-v2"
@@ -843,7 +562,7 @@ class InformationSetSearchTest {
                 simulations = 32,
                 maxPolicyDecisions = 1,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -857,7 +576,7 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `bounded rollout can score its nonterminal horizon with Argentum evaluator`() {
+    fun `bounded rollout can score its nonterminal horizon with information evaluator`() {
         val search = coreSearch(
             InformationSetSearchConfig(
                 simulations = 32,
@@ -869,13 +588,13 @@ class InformationSetSearchTest {
             opponentPolicy = UniformOpponentPolicy,
             rolloutPolicy = UniformOpponentPolicy,
             rolloutOpponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
+            valueSource = LeafValueSource.Information(testInformationEvaluator()),
         )
 
         val result = search.search("p0", batch(listOf(FakeWorld())), 93L)
 
         assertEquals("A", result.chosen.display.label)
-        assertEquals(LeafStateSource.BOUNDED_ROLLOUT, result.diagnostics.leaf.stateSource)
+        assertEquals(LeafStateSource.BOUNDED_ROLLOUT.name, result.diagnostics.leaf.stateSource)
     }
 
     @Test
@@ -976,7 +695,7 @@ class InformationSetSearchTest {
                 simulations = 16,
                 maxPolicyDecisions = 2,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
@@ -1058,7 +777,7 @@ class InformationSetSearchTest {
                     simulations = 4,
                     maxPolicyDecisions = 1,
                     leaf = LeafEvaluationConfig(
-                        LeafStateSource.CURRENT_SAMPLED_WORLD,
+                        LeafStateSource.CURRENT_INFORMATION_STATE,
                         ),
                 ),
                 opponentPolicy = UniformOpponentPolicy,
@@ -1152,7 +871,7 @@ class InformationSetSearchTest {
                 valueSource = LeafValueSource.Information(recordingEvaluator(probe)),
             ).search("p0", batch(List(2) { QuiescenceWorld(probe, QuiescenceBranch.FORCED_PASS) }), 101L)
             return result.copy(diagnostics = result.diagnostics.copy(
-                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE), evaluatorNanos = 0))
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE).diagnostic(), evaluatorNanos = 0))
         }
         val rules = search(QuiescencePassRule.RULES_FORCED_V1)
         assertEquals(4, rules.diagnostics.quiescenceForcedPasses)
@@ -1160,14 +879,18 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `quiescence pass rule keeps earlier leaf bytes and needs a settling leaf`() {
-        val earlier = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)
-        val encoded = PolicyJson.format.encodeToJsonElement(LeafEvaluationConfig.serializer(), earlier)
-            as kotlinx.serialization.json.JsonObject
-        assertEquals(setOf("stateSource", "cutoff", "unresolved"), encoded.keys)
-        val declared = earlier.copy(quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1)
-        assertTrue("quiescencePasses" in (PolicyJson.format.encodeToJsonElement(LeafEvaluationConfig.serializer(),
-            declared) as kotlinx.serialization.json.JsonObject))
+    fun `diagnostic leaf preserves current and rollout profile bytes and retired modes`() {
+        val current = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE).diagnostic()
+        assertEquals("""{"stateSource":"CURRENT_INFORMATION_STATE","cutoff":"EVALUATE","unresolved":"EVALUATE"}""",
+            PolicyJson.format.encodeToString(LeafEvaluationDiagnostic.serializer(), current))
+        val profile = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+            cutoff = RolloutCutoff.POLICY_QUIESCENCE,
+            quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1).diagnostic()
+        assertEquals("""{"stateSource":"BOUNDED_ROLLOUT","cutoff":"POLICY_QUIESCENCE","unresolved":"EVALUATE","quiescencePasses":"PROFILE_FORCED_WHILE_VOLATILE_V1"}""",
+            PolicyJson.format.encodeToString(LeafEvaluationDiagnostic.serializer(), profile))
+        val historical = """{"stateSource":"CURRENT_SAMPLED_WORLD","cutoff":"EVALUATE","unresolved":"BACK_UP_NEUTRAL"}"""
+        assertEquals(historical, PolicyJson.format.encodeToString(LeafEvaluationDiagnostic.serializer(),
+            PolicyJson.format.decodeFromString(LeafEvaluationDiagnostic.serializer(), historical)))
         assertFailsWith<IllegalArgumentException> {
             LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
                 quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1)
@@ -1179,7 +902,7 @@ class InformationSetSearchTest {
         fun search(profileExhaustive: Boolean): Pair<InformationSetSearchResult, List<Int>> {
             val limits = mutableListOf<Int>()
             val result = coreSearch(InformationSetSearchConfig(simulations = 70, maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)), UniformOpponentPolicy)
+                leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)), UniformOpponentPolicy)
                 .search("p0", batch(listOf(OmittingProgressiveWorld(FakeWorld(), profileExhaustive, limits))), 115L)
             return result to limits
         }
@@ -1227,7 +950,7 @@ class InformationSetSearchTest {
             opponentPolicy = UniformOpponentPolicy,
             rolloutPolicy = root,
             rolloutOpponentPolicy = opponent,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
         )
         val result = search.search("p0", batch(listOf(QuiescenceWorld(
             probe, QuiescenceBranch.REAL_BRANCH, volatileThroughStage = 3, alternatingActors = true,
@@ -1249,7 +972,7 @@ class InformationSetSearchTest {
         val result = coreSearch(
             policyQuiescenceConfig().copy(maxQuiescenceDecisions = 1),
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
         ).search("p0", batch(listOf(QuiescenceWorld(
             probe, QuiescenceBranch.REAL_BRANCH, volatileThroughStage = 8,
         ))), 108L)
@@ -1268,7 +991,7 @@ class InformationSetSearchTest {
         val search = coreSearch(
             policyQuiescenceConfig(),
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
         )
         val terminal = search.search("p0", batch(listOf(QuiescenceWorld(
             probe, QuiescenceBranch.REAL_BRANCH, terminalAtStage = 2, volatileThroughStage = 3,
@@ -1289,13 +1012,11 @@ class InformationSetSearchTest {
         val probe = QuiescenceProbe()
         val policy = RecordingPolicy("quiet-policy")
         val settlement = coreSearch(
-            policyQuiescenceConfig(), opponentPolicy = policy, rolloutPolicy = policy,
+            policyQuiescenceConfig().copy(simulations = 1), opponentPolicy = policy, rolloutPolicy = policy,
             rolloutOpponentPolicy = policy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
-        ).settleFirstUnvisitedEdge(
-            QuiescenceWorld(probe, QuiescenceBranch.REAL_BRANCH, stage = 2), "p0", 111L, 0,
-        )
-        assertEquals(SearchSettlementOrigin.HEURISTIC_SETTLEMENT, settlement.origin)
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
+        ).search("p0", batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.REAL_BRANCH, stage = 1))), 111L)
+        assertEquals(1, settlement.candidateSettlementCounts.values.sumOf { it.heuristicSettlementBackups })
         assertEquals(listOf(2), probe.evaluatedStages)
         assertTrue(policy.actors.isEmpty())
     }
@@ -1315,7 +1036,7 @@ class InformationSetSearchTest {
         val result = coreSearch(
             policyQuiescenceConfig().copy(maxQuiescenceForcedPasses = 2),
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
         ).search("p0", batch(listOf(QuiescenceWorld(
             probe, QuiescenceBranch.ALTERNATING_PASS, volatileThroughStage = 8,
         ))), 112L)
@@ -1323,36 +1044,6 @@ class InformationSetSearchTest {
         assertEquals(4, result.diagnostics.quiescenceForcedPasses)
         assertEquals(4, result.diagnostics.quiescenceStrategicDecisions)
         assertEquals(2, result.diagnostics.quiescenceOverflows)
-    }
-
-    @Test
-    fun `unresolved quiescence backs up neutral without evaluating`() {
-        val probe = QuiescenceProbe()
-        val search = coreSearch(
-            InformationSetSearchConfig(
-                simulations = 2,
-                maxPolicyDecisions = 1,
-                maxQuiescenceForcedPasses = 2,
-                leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_INFORMATION_STATE,
-                    unresolved = UnresolvedLeafHandling.BACK_UP_NEUTRAL,
-                ),
-            ),
-            opponentPolicy = UniformOpponentPolicy,
-
-            valueSource = LeafValueSource.Information(testEvaluator()),
-        )
-
-        val result = search.search(
-            "p0",
-            batch(listOf(QuiescenceWorld(probe, QuiescenceBranch.ENDLESS_PASS))),
-            104L,
-        )
-
-        assertEquals(2, result.diagnostics.quiescenceOverflows)
-        assertEquals(2, result.diagnostics.quiescenceUnresolvedBackups)
-        assertEquals(0, result.diagnostics.evaluatorCalls)
-        assertEquals(0.0, result.rootValue)
     }
 
     @Test
@@ -1369,7 +1060,7 @@ class InformationSetSearchTest {
                 ),
             ),
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
         )
 
         val result = search.search(
@@ -1399,7 +1090,7 @@ class InformationSetSearchTest {
         val search = coreSearch(
             config,
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(probe, "test-information-evaluator")),
         )
 
         val unresolved = search.search(
@@ -1424,7 +1115,7 @@ class InformationSetSearchTest {
         val volatile = coreSearch(
             config,
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(volatileProbe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(volatileProbe, "test-information-evaluator")),
         ).search(
             "p0",
             batch(listOf(QuiescenceWorld(
@@ -1453,7 +1144,7 @@ class InformationSetSearchTest {
         val terminal = coreSearch(
             config,
             opponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(recordingEvaluator(terminalProbe, "mono-red-tactical-value-v3")),
+            valueSource = LeafValueSource.Information(recordingEvaluator(terminalProbe, "test-information-evaluator")),
         ).search(
             "p0",
             batch(listOf(QuiescenceWorld(terminalProbe, QuiescenceBranch.FORCED_PASS, terminalAtStage = 2))),
@@ -1787,7 +1478,6 @@ class InformationSetSearchTest {
 
             override fun terminalPayoff(rootPlayer: String): Double? = null
 
-            override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.0
         }
         val probes = List(4) { AnnotationProbe() }
         val roots = probes.map(::AnnotatedPrivateChoiceWorld)
@@ -1835,7 +1525,7 @@ class InformationSetSearchTest {
         opponentPolicy: OpponentPolicy,
         rolloutPolicy: OpponentPolicy = UniformOpponentPolicy,
         rolloutOpponentPolicy: OpponentPolicy = UniformOpponentPolicy,
-        valueSource: LeafValueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
+        valueSource: LeafValueSource = LeafValueSource.Information(testInformationEvaluator()),
     ): InformationSetSearch = InformationSetSearch(
         config = config,
         opponentPolicy = opponentPolicy,
@@ -2137,7 +1827,7 @@ private class QuiescenceWorld(
             zones = emptyList(),
             stack = emptyList(),
             pendingDecision = null,
-            observationDigest = PolicyJson.sha256("quiescence:$viewer:$stage:$rootChoice:$branch"),
+            observationDigest = PolicyJson.sha256("quiescence:$viewer:$stage:$rootChoice:$branch") + ":test-value:0.5",
         )
         return InformationStateRepresentation(
             actingPlayerId = actorToAct(),
@@ -2196,7 +1886,6 @@ private class QuiescenceWorld(
     override fun terminalPayoff(rootPlayer: String): Double? =
         if (terminalAtStage != null && stage >= terminalAtStage) 1.0 else null
 
-    override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.5
 }
 
 private fun quiescenceChoice(
@@ -2257,17 +1946,6 @@ private class AuditedReplacementPolicy(
     )
 }
 
-private class TracingWorld(
-    private val world: FakeWorld,
-    private val trace: MutableList<Pair<Int, String>>,
-) : SearchWorld by world {
-    override fun fork(): SearchWorld = TracingWorld(world.fork() as FakeWorld, trace)
-    override fun step(choice: SemanticChoice): SearchStepResult {
-        trace += world.depth to choice.display.label
-        return world.step(choice)
-    }
-}
-
 private class FakeWorld(
     private val candidateCount: Int = 2,
     private val variant: String = "default",
@@ -2285,6 +1963,12 @@ private class FakeWorld(
 
     override fun informationState(viewer: String): InformationStateRepresentation {
         val expansion = expandChoices()
+        // Keep the root observation identical across worlds with different later test scores.
+        val visibleValue = when (firstChoice) {
+            null -> 0.0
+            "A" -> valueForA
+            else -> valueForB
+        }
         val observation = PlayerObservationSnapshot(
             perspectivePlayerId = viewer,
             turnNumber = depth,
@@ -2299,12 +1983,13 @@ private class FakeWorld(
             zones = emptyList(),
             stack = emptyList(),
             pendingDecision = null,
-            observationDigest = PolicyJson.sha256("$viewer:$depth:$variant:$firstChoice"),
+            observationDigest = PolicyJson.sha256("$viewer:$depth:$variant:$firstChoice") +
+                ":test-value:$visibleValue",
         )
         return InformationStateRepresentation(
             actingPlayerId = actorToAct(),
             observation = observation,
-            informationStateDigest = PolicyJson.sha256("info:$viewer:$depth:$variant:$firstChoice"),
+            informationStateDigest = PolicyJson.sha256("info:$viewer:$depth:$variant:$firstChoice:$visibleValue"),
             historyCommitment = PolicyHistoryCommitment.empty(),
             history = emptyList(),
             candidates = if (viewer == actorToAct()) expansion.candidates else emptyList(),
@@ -2364,8 +2049,6 @@ private class FakeWorld(
     override fun terminalPayoff(rootPlayer: String): Double? =
         1.0.takeIf { terminalAtDepth == depth }
 
-    override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double =
-        if (firstChoice == "A") valueForA else valueForB
 }
 
 private fun rootChoiceStep(variant: String, firstChoice: String?): String =
@@ -2375,15 +2058,6 @@ private fun fakeChoiceSignature(label: String): String = SemanticChoice.computeS
     SemanticOperationFamily.OTHER,
     buildJsonObject { put("choice", JsonPrimitive(label)) },
 )
-
-/** Intentional profile omission is distinct from an incompletely enumerated admitted menu. */
-private class ProfilePrunedWorld(private val world: SearchWorld) : SearchWorld by world {
-    override fun decisionContext(view: DecisionView) = testDecisionContext(this, view)
-    override fun fork(): SearchWorld = ProfilePrunedWorld(world.fork())
-    override fun expandChoices(): PolicyExpansion = world.expandChoices().copy(
-        isExhaustive = false, isProfileExhaustive = true,
-        omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA))
-}
 
 /** Every menu omits something: intentionally under the profile, or because enumeration was bounded. */
 private class OmittingProgressiveWorld(
@@ -2416,4 +2090,11 @@ private fun testDecisionContext(world: SearchWorld, view: DecisionView): Decisio
     val captured = world.fork()
     return DecisionSiteRequest.capture(requireNotNull(world.actorToAct()), expansion,
         { captured.epistemicState(requireNotNull(captured.actorToAct())) }, view, expansion.proposalVersion)
+}
+
+/** A test-only score carried by the player's synthetic observation. */
+internal fun testInformationEvaluator() = object : InformationStateEvaluator {
+    override val id = "synthetic-information-value-v1"
+    override fun evaluate(information: InformationStateRepresentation, rootPlayer: String): Double =
+        information.observation.observationDigest.substringAfterLast(":test-value:", "0.0").toDouble()
 }

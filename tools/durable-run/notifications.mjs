@@ -13,21 +13,12 @@ const read = file => JSON.parse(fs.readFileSync(file, 'utf8'))
 const now = () => new Date().toISOString()
 const directoryOf = run => path.join(run, 'notification-observer')
 
-export function progressSnapshot(status) {
-  const progress = status.progress?.current
-  if (progress) return { phase: progress.phase || 'running', completed: progress.completed,
-    total: progress.total, unit: progress.unit, detail: progress.detail || progress.unit || 'work units' }
-  return { phase: status.phase, detail: 'No workload progress is available.' }
+export function runSnapshot(status) {
+  return { phase: status.phase, detail: `Run is ${status.phase}.` }
 }
 
-export function notificationDue(previous, current, atMs, minimumIntervalMs = 60000) {
-  if (!previous) return true
-  if (previous.snapshot.phase !== current.phase) return true
-  if (atMs - previous.atMs < minimumIntervalMs) return false
-  if (!(current.total > 0 && current.completed >= 0)) return false
-  if (!(previous.snapshot.total > 0 && previous.snapshot.completed >= 0) || previous.snapshot.total !== current.total) return true
-  const milestone = value => Math.floor(5 * value.completed / value.total)
-  return milestone(current) > milestone(previous.snapshot)
+export function notificationDue(previous, current) {
+  return !previous || previous.snapshot.phase !== current.phase
 }
 
 export function attachNotifications(args) {
@@ -65,7 +56,7 @@ export function attachNotifications(args) {
       receipt: { status: 'SUBMISSION_UNKNOWN', runId: request.runId, unit, directory } })
   }
   const result = { runId: request.runId, attached: true, unit, directory,
-    notification: 'Future progress milestones and completion; no replay of past milestones.',
+    notification: 'Future run-state changes and completion; no replay of past changes.',
     researchRestarted: false, additionalCodexWake: false }
   process.stdout.write(json ? `${JSON.stringify(result, null, 2)}\n` : `Attached ntfy notifications to ${request.runId}.\n`)
 }
@@ -83,7 +74,7 @@ export async function observeNotifications(run, { querySystemd = systemdSnapshot
     // Persist the attempt first. An ambiguous delivery is never automatically resent.
     record({ phase: 'observing', lastKind: kind, lastDelivery: { state: 'attempting' }, snapshot })
     const result = publishNtfy({ ...request, runDirectory: directory }, ntfy, {
-      title: `MTGallium · ${request.name}`, tags: kind === 'complete' ? 'checkered_flag' : 'chart_with_upwards_trend',
+      title: `MTGallium · ${request.name}`, tags: kind === 'complete' ? 'checkered_flag' : 'information_source',
       message: `${message}\nRun ${request.runId}`,
     })
     record({ lastDelivery: result })
@@ -92,8 +83,8 @@ export async function observeNotifications(run, { querySystemd = systemdSnapshot
     while (true) {
       const status = read(path.join(run, 'status.json'))
       let snapshot
-      try { snapshot = progressSnapshot(status) }
-      catch { snapshot = { phase: status.phase, detail: 'Progress temporarily unavailable; execution status is still monitored.' } }
+      try { snapshot = runSnapshot(status) }
+      catch { snapshot = { phase: status.phase, detail: 'Run state temporarily unavailable; execution status is still monitored.' } }
       if (status.commandFinishedAt) {
         deliver('complete', `Command finished with exit ${status.experiment.exitCode}. The original Codex completion wake remains managed by the run.`, snapshot)
         record({ phase: 'completed', completedAt: now() })
@@ -113,11 +104,9 @@ export async function observeNotifications(run, { querySystemd = systemdSnapshot
         record({ phase: 'completed', completedAt: now() })
         return
       }
-      const atMs = Date.now()
-      if (notificationDue(previous, snapshot, atMs)) {
-        const count = snapshot.total > 0 ? ` ${snapshot.completed}/${snapshot.total} ${snapshot.unit || 'work units'}.` : ''
-        deliver('progress', `${previous ? 'Progress' : 'Notifications enabled'}: ${snapshot.phase}.${count}\n${snapshot.detail}`, snapshot)
-        previous = { snapshot, atMs }
+      if (notificationDue(previous, snapshot)) {
+        deliver('state', `${previous ? 'Run state' : 'Notifications enabled'}: ${snapshot.phase}.\n${snapshot.detail}`, snapshot)
+        previous = { snapshot }
       }
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
     }

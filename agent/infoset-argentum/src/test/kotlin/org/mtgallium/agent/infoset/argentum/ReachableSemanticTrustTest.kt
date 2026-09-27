@@ -56,7 +56,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import org.mtgallium.agent.infoset.core.BoundedPolicyInput
 import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
 import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
 import org.mtgallium.agent.infoset.core.PolicyAudience
@@ -120,8 +119,8 @@ class ReachableSemanticTrustTest {
         val permittedCast = (permitted.resolveChoice(permittedChoice) as ArgentumResolvedChoice.Action).value as CastSpell
         assertFalse(permittedCast.useAlternativeCost, "Warp exile grants only the ordinary-cost recast")
         assertNotEquals(deniedInformation.observation.observationDigest, permittedInformation.observation.observationDigest)
-        val deniedBounded = BoundedPolicyInputCompiler.compile(deniedInformation)
-        val permittedBounded = BoundedPolicyInputCompiler.compile(permittedInformation)
+        val deniedBounded = deniedInformation
+        val permittedBounded = permittedInformation
         assertFalse(deniedBounded.observation.card("p0", "EXILE", "Nova Hellkite").playableFromExile)
         assertTrue(permittedBounded.observation.card("p0", "EXILE", "Nova Hellkite").playableFromExile)
         assertFalse(deniedBounded.candidates.any { it.signature == permittedChoice.signature })
@@ -182,7 +181,7 @@ class ReachableSemanticTrustTest {
         val policyNova = world.informationState("p0").observation.card("p0", "BATTLEFIELD", "Nova Hellkite")
         assertTrue(policyNova.isWarped)
         assertTrue(
-            BoundedPolicyInputCompiler.compile(world.informationState("p0"))
+            world.informationState("p0")
                 .observation.card("p0", "BATTLEFIELD", "Nova Hellkite").isWarped,
         )
     }
@@ -223,7 +222,7 @@ class ReachableSemanticTrustTest {
         assertEquals("Spend this mana only to cast creature spells", mana.restricted.single().spendRestriction)
         assertEquals(
             mana,
-            BoundedPolicyInputCompiler.compile(restrictedWorld.informationState("p0"))
+            restrictedWorld.informationState("p0")
                 .observation.players.single { it.playerId == "p0" }.mana,
         )
     }
@@ -278,12 +277,12 @@ class ReachableSemanticTrustTest {
         )
 
         assertTurnFactsAreOnlySafeDifference(firstInformation, secondInformation)
-        val firstInput = BoundedPolicyInputCompiler.compile(firstInformation)
-        val secondInput = BoundedPolicyInputCompiler.compile(secondInformation)
+        val firstInput = firstInformation
+        val secondInput = secondInformation
         assertAgedInputsAliasWithoutTurnFacts(firstInput, secondInput)
         assertEquals(0, firstInput.observation.player("p0").noncreatureSpellsCastThisTurn)
         assertEquals(1, secondInput.observation.player("p0").noncreatureSpellsCastThisTurn)
-        assertNotEquals(firstInput.inputDigest, secondInput.inputDigest)
+        assertNotEquals(firstInput.informationStateDigest, secondInput.informationStateDigest)
 
         val firstCast = castChoice(first, currentShock, opponent)
         val secondCast = castChoice(second, currentShock, opponent)
@@ -325,12 +324,12 @@ class ReachableSemanticTrustTest {
         )
 
         assertTurnFactsAreOnlySafeDifference(firstInformation, secondInformation)
-        val firstInput = BoundedPolicyInputCompiler.compile(firstInformation)
-        val secondInput = BoundedPolicyInputCompiler.compile(secondInformation)
+        val firstInput = firstInformation
+        val secondInput = secondInformation
         assertAgedInputsAliasWithoutTurnFacts(firstInput, secondInput)
         assertFalse(firstInput.observation.player("p0").speedIncreaseTriggerFiredThisTurn)
         assertTrue(secondInput.observation.player("p0").speedIncreaseTriggerFiredThisTurn)
-        assertNotEquals(firstInput.inputDigest, secondInput.inputDigest)
+        assertNotEquals(firstInput.informationStateDigest, secondInput.informationStateDigest)
 
         val firstCast = castChoice(first, shock, opponent)
         val secondCast = castChoice(second, shock, opponent)
@@ -383,8 +382,8 @@ class ReachableSemanticTrustTest {
             secondInformation,
             runtimeSemanticIdentityDiffers = true,
         )
-        val firstInput = BoundedPolicyInputCompiler.compile(firstInformation)
-        val secondInput = BoundedPolicyInputCompiler.compile(secondInformation)
+        val firstInput = firstInformation
+        val secondInput = secondInformation
         assertAgedInputsAliasWithoutTurnFacts(
             firstInput,
             secondInput,
@@ -394,7 +393,7 @@ class ReachableSemanticTrustTest {
         assertTrue(secondInput.observation.player("p1").lostLifeThisTurn)
         assertFalse(firstInput.observation.card("p0", "BATTLEFIELD", "Hired Claw").hasActivatedAbilityThisTurn)
         assertTrue(secondInput.observation.card("p0", "BATTLEFIELD", "Hired Claw").hasActivatedAbilityThisTurn)
-        assertNotEquals(firstInput.inputDigest, secondInput.inputDigest)
+        assertNotEquals(firstInput.informationStateDigest, secondInput.informationStateDigest)
 
         val firstCast = castChoice(first, shock, opponent)
         val secondCast = castChoice(second, shock, opponent)
@@ -439,12 +438,12 @@ class ReachableSemanticTrustTest {
         assertFalse(hasActivationFor(first, ojer, transformAbility))
         assertFalse(hasActivationFor(second, ojer, transformAbility))
         assertTurnFactsAreOnlySafeDifference(firstInformation, secondInformation)
-        val firstInput = BoundedPolicyInputCompiler.compile(firstInformation)
-        val secondInput = BoundedPolicyInputCompiler.compile(secondInformation)
+        val firstInput = firstInformation
+        val secondInput = secondInformation
         assertAgedInputsAliasWithoutTurnFacts(firstInput, secondInput)
         assertEquals(3, firstInput.observation.player("p0").redNoncombatDamageDealtThisTurn)
         assertEquals(4, secondInput.observation.player("p0").redNoncombatDamageDealtThisTurn)
-        assertNotEquals(firstInput.inputDigest, secondInput.inputDigest)
+        assertNotEquals(firstInput.informationStateDigest, secondInput.informationStateDigest)
 
         advanceToPostcombatMain(first)
         advanceToPostcombatMain(second)
@@ -544,12 +543,12 @@ class ReachableSemanticTrustTest {
         assertFalse(hasLandPlayFor(first, mountain))
         assertFalse(hasLandPlayFor(second, mountain))
         assertTurnFactsAreOnlySafeDifference(firstInformation, secondInformation)
-        val firstInput = BoundedPolicyInputCompiler.compile(firstInformation)
-        val secondInput = BoundedPolicyInputCompiler.compile(secondInformation)
+        val firstInput = firstInformation
+        val secondInput = secondInformation
         assertAgedInputsAliasWithoutTurnFacts(firstInput, secondInput)
         assertEquals(1, firstInput.observation.player("p0").landPlaysRemainingThisTurn)
         assertEquals(0, secondInput.observation.player("p0").landPlaysRemainingThisTurn)
-        assertNotEquals(firstInput.inputDigest, secondInput.inputDigest)
+        assertNotEquals(firstInput.informationStateDigest, secondInput.informationStateDigest)
 
         advanceToPostcombatMain(first)
         advanceToPostcombatMain(second)
@@ -845,7 +844,7 @@ class ReachableSemanticTrustTest {
      * Wrap the source-constructive engine states in two public, structurally valid ledgers whose
      * different causal record is followed by the same 65-event safe context. The last 64 events
      * are therefore identical. Current-turn overflow reachability itself is established by the
-     * current-revision Case Cedar evidence; this harness locks the bounded compiler behavior for
+     * current-revision Case Cedar evidence; this harness locks the recent-event window behavior for
      * each paired rules consequence without treating commitment digests as learnable features.
      */
     private fun withAgedCausalPrefixes(
@@ -915,17 +914,19 @@ class ReachableSemanticTrustTest {
     }
 
     private fun assertAgedInputsAliasWithoutTurnFacts(
-        first: BoundedPolicyInput,
-        second: BoundedPolicyInput,
+        first: InformationStateRepresentation,
+        second: InformationStateRepresentation,
         runtimeSemanticIdentityDiffers: Boolean = false,
     ) {
-        assertEquals(64, first.recentEvents.size)
-        assertEquals(first.recentEvents, second.recentEvents)
-        assertEquals(2, first.recentEventStartCursor)
-        assertEquals(first.recentEventStartCursor, second.recentEventStartCursor)
+        val firstWindow = BoundedPolicyInputCompiler.recentEventWindow(first.history)
+        val secondWindow = BoundedPolicyInputCompiler.recentEventWindow(second.history)
+        assertEquals(64, firstWindow.events.size)
+        assertEquals(firstWindow.events, secondWindow.events)
+        assertEquals(2, first.history.size - firstWindow.events.size)
+        assertEquals(first.history.size - firstWindow.events.size,
+            second.history.size - secondWindow.events.size)
         assertEquals(first.actingPlayerId, second.actingPlayerId)
         assertEquals(first.knowledge, second.knowledge)
-        assertEquals(first.belief, second.belief)
         if (runtimeSemanticIdentityDiffers) {
             assertCandidateSurfacesEqualWithDistinctIdentity(first.candidates, second.candidates)
         } else {

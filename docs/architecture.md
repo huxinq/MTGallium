@@ -31,7 +31,7 @@ player decision; see [simulation](architecture/information-and-decisions.md#live
 | `agent/infoset-planning` | Planning algorithms and root selection. |
 | `agent/infoset-argentum` | Trusted Argentum projections, engine-backed worlds, and transitions. |
 | `agent/mono-red-models` | Mono-Red features and value evaluators. |
-| `agent/neural-policy` | Factual tensor encoding and ONNX runtime loading. |
+| `agent/neural-policy` | Factual tensor encoding. |
 | `agent/argentum-policy` | Argentum policy lifecycle, defaults, and search/leaf composition. |
 | `research/workbench` | Direct games, Python bridge, native policies and the provider hook for other builds, feature/kernel routines, and CLI entry points. |
 | `integration/argentum-policy` | Argentum application integration. |
@@ -51,4 +51,4 @@ application layers; agent and integration modules cannot depend on evaluation.
 - [Value models](value-models.md): value features, linear evaluators and search
   leaves.
 - [Neural policy training](neural-policy.md): tensors, player memory, training
-  and ONNX sessions.
+  and export.

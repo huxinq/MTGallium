@@ -42,7 +42,6 @@ internal class PerspectiveHistory private constructor(
     private val rememberedReferences: Map<EntityId, RememberedHistoryReferences>,
     private val aliases: Map<EntityId, String>,
     private val events: MutableMap<EntityId, PolicyHistorySnapshot>,
-    private val auditSink: PerspectiveProjectionAuditSink,
     /** Raw ids remain trusted; values are chronology-derived, perspective-local knowledge handles. */
     private val knowledgeHandles: MutableMap<EntityId, MutableMap<EntityId, String>>,
     private val nextKnowledgeHandle: MutableMap<EntityId, Int>,
@@ -55,7 +54,6 @@ internal class PerspectiveHistory private constructor(
 ) {
     constructor(
         playerIds: List<EntityId>,
-        auditSink: PerspectiveProjectionAuditSink = PerspectiveProjectionAuditSink.NONE,
         eventOrder: PerspectiveHistoryEventOrder = PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
         objectReference: PerspectiveHistoryObjectReference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,
     ) : this(
@@ -64,7 +62,6 @@ internal class PerspectiveHistory private constructor(
         rememberedReferences = playerIds.associateWith { RememberedHistoryReferences() },
         aliases = playerIds.mapIndexed { index, id -> id to "p$index" }.toMap(),
         events = playerIds.associateWith { PolicyHistorySnapshot.empty() }.toMutableMap(),
-        auditSink = auditSink,
         knowledgeHandles = playerIds.associateWith { mutableMapOf<EntityId, String>() }.toMutableMap(),
         nextKnowledgeHandle = playerIds.associateWith { 0 }.toMutableMap(),
         knownLibraryOrderIds = playerIds.associateWith { mutableMapOf<EntityId, MutableList<EntityId>>() }.toMutableMap(),
@@ -78,7 +75,6 @@ internal class PerspectiveHistory private constructor(
         rememberedReferences = rememberedReferences.mapValues { (_, references) -> references.fork() },
         aliases = aliases,
         events = events.toMutableMap(),
-        auditSink = auditSink,
         knowledgeHandles = knowledgeHandles.mapValues { (_, value) -> value.toMutableMap() }.toMutableMap(),
         nextKnowledgeHandle = nextKnowledgeHandle.toMutableMap(),
         knownLibraryOrderIds = knownLibraryOrderIds.mapValues { (_, byOwner) ->
@@ -87,21 +83,6 @@ internal class PerspectiveHistory private constructor(
         knowledgeAccumulators = knowledgeAccumulators.mapValues { (_, value) -> value.fork() }.toMutableMap(),
         nextEventId = nextEventId.toMutableMap(),
     )
-
-    /** Diagnostic only. Player IDs and all safe ledger bytes remain fixed. */
-    fun swapNativeIds(swap: ArgentumNativeIdSwap): PerspectiveHistory {
-        require(swap.first !in aliases && swap.second !in aliases)
-        return PerspectiveHistory(eventOrder, objectReference,
-            rememberedReferences.mapValues { (_, refs) -> refs.swapNativeIds(swap) }, aliases,
-            events.toMutableMap(), auditSink,
-            knowledgeHandles.mapValues { (_, handles) -> handles.entries.associate { (id, handle) ->
-                swap.id(id) to handle }.toMutableMap() }.toMutableMap(),
-            nextKnowledgeHandle.toMutableMap(),
-            knownLibraryOrderIds.mapValues { (_, byOwner) -> byOwner.mapValues { (_, order) ->
-                order.map(swap::id).toMutableList() }.toMutableMap() }.toMutableMap(),
-            knowledgeAccumulators.mapValues { (_, accumulator) -> accumulator.fork() }.toMutableMap(),
-            nextEventId.toMutableMap())
-    }
 
     fun forViewer(viewer: EntityId): List<PolicyHistoryEvent> = events.getValue(viewer)
 
@@ -154,10 +135,8 @@ internal class PerspectiveHistory private constructor(
     ): List<PolicyHistoryEvent> {
         val actorEvents = mutableListOf<PolicyHistoryEvent>()
         val untapRange = when (eventOrder) {
-            PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V1 ->
-                qualifiedTurnUntapRange(engineEvents, beforeState, afterState)
             PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2 ->
-                qualifiedTurnUntapRange(engineEvents, beforeState, afterState, allowOrderedPrefix = true)
+                qualifiedTurnUntapRange(engineEvents, beforeState, afterState)
             PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1 -> null
         }
         val pendingUntaps = if (untapRange == null) emptyMap() else
@@ -193,9 +172,7 @@ internal class PerspectiveHistory private constructor(
                 remembered.bindBoundary(beforeState, beforeRefs, handles)
                 remembered.eligible(beforeState, afterState, beforeRefs, afterRefs, handles.toMap(), excluded)
             } else emptyMap()
-            val resolutionSources = if (objectReference in setOf(
-                PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1,
-                PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2)) {
+            val resolutionSources = if (objectReference == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2) {
                 qualifiedResolutionSources(engineEvents, beforeState, afterState, beforeRefs, nextEventId.getValue(viewer))
             } else emptyMap()
             PerspectiveEventReferenceResolver(beforeRefs, afterRefs, eligible, resolutionSources) { handles[it] }
@@ -236,20 +213,6 @@ internal class PerspectiveHistory private constructor(
                             subjects = detail.subjects.sortedBy { it.objectRef }))
                     } else event
                 }
-                auditSink.record(
-                    PerspectiveProjectionAudit(
-                        rawEventType = engineEvent::class.simpleName ?: "UnknownGameEvent",
-                        viewerAlias = aliases.getValue(viewer),
-                        disposition = when {
-                            projected == null -> ProjectionDisposition.INTENTIONALLY_OMITTED
-                            projected.kind == PolicyHistoryEventKind.UNSUPPORTED_VISIBLE_TRANSITION ->
-                                ProjectionDisposition.UNSUPPORTED
-                            else -> ProjectionDisposition.PROJECTED
-                        },
-                        projectedKind = projected?.kind?.name,
-                        detailType = projected?.detail?.let { it::class.simpleName },
-                    )
-                )
                 if (projected == null) continue
                 if (untapRange != null && eventIndex in untapRange) {
                     pendingUntaps.getValue(viewer) += projected

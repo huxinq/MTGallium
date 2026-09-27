@@ -1,6 +1,5 @@
 """Fixed game plans, long-lived JVMs, and atomic per-game compressed shards."""
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 import fcntl
 import gzip
 import hashlib
@@ -113,12 +112,6 @@ def run_games(jobs, play, *, output, plan, threads=None, java_options=JAVA_OPTIO
                           timing_scope='JVM: committed games across resumes; Python/wall: this invocation',
                           threads=workers, java_options=list(java_options), source=source)
             _atomic_json(output / 'summary.json', result)
-            progress = os.environ.get('MTGALLIUM_PROGRESS_FILE')
-            if progress:
-                _atomic_json(Path(progress), dict(schemaVersion=1,
-                    updatedAt=datetime.now(timezone.utc).isoformat(),
-                    completed=len(completed), unit='games', phase=state,
-                    **({'total': len(jobs)} if jobs else {})))
             return result
 
         def worker():

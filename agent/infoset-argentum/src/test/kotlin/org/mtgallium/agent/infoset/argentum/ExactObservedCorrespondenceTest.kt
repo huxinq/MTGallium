@@ -378,7 +378,7 @@ class ExactObservedCorrespondenceTest {
         assertEquals(1.0, result.memberProbability)
         assertEquals(ArgentumActionCorrespondence.REPRESENTATIVE_ONLY, result.memberSelectionBehaviorId)
         assertEquals(f.world.observedActionBehaviorId(), capture.behaviorId)
-        val old = fixture(reference = PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1)
+        val old = fixture(reference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
         assertEquals(old.world.expandChoices(), f.world.expandChoices())
         assertNotEquals(old.world.exactRevision(), f.world.exactRevision())
         val env = environment()

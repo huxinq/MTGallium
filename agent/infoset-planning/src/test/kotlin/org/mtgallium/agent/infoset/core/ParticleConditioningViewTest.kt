@@ -75,7 +75,6 @@ class ParticleConditioningViewTest {
         }
         override fun fork(): SearchWorld = World(tagged, views, done)
         override fun terminalPayoff(rootPlayer: String): Double? = null
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.0
     }
 
     companion object {

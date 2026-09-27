@@ -152,7 +152,7 @@ class OpponentHandBeliefQueriesTest {
         assertEquals(7.0, query.expectedCopies("Shock") + query.expectedCopies("Mountain"), 1e-12)
         assertEquals(fingerprints, (listOf(root) + worlds).map { it.freshAuthoritativeFingerprintForHost() })
         assertEquals(information, (listOf(root) + worlds).map { world -> listOf("p0", "p1").map(world::informationState) })
-        assertTrue(belief.weightedWorlds().map { it.weight }.distinct().size > 1, "Use genuinely nonuniform native weights")
+        assertTrue(belief.weightedWorlds().map { it.weight }.distinct().size > 1, "Use genuinely nonuniform synthetic weights")
 
         assertFailsWith<IllegalArgumentException> { ArgentumHandBeliefQueries.snapshot(belief, "unknown") }
         val unsupported = object : SearchWorld by root {}
@@ -238,7 +238,11 @@ class OpponentHandBeliefQueriesTest {
             assertTrue(root.step(pass).accepted)
         }
         check(ready) { "Fixture failed to reach a genuine main-phase menu" }
-        val batch = ArgentumHybridBeliefWorldSource(root).sample(root.informationState("p1"), decks, 77L, 8)
+        val sampled = ArgentumKnownDeckBeliefWorldSource(root).sample(root.informationState("p1"), decks, 77L, 32)
+        // Query behavior is tested with deliberate nonuniform weights, independent of the sampler.
+        val batch = sampled.copy(particles = sampled.particles.mapIndexed { index, weighted ->
+            weighted.copy(weight = (index + 1) / 528.0)
+        })
         return root to batch
     }
 }

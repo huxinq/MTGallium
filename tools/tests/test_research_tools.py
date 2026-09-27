@@ -2,7 +2,6 @@
 from contextlib import ExitStack
 import gzip
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -77,7 +76,6 @@ class RunnerTest(unittest.TestCase):
         self.stack.enter_context(patch.object(runner, 'Session', FakeSession))
         self.stack.enter_context(patch.object(runner, 'runtime'))
         self.stack.enter_context(patch.object(runner, 'source_provenance', return_value={'commit': 'test'}))
-        self.stack.enter_context(patch.dict(os.environ, {'MTGALLIUM_PROGRESS_FILE': str(self.root / 'progress.json')}))
         self.jobs = [{'seed': i} for i in range(7)]
         FakeSession.created = 0
 
@@ -188,7 +186,6 @@ class RunnerTest(unittest.TestCase):
         summary = self.run_plan('errors', play)
         self.assertEqual((summary['completed'], summary['failed'], summary['rows']), (7, 1, 6))
         self.assertEqual(FakeSession.created, 2)
-        self.assertEqual(json.loads((self.root / 'progress.json').read_text())['completed'], 7)
 
     def test_warmup_games_are_separated_from_steady_cost(self):
         def play(session, job):

@@ -17,7 +17,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class PerspectiveHistoryEventOrder {
     LEGACY_ENGINE_ORDER_V1,
-    QUALIFIED_TURN_UNTAP_V1,
     QUALIFIED_TURN_UNTAP_V2,
 }
 
@@ -32,10 +31,9 @@ enum class PerspectiveHistoryEventOrder {
  * ordered here. General support still requires explicit causal/simultaneity metadata from the
  * rules engine.
  *
- * V1 ([allowOrderedPrefix] = false) permits only the optional cleanup step marker before the
- * turn marker, preserving its historical meaning exactly. V2 (= true) separates the occurrence
- * from unrelated earlier events in the same engine response: an ordered prefix is preserved in
- * its actual order, while only the later untap group is canonicalized. The prefix may not change
+ * V2 separates the occurrence from unrelated earlier events in the same engine response:
+ * an ordered prefix is preserved in its actual order, while only the later untap group is
+ * canonicalized. The prefix may not change
  * a member of that group's continuity, tapped state or phased presence between the response's
  * start and the occurrence; those cases remain outside normalization. This is an object-directed
  * guard, not a whitelist of harmless event names.
@@ -44,7 +42,6 @@ internal fun qualifiedTurnUntapRange(
     events: List<GameEvent>,
     before: GameState,
     after: GameState,
-    allowOrderedPrefix: Boolean = false,
 ): IntRange? {
     if (before.step !in setOf(Step.END, Step.CLEANUP) || after.step != Step.UPKEEP ||
         after.turnNumber != before.turnNumber + 1 || before.activePlayerId == after.activePlayerId) return null
@@ -55,8 +52,6 @@ internal fun qualifiedTurnUntapRange(
     if (turn.turnNumber != after.turnNumber || turn.activePlayerId != after.activePlayerId) return null
     val last = events.lastOrNull() as? StepChangedEvent ?: return null
     if (last.newStep != Step.UPKEEP) return null
-    if (!allowOrderedPrefix &&
-        events.take(turnIndex).any { it !is StepChangedEvent || it.newStep != Step.CLEANUP }) return null
     val range = (turnIndex + 1) until events.lastIndex
     if (range.count() < 2 || range.any { events[it] !is UntappedEvent }) return null
     val untaps = range.map { events[it] as UntappedEvent }
@@ -66,7 +61,7 @@ internal fun qualifiedTurnUntapRange(
     // member's zone, tapped state or phased presence. Other prefix state (counters, damage,
     // attachments, control changes, expired effects) is not certified, and uninterrupted control
     // between the endpoints is not established; the prefix stays in its actual order.
-    if (allowOrderedPrefix && events.take(turnIndex).any { prefixEvent ->
+    if (events.take(turnIndex).any { prefixEvent ->
             when (prefixEvent) {
                 is ZoneChangeEvent -> prefixEvent.entityId in untappedIds
                 is TappedEvent -> prefixEvent.entityId in untappedIds

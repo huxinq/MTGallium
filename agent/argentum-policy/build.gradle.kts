@@ -8,7 +8,6 @@ dependencies {
     api(project(":agent:infoset-planning"))
     api(project(":agent:infoset-argentum"))
     implementation(project(":agent:mono-red-models"))
-    api(project(":agent:neural-policy"))
     implementation("org.mtgallium.argentum:rules-engine")
     implementation(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test-junit5"))

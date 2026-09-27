@@ -104,7 +104,6 @@ class ParticleUpdateAncestryTest {
         override fun fork(): SearchWorld = World(compatible, depth, marker)
         override fun step(choice: SemanticChoice): SearchStepResult { check(choice == pass); depth++; return SearchStepResult(true) }
         override fun terminalPayoff(rootPlayer: String): Double? = null
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String) = 0.0
         override fun informationState(viewer: String) = InformationStateRepresentation(
             actingPlayerId = "p0", observation = PlayerObservationSnapshot(viewer, depth, "TEST", "TEST", "p0", "p0",
                 emptyList(), emptyList(), emptyList(), pendingDecision = null,

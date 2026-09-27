@@ -9,7 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 
 class RolloutPolicyAnnotationRequirementTest {
     @Test
-    fun `selector only policies drive terminal bounded rollout and refresh with admitted menus`() {
+    fun `selector only policies drive bounded rollout with admitted menus`() {
         val probe = ExpansionProbe()
         val seeds = mutableListOf<Pair<Long, Long>>()
         val selector = object : ActionSelector {
@@ -24,19 +24,11 @@ class RolloutPolicyAnnotationRequirementTest {
                 return OpponentPolicyDecision(candidates.first(), OpponentPolicyDecisionDiagnostic(id, id))
             }
         }
-        val terminal = TerminalPolicyContinuationRunner(selector, selector, 16)
-            .continueToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
-        assertEquals(3, terminal.policyDecisions)
-        assertEquals((1..3).map { depth ->
-            ComponentSeeds.derive(77L, 0, depth, selector.id, "rollout") to
-                ComponentSeeds.derive(77L, 0, depth, "rollout-sample")
-        }, seeds)
-        seeds.clear()
         val search = InformationSetSearch(
             InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 8,
                 leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)),
             UniformOpponentPolicy, selector, selector,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
+            valueSource = LeafValueSource.Information(testInformationEvaluator()),
         )
         search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
         assertTrue(seeds.isNotEmpty())
@@ -51,7 +43,7 @@ class RolloutPolicyAnnotationRequirementTest {
             val root = PerspectiveRecordingPolicy("quiescent-root", admission)
             val opponent = PerspectiveRecordingPolicy("quiescent-opponent", admission)
             val evaluator = object : InformationStateEvaluator {
-                override val id = "mono-red-tactical-value-v3"
+                override val id = "test-information-evaluator"
                 override fun evaluate(information: InformationStateRepresentation, rootPlayer: String) = 0.0
             }
             val search = InformationSetSearch(
@@ -60,11 +52,11 @@ class RolloutPolicyAnnotationRequirementTest {
                 UniformOpponentPolicy, root, opponent,
                 valueSource = LeafValueSource.Information(evaluator),
             )
-            val result = search.settleFirstUnvisitedEdge(PolicyAdmissionWorld(probe, 1, volatile = true), "p0", 77L, 0)
-            assertEquals(SearchSettlementOrigin.TERMINAL_PAYOFF, result.origin)
+            val result = search.search("p0", belief(PolicyAdmissionWorld(probe, volatile = true)), 77L)
+            assertEquals(1, result.candidateSettlementCounts.values.sumOf { it.terminalPayoffBackups })
             assertEquals(0, probe.annotationCalls)
             assertEquals(if (admission) 3 else 0, probe.admissionCalls)
-            assertEquals(List(3) { if (admission) "admitted" else "base-a" }, probe.acceptedLabels)
+            assertEquals(List(3) { if (admission) "admitted" else "base-a" }, probe.acceptedLabels.drop(1))
             assertTrue(root.calls > 0 && opponent.calls > 0)
             (root.perspectives + opponent.perspectives).forEach { assertEquals(it.actor, it.viewer) }
         }
@@ -72,7 +64,7 @@ class RolloutPolicyAnnotationRequirementTest {
 
     @Test
     fun `menu-only rollout selection preserves seeds decisions and diagnostics while avoiding information reads`() {
-        data class Run(val result: InformationSetSearchResult, val terminal: TerminalPolicyContinuation,
+        data class Run(val result: InformationSetSearchResult,
             val probe: ExpansionProbe, val root: MenuSelectionProbePolicy, val opponent: MenuSelectionProbePolicy)
         fun run(enabled: Boolean): Run {
             val probe = ExpansionProbe()
@@ -81,10 +73,9 @@ class RolloutPolicyAnnotationRequirementTest {
             val config = InformationSetSearchConfig(simulations = 8, maxPolicyDecisions = 8,
                 leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT))
             val search = InformationSetSearch(config, UniformOpponentPolicy, root, opponent,
-                valueSource = LeafValueSource.SampledWorld("argentum-board-v1"))
+                valueSource = LeafValueSource.Information(testInformationEvaluator()))
             val result = search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
-            val terminal = search.continueFirstUnvisitedEdgeToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
-            return Run(result, terminal, probe, root, opponent)
+            return Run(result, probe, root, opponent)
         }
         val baseline = run(false)
         val optimized = run(true)
@@ -94,7 +85,6 @@ class RolloutPolicyAnnotationRequirementTest {
             evaluatorNanos = 0, transitionCacheDerivedSnapshots = 0)),
             optimized.result.copy(diagnostics = optimized.result.diagnostics.copy(
                 evaluatorNanos = 0, transitionCacheDerivedSnapshots = 0)))
-        assertEquals(baseline.terminal, optimized.terminal)
         assertEquals(baseline.probe.acceptedLabels, optimized.probe.acceptedLabels)
         assertEquals(baseline.root.seeds, optimized.root.seeds)
         assertEquals(baseline.opponent.seeds, optimized.opponent.seeds)
@@ -237,8 +227,6 @@ class RolloutPolicyAnnotationRequirementTest {
 
         val result = search.search("p0", belief(PolicyAdmissionWorld(probe)), 771L)
 
-        search.settleFirstUnvisitedEdge(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
-        search.continueFirstUnvisitedEdgeToTerminal(PolicyAdmissionWorld(probe, 1), "p0", 77L, 0)
 
         assertEquals(0, probe.annotationCalls)
         assertEquals(0, probe.admissionCalls)
@@ -477,7 +465,6 @@ private class PolicyAdmissionWorld(
 
     override fun terminalPayoff(rootPlayer: String): Double? = if (tick >= 4) 0.0 else null
 
-    override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double = 0.0
 }
 
 /** Exact uniform test policy with nontrivial attribution seeds, shared with the refresh witness. */

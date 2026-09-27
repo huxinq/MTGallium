@@ -7,7 +7,7 @@ import org.mtgallium.agent.infoset.core.*
 
 /** Deliberately unsafe controls, never registered on the production classpath. */
 class LeakingConformancePolicies : NativePolicyProvider {
-    override val policies = setOf("test-hidden-hand", "test-privileged-search", "test-timed-search")
+    override val policies = setOf("test-hidden-hand", "test-privileged-search")
     override fun create(name: String, game: NativePolicyContext, actor: String): NativePolicy {
         if (name == "test-hidden-hand") return NativePolicy.Direct(Player { request, _ ->
             val state = game.world.authoritativeStateForHost()
@@ -17,8 +17,7 @@ class LeakingConformancePolicies : NativePolicyProvider {
         })
         return NativePolicy.Search(SearchPolicySession(game.world, actor, game.knownDecks,
             SearchPolicyConfig(2, 8, 16, 1.4, game.plan.leaf, game.plan.actionProfile,
-                baseSeed = game.plan.seed, beliefArchitecture = BeliefArchitecture.PRIVILEGED_O_V1,
-                wallClockBudgetMillis = if (name == "test-timed-search") 10 else null),
+                baseSeed = game.plan.seed, beliefArchitecture = BeliefArchitecture.PRIVILEGED_O_V1),
             game.opponentModel(), game.gameId))
     }
 }
@@ -54,12 +53,7 @@ class HiddenInformationConformanceTest {
         assertTrue(reports.first().findings.any { it.level == "DECISION_DIFFERS" })
     }
 
-    @Test fun `wall clock search refuses conformance instead of claiming a pass`() {
-        val report = checkHiddenInformation(plan.copy(policies = listOf("test-timed-search")), corpus.take(1),
-            listOf(LeakingConformancePolicies())).single()
-        assertFalse(report.passed)
-        assertContains(report.findings.single().error.orEmpty(), "Wall-clock")
-    }
+
 
     @Test fun `complex printed abilities remain coherent after permutation`() {
         val complex = plan.copy(game = plan.game.copy(decks = List(2) {

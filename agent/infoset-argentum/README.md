@@ -15,7 +15,7 @@ acting player's information. It depends on `infoset-semantics`,
 - `UnifiedSemanticExpander` builds the admitted action menu, checking each
   candidate on a fork; `BoundedDecisionResponseProposer` and
   `BlockStructuredActionSpace` cover large decision and blocker spaces.
-- `ArgentumKnownDeckBeliefWorldSource`, `ArgentumHybridBeliefWorldSource` and
+- `ArgentumKnownDeckBeliefWorldSource` and
   `KnownDeckWorldMaterializer` sample hidden worlds from known decks that agree
   with the viewer's represented knowledge; `ArgentumHandBeliefQueries` answers
   hand queries over them.

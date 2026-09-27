@@ -6,7 +6,6 @@ import kotlinx.serialization.Serializable
 const val PERSPECTIVE_EVENT_SCHEMA_V1: Int = 1
 const val PERSPECTIVE_EVENT_SCHEMA_V2: Int = 2
 const val PERSPECTIVE_EVENT_SCHEMA_V3: Int = 3
-const val KNOWLEDGE_SCHEMA_V1: Int = 1
 const val KNOWLEDGE_SCHEMA_V2: Int = 2
 const val KNOWLEDGE_SCHEMA_CURRENT: Int = KNOWLEDGE_SCHEMA_V2
 

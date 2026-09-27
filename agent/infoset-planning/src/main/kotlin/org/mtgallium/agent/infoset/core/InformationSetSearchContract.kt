@@ -5,22 +5,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 
 @Serializable
-enum class LeafStateSource { CURRENT_INFORMATION_STATE, CURRENT_SAMPLED_WORLD, BOUNDED_ROLLOUT }
-
-/** A forced first edge's search estimate; it is not a policy recommendation or terminal outcome. */
-@Serializable
-data class RootActionSearchEstimate(
-    val action: SemanticChoice,
-    val meanBackedValue: Double,
-    val visits: Int,
-    val settlementCounts: SearchSettlementCounts,
-    val diagnostics: InformationSetSearchDiagnostics,
-) {
-    init {
-        require(meanBackedValue.isFinite() && visits > 0)
-        require(settlementCounts.successfulBackups == visits && diagnostics.simulations == visits)
-    }
-}
+enum class LeafStateSource { CURRENT_INFORMATION_STATE, BOUNDED_ROLLOUT }
 
 @Serializable
 enum class RolloutCutoff {
@@ -46,7 +31,6 @@ enum class QuiescencePassRule {
 data class LeafEvaluationConfig(
     val stateSource: LeafStateSource,
     val cutoff: RolloutCutoff = RolloutCutoff.EVALUATE,
-    val unresolved: UnresolvedLeafHandling = UnresolvedLeafHandling.EVALUATE,
     /** Absent in earlier configurations, which keep the rules-forced rule and their identity. */
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
@@ -62,6 +46,23 @@ data class LeafEvaluationConfig(
         }
     }
 }
+
+/** Recorded leaf settings keep historical wire values without making retired routes selectable. */
+@Serializable
+data class LeafEvaluationDiagnostic(
+    val stateSource: String,
+    val cutoff: String = "EVALUATE",
+    val unresolved: String? = "EVALUATE",
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val quiescencePasses: String = "RULES_FORCED_V1",
+)
+
+internal fun LeafEvaluationConfig.diagnostic() = LeafEvaluationDiagnostic(
+    stateSource = stateSource.name,
+    cutoff = cutoff.name,
+    quiescencePasses = quiescencePasses.name,
+)
 
 @Serializable
 data class RolloutTurnHorizon(
@@ -97,11 +98,6 @@ data class InformationSetSearchConfig(
     val wideningLimits: List<Int> = listOf(128, 256, 512),
     val maxQuiescenceDecisions: Int = 32,
     val maxQuiescenceForcedPasses: Int = 256,
-    /** Exact semantic-prefix memoization. This is behavior-preserving and can be disabled for A/B validation. */
-    val cacheSimulationTransitions: Boolean = true,
-    /** Optional deployment-style budget. Null preserves exact fixed-simulation behavior. */
-    val wallClockBudgetMillis: Long? = null,
-    val minimumSimulations: Int = 1,
     /** Evaluate at the first player decision after N complete turns, anchored to the search root. */
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
@@ -114,8 +110,6 @@ data class InformationSetSearchConfig(
         require(initialExpansionLimit > 0)
         require(maxQuiescenceDecisions > 0)
         require(maxQuiescenceForcedPasses > 0)
-        require(wallClockBudgetMillis == null || wallClockBudgetMillis > 0)
-        require(minimumSimulations in 1..simulations)
         require(rolloutTurnHorizon == null || leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT) {
             "Completed-turn horizons require bounded rollout"
         }
@@ -146,22 +140,6 @@ data class SearchSettlement(
     val origin: SearchSettlementOrigin,
 ) {
     init { require(backedValue.isFinite()) { "Search settlement must be finite" } }
-}
-
-/** Actual terminal continuation reached only by the production rollout-policy pair. */
-data class TerminalPolicyContinuation(
-    val payoff: Double,
-    val policyDecisions: Int,
-    val rootPolicyDecisions: OpponentPolicyDecisionSummary,
-    val opponentPolicyDecisions: OpponentPolicyDecisionSummary,
-) {
-    init {
-        require(payoff.isFinite() && payoff in -1.0..1.0)
-        require(policyDecisions >= 0)
-        require(rootPolicyDecisions.decisions + opponentPolicyDecisions.decisions == policyDecisions)
-        require(rootPolicyDecisions.evidenceInvalidatingReplacements == 0)
-        require(opponentPolicyDecisions.evidenceInvalidatingReplacements == 0)
-    }
 }
 
 /** Exact partition of successful backups for one candidate edge. */
@@ -226,7 +204,7 @@ data class InformationSetSearchDiagnostics(
     val nonExhaustiveNodes: Int,
     val wideningEvents: Int,
     val opponentModelId: String,
-    val leaf: LeafEvaluationConfig,
+    val leaf: LeafEvaluationDiagnostic,
     val rootRolloutPolicyId: String? = null,
     val opponentRolloutPolicyId: String? = null,
     val rootRolloutDecisions: Int = 0,
@@ -269,7 +247,7 @@ data class InformationSetSearchDiagnostics(
     /** Unresolved horizon fallbacks backed up as neutral instead of evaluated. */
     val quiescenceUnresolvedBackups: Int = 0,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
-    val rootSelectionGuidance: RootSelectionGuidance? = null,
+    val rootSelectionGuidance: kotlinx.serialization.json.JsonObject? = null,
     val wallClockBudgetMillis: Long? = null,
     /** Exact within-search rollout-prefix hits; policy choices are still sampled afresh. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)

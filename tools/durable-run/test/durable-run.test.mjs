@@ -7,29 +7,20 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fakeCodex, readCodexCalls } from './fake-codex.mjs'
 import {
-  DEFAULT_PROGRESS_POLICY,
   WAKE_MECHANISM,
   atomicWriteJson,
-  deriveRunnerEta,
   parseEnvironmentFile,
   parseLaunchArgs,
-  parseProgressArgs,
-  progressNotificationDecision,
-  startProgressMonitor,
   systemdRunArguments,
-  validateProgressUpdate,
-  workloadEta,
 } from '../durable-run.mjs'
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'durable-run.mjs')
-const PROGRESS_CANARY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'progress-canary.mjs')
 const THREAD = '12345678-1234-4234-9234-123456789abc'
 
 function fixture(command, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-durable-run-test-'))
   const runDirectory = path.join(root, 'run')
   fs.mkdirSync(runDirectory, { mode: 0o700 })
-  const progressPolicy = { ...DEFAULT_PROGRESS_POLICY, ...(options.progressPolicy || {}) }
   const request = {
     schemaVersion: 2,
     runId: 'test-run',
@@ -42,10 +33,7 @@ function fixture(command, options = {}) {
     command: { argv: command },
     environment: { PATH: process.env.PATH },
     logPath: path.join(runDirectory, 'command.log'),
-    progressFile: path.join(runDirectory, 'progress.json'),
-    progressPolicy,
     outputPaths: [path.join(root, 'result.txt')],
-    initialEstimatedSeconds: options.initialEstimatedSeconds ?? null,
     codexThreadId: options.thread || null,
     notificationConfigSource: options.ntfy ? 'test fixture' : 'unconfigured',
   }
@@ -65,25 +53,6 @@ function fixture(command, options = {}) {
     commandFinishedAt: null,
     completedAt: null,
     experiment: { state: 'pending', exitCode: null, signal: null, spawnError: null },
-    progress: {
-      state: 'unreported',
-      file: request.progressFile,
-      current: null,
-      percent: null,
-      eta: { state: 'unavailable', source: null, reason: 'no-progress-reported' },
-      observedAt: null,
-      acceptedUpdates: 0,
-      ignoredUpdates: 0,
-      lastIgnored: null,
-      notificationPolicy: {
-        milestonePercent: progressPolicy.milestonePercent,
-        minimumIntervalSeconds: progressPolicy.minimumNotificationIntervalMs / 1000,
-        highestNotifiedMilestone: 0,
-        lastNotifiedPhase: null,
-        lastNotifiedEtaAt: null,
-        lastNotifiedAt: null,
-      },
-    },
     notification: {
       configured: Boolean(completionConfig.ntfy.url),
       state: completionConfig.ntfy.url ? 'pending' : 'unavailable',
@@ -95,14 +64,6 @@ function fixture(command, options = {}) {
         reason: completionConfig.ntfy.url ? null : 'unconfigured for test',
         attemptedAt: null,
         exitCode: null,
-      },
-      progress: {
-        state: completionConfig.ntfy.url ? 'idle' : 'unavailable',
-        reason: completionConfig.ntfy.url ? null : 'unconfigured for test',
-        attemptedCount: 0,
-        succeededCount: 0,
-        failedCount: 0,
-        last: null,
       },
       terminal: {
         state: completionConfig.ntfy.url ? 'pending' : 'unavailable',
@@ -129,15 +90,13 @@ function fixture(command, options = {}) {
 test('launch parsing preserves command arguments without shell reconstruction', () => {
   const parsed = parseLaunchArgs([
     '--name', 'long neural run', '--workdir', '/repo', '--output', 'result with spaces.json',
-    '--env', 'CUDA_VISIBLE_DEVICES', '--estimated-seconds', '120',
+    '--env', 'CUDA_VISIBLE_DEVICES',
     '--', 'just', 'neural-run', 'ARGS=a b;$(not-a-shell)',
   ])
   assert.deepEqual(parsed.command, ['just', 'neural-run', 'ARGS=a b;$(not-a-shell)'])
   assert.deepEqual(parsed.outputs, ['result with spaces.json'])
   assert.deepEqual(parsed.envNames, ['CUDA_VISIBLE_DEVICES'])
-  assert.equal(parsed.estimatedSeconds, 120)
   assert.throws(() => parseLaunchArgs(['--name', 'run', '--thread', 'not-a-uuid', '--', 'true']), /UUID/)
-  assert.throws(() => parseLaunchArgs(['--name', 'run', '--estimated-seconds', '0', '--', 'true']), /greater than zero/)
 })
 
 test('systemd launch is a transient exec service carrying only the run directory', () => {
@@ -165,82 +124,6 @@ test('environment files support local ntfy configuration without shell evaluatio
     MTGALLIUM_NTFY_TOKEN: 'tk_example',
   })
   assert.throws(() => parseEnvironmentFile('curl dangerous'), /NAME=value/)
-})
-
-test('progress helper publishes one validated atomic state', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-progress-helper-'))
-  const progressFile = path.join(root, 'progress.json')
-  const written = spawnSync(process.execPath, [
-    SCRIPT, 'progress', '--file', progressFile,
-    '--completed', '3', '--total', '10', '--unit', 'seeds', '--phase', 'training', '--detail', 'seed 3253',
-  ], { encoding: 'utf8' })
-  assert.equal(written.status, 0, written.stderr)
-  const progress = validateProgressUpdate(JSON.parse(fs.readFileSync(progressFile, 'utf8')))
-  assert.equal(progress.completed, 3)
-  assert.equal(progress.total, 10)
-  assert.equal(progress.phase, 'training')
-  assert.deepEqual(fs.readdirSync(root), ['progress.json'])
-  assert.equal(parseProgressArgs(['--file', progressFile, '--phase', 'done']).progress.phase, 'done')
-})
-
-test('ETA stays unavailable until enough observed progress and labels its source when derived', () => {
-  const progress = validateProgressUpdate({
-    schemaVersion: 1,
-    updatedAt: '2026-09-01T10:00:06.000Z',
-    completed: 30,
-    total: 100,
-    unit: 'decisions',
-  }, { observedAtMs: Date.parse('2026-09-01T10:00:06.000Z') })
-  const samples = [
-    { completed: 10, total: 100, observedAtMs: 0 },
-    { completed: 20, total: 100, observedAtMs: 3_000 },
-    { completed: 30, total: 100, observedAtMs: 6_000 },
-  ]
-  const etaPolicy = { ...DEFAULT_PROGRESS_POLICY, etaMinimumElapsedMs: 4_000 }
-  assert.equal(deriveRunnerEta(samples.slice(0, 2), progress, etaPolicy).state, 'unavailable')
-  const eta = deriveRunnerEta(samples, progress, etaPolicy)
-  assert.equal(eta.state, 'available')
-  assert.equal(eta.source, 'runner')
-  assert.equal(eta.basis.observationCount, 3)
-  assert.equal(eta.estimatedCompletionAt, '1970-01-01T00:00:27.000Z')
-  const supplied = workloadEta(validateProgressUpdate({
-    schemaVersion: 1,
-    updatedAt: '2026-09-01T10:00:00.000Z',
-    remainingSeconds: 120,
-    phase: 'training',
-  }, { observedAtMs: Date.parse('2026-09-01T10:00:00.000Z') }))
-  assert.equal(supplied.source, 'workload')
-  assert.equal(supplied.kind, 'remaining-duration')
-  assert.equal(supplied.estimatedCompletionAt, '2026-09-01T10:02:00.000Z')
-})
-
-test('milestones, phase, ETA threshold, and minimum interval prevent notification spam', () => {
-  const progress = {
-    current: { phase: 'training' },
-    percent: 21,
-    eta: { state: 'available', source: 'runner', estimatedCompletionAt: '2026-09-01T11:00:00.000Z' },
-    notificationPolicy: {
-      highestNotifiedMilestone: 0,
-      lastNotifiedPhase: null,
-      lastNotifiedEtaAt: null,
-      lastNotifiedAt: '2026-09-01T10:00:00.000Z',
-    },
-  }
-  assert.equal(progressNotificationDecision(progress, Date.parse('2026-09-01T10:00:29.000Z')), null)
-  const first = progressNotificationDecision(progress, Date.parse('2026-09-01T10:00:30.000Z'))
-  assert.deepEqual(first.triggers.sort(), ['eta-available', 'milestone', 'phase'])
-  progress.notificationPolicy = {
-    highestNotifiedMilestone: 20,
-    lastNotifiedPhase: 'training',
-    lastNotifiedEtaAt: '2026-09-01T11:00:00.000Z',
-    lastNotifiedAt: '2026-09-01T10:00:30.000Z',
-  }
-  progress.percent = 19
-  assert.equal(progressNotificationDecision(progress, Date.parse('2026-09-01T10:02:00.000Z')), null)
-  progress.percent = 21
-  assert.equal(progressNotificationDecision(progress, Date.parse('2026-09-01T10:02:00.000Z')), null)
-  progress.percent = 40
-  assert.deepEqual(progressNotificationDecision(progress, Date.parse('2026-09-01T10:02:00.000Z')).triggers, ['milestone'])
 })
 
 test('successful compute records completion while unconfigured notification and wake stay distinct', () => {
@@ -318,7 +201,6 @@ test('configured ntfy can succeed while a wake failure remains independent of su
   const fakeCurl = path.join(root, 'curl')
   const { runDirectory } = fixture(['/bin/true'], {
     thread: THREAD,
-    initialEstimatedSeconds: 60,
     ntfy: { url: 'https://example.invalid/private', token: 'private-token', curlPath: fakeCurl },
     wake: { requested: true, supported: true, reason: null, codexPath: '/usr/bin/false' },
   })
@@ -332,82 +214,10 @@ test('configured ntfy can succeed while a wake failure remains independent of su
   assert.equal(status.notification.start.state, 'succeeded')
   assert.equal(status.notification.terminal.state, 'succeeded')
   assert.equal(status.wake.state, 'failed')
-  assert.equal(status.progress.acceptedUpdates, 0)
-  assert.equal(status.progress.eta.source, 'workload')
-  assert.equal(status.progress.eta.kind, 'launch-estimate')
   assert.doesNotMatch(statusText, /private-token|example\.invalid/)
   assert.match(fs.readFileSync(recordedConfig, 'utf8'), /Authorization: Bearer private-token/)
   const calls = fs.readFileSync(recordedCalls, 'utf8')
   assert.match(calls, /Started\./)
-  assert.match(calls, /workload estimate/)
   assert.match(calls, /Completed successfully/)
   assert.deepEqual(fs.readFileSync(recordedPhases, 'utf8').trim().split('\n'), ['running', 'completing'])
-})
-
-test('structured progress is observed, malformed and stale updates are isolated, and only terminal wakes Codex', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-durable-run-progress-'))
-  const codexCalls = path.join(root, 'codex-calls.txt')
-  const codexPath = path.join(root, 'codex')
-  fakeCodex(codexPath, codexCalls)
-  const { runDirectory } = fixture([process.execPath, PROGRESS_CANARY, '40', '--await-observation'], {
-    thread: THREAD,
-    ntfy: { url: 'https://example.invalid/private', token: null, curlPath: '/usr/bin/false' },
-    wake: { requested: true, supported: true, reason: null, codexPath },
-    progressPolicy: {
-      pollIntervalMs: 10,
-      minimumNotificationIntervalMs: 0,
-      etaMinimumElapsedMs: 50,
-    },
-  })
-  const executed = spawnSync(process.execPath, [SCRIPT, '_execute', '--run-dir', runDirectory], { encoding: 'utf8' })
-  assert.equal(executed.status, 0, executed.stderr)
-  const status = JSON.parse(fs.readFileSync(path.join(runDirectory, 'status.json'), 'utf8'))
-  assert.equal(status.experiment.exitCode, 0)
-  assert.ok(status.progress.acceptedUpdates >= 5)
-  assert.equal(status.progress.current.completed, 100)
-  assert.equal(status.progress.eta.source, 'runner')
-  assert.ok(status.notification.progress.failedCount >= 1)
-  assert.equal(status.wake.state, 'succeeded')
-  const calls = readCodexCalls(codexCalls)
-  assert.deepEqual(calls[0], ['app-server', 'proxy'])
-  const starts = calls.filter(call => call.method === 'turn/start')
-  assert.equal(starts.length, 1)
-  assert.equal(starts[0].params.threadId, THREAD)
-})
-
-test('malformed and stale progress never change compute success', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mtgallium-durable-run-bad-progress-'))
-  const workload = path.join(root, 'bad-progress.mjs')
-  fs.writeFileSync(workload, `import fs from 'node:fs'\nconst file = process.env.MTGALLIUM_PROGRESS_FILE\nconst sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))\nfs.writeFileSync(file, '{bad json')\nawait sleep(40)\nconst fresh = {schemaVersion:1, updatedAt:new Date().toISOString(), completed:1, total:10}\nfs.writeFileSync(file + '.tmp', JSON.stringify(fresh)); fs.renameSync(file + '.tmp', file)\nawait sleep(40)\nconst stale = {...fresh, updatedAt:'2020-01-01T00:00:00.000Z', completed:2}\nfs.writeFileSync(file + '.tmp', JSON.stringify(stale)); fs.renameSync(file + '.tmp', file)\nawait sleep(40)\n`, { mode: 0o600 })
-  const { runDirectory } = fixture([process.execPath, workload], {
-    progressPolicy: { pollIntervalMs: 10, minimumNotificationIntervalMs: 0 },
-  })
-  const executed = spawnSync(process.execPath, [SCRIPT, '_execute', '--run-dir', runDirectory], { encoding: 'utf8' })
-  assert.equal(executed.status, 0, executed.stderr)
-  const status = JSON.parse(fs.readFileSync(path.join(runDirectory, 'status.json'), 'utf8'))
-  assert.equal(status.experiment.state, 'succeeded')
-  assert.equal(status.progress.acceptedUpdates, 1)
-  assert.ok(status.progress.ignoredUpdates >= 2)
-  assert.match(status.progress.lastIgnored.reason, /stale/)
-})
-
-test('stopping progress monitoring retains a final write between timer ticks', () => {
-  const { runDirectory } = fixture(['/bin/true'], {
-    progressPolicy: { pollIntervalMs: 60000 },
-    ntfy: { url: 'https://example.invalid/private', token: null, curlPath: '/usr/bin/false' },
-  })
-  const request = JSON.parse(fs.readFileSync(path.join(runDirectory, 'request.json'), 'utf8'))
-  const completion = JSON.parse(fs.readFileSync(path.join(runDirectory, 'completion-config.json'), 'utf8'))
-  const running = JSON.parse(fs.readFileSync(path.join(runDirectory, 'status.json'), 'utf8'))
-  running.phase = 'running'
-  running.experiment.state = 'running'
-  atomicWriteJson(path.join(runDirectory, 'status.json'), running)
-  const stop = startProgressMonitor(request, completion)
-  atomicWriteJson(request.progressFile, { schemaVersion: 1, updatedAt: new Date().toISOString(), completed: 100, total: 100 })
-  stop()
-  const status = JSON.parse(fs.readFileSync(path.join(runDirectory, 'status.json'), 'utf8'))
-  assert.equal(status.progress.current.completed, 100)
-  assert.equal(status.progress.acceptedUpdates, 1)
-  assert.equal(status.notification.progress.attemptedCount, 0)
-  assert.equal(status.experiment.state, 'running')
 })

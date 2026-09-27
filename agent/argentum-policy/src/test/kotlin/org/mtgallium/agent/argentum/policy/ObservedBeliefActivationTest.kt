@@ -48,9 +48,15 @@ class ObservedBeliefActivationTest {
         return CastSpell(actor, state.getHand(actor).first())
     }
 
-    private fun preparation(world: ArgentumSearchWorld) = BeliefPreparation(
+    private fun backend(world: ArgentumSearchWorld) = ArgentumParticleBeliefBackend(
         world, "p0", decks, BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1),
-        UniformOpponentPolicy, "observed-live-test")
+        UniformOpponentPolicy, "observed-live-test", ArgentumBeliefProposalAuditSink.NONE)
+
+    private fun session(world: ArgentumSearchWorld, viewer: String, gameId: String) =
+        SearchPolicySession(world, viewer, decks,
+            LivePolicyConfig(particles = 8, beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
+                actionSpaceProfile = world.semanticExpansionSpecification().actionSpaceProfile).policyParameters(),
+            UniformOpponentPolicy, gameId)
 
     @Test fun `exact opponent updates use the conditioning model view instead of the host capture view`() {
         val world = world(qualified)
@@ -65,13 +71,13 @@ class ObservedBeliefActivationTest {
                 return ProbabilityDistribution.uniform(context.expansion.candidates)
             }
         }
-        val preparation = BeliefPreparation(world, viewer, decks,
+        val belief = ArgentumParticleBeliefBackend(world, viewer, decks,
             BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1), model, UniformOpponentPolicy,
-            "exact-conditioning-view-test")
+            "exact-conditioning-view-test", ArgentumBeliefProposalAuditSink.NONE)
         val observed = world.applyObservedAction(pass(world))
         assertTrue(observed.result.accepted)
-        preparation.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor)
-        assertEquals(ObservedBeliefUpdateRoute.QUALIFIED_EXACT_MEMBER_V1, preparation.lastObservedUpdate?.route)
+        belief.advance(world, actor, observed.choice, 0, observed.result.privateToActor)
+        assertEquals(ObservedBeliefUpdateRoute.QUALIFIED_EXACT_MEMBER_V1, belief.lastObservedUpdate?.route)
         assertEquals(8, views.size)
         assertTrue(views.all { it.admission == DecisionAdmission.PRODUCTION && it.annotations })
     }
@@ -83,22 +89,23 @@ class ObservedBeliefActivationTest {
         val historical = config.copy(observedConditioning = ObservedBeliefConditioning.HISTORICAL_GROUP_SIGNATURE_V1)
         assertNotEquals(encoded, PolicyJson.format.encodeToJsonElement(BeliefConfig.serializer(), historical))
         val world = world(qualified)
-        fun prepare(configuration: BeliefConfig) = BeliefPreparation(
-            world, "p0", decks, configuration, UniformOpponentPolicy, "observed-live-test")
+        fun prepare(configuration: BeliefConfig) = ArgentumParticleBeliefBackend(
+            world, "p0", decks, configuration, UniformOpponentPolicy, "observed-live-test",
+            ArgentumBeliefProposalAuditSink.NONE)
         val groupOnly = prepare(historical)
         val nativeDefault = prepare(config)
-        assertNotEquals(groupOnly.beliefSnapshot().queries.binding.inferenceModelIdentity,
-            nativeDefault.beliefSnapshot().queries.binding.inferenceModelIdentity)
+        assertNotEquals(groupOnly.snapshot().queries.binding.inferenceModelIdentity,
+            nativeDefault.snapshot().queries.binding.inferenceModelIdentity)
         val actor = requireNotNull(world.actorToAct())
         val capture = world.captureObservedActionForHost("p0", pass(world))
         val observed = world.applyObservedAction(pass(world))
         assertTrue(observed.result.accepted)
-        groupOnly.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor)
-        nativeDefault.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor)
+        groupOnly.advance(world, actor, observed.choice, 0, observed.result.privateToActor)
+        nativeDefault.advance(world, actor, observed.choice, 0, observed.result.privateToActor)
         assertEquals(ObservedBeliefUpdateRoute.HISTORICAL_SIGNATURE_V1, groupOnly.lastObservedUpdate?.route)
         assertEquals(ObservedBeliefUpdateRoute.QUALIFIED_EXACT_MEMBER_V1, nativeDefault.lastObservedUpdate?.route)
         assertFailsWith<IllegalArgumentException> {
-            groupOnly.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor, capture)
+            groupOnly.advance(world, actor, observed.choice, 0, observed.result.privateToActor, capture)
         }
     }
 
@@ -122,25 +129,25 @@ class ObservedBeliefActivationTest {
         }
     }
 
-    @Test fun `standalone preparation uses host predecessor and binds the opt-in identity before updates`() {
+    @Test fun `search policy session uses host predecessor and binds the opt-in identity before updates`() {
         val identities = mutableMapOf<PerspectiveHistoryObjectReference, String>()
         for (mode in listOf(PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1, qualified)) {
             for (isCast in listOf(false, true)) {
                 val world = world(mode)
-                val preparation = preparation(world)
-                val before = preparation.beliefSnapshot().queries.binding.inferenceModelIdentity
+                val policy = session(world, "p0", "observed-live-test")
+                val before = policy.beliefSnapshot().queries.binding.inferenceModelIdentity
                 identities[mode]?.let { assertEquals(it, before) }
                 identities[mode] = before
                 val actor = requireNotNull(world.actorToAct())
                 val observed = world.applyObservedAction(if (isCast) cast(world) else pass(world))
                 assertTrue(observed.result.accepted)
-                preparation.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor)
-                assertEquals(before, preparation.beliefSnapshot().queries.binding.inferenceModelIdentity)
+                policy.observeAccepted(world, actor, observed.choice, 0, observed.result.privateToActor)
+                assertEquals(before, policy.beliefSnapshot().queries.binding.inferenceModelIdentity)
                 assertEquals(when {
                     mode != qualified -> ObservedBeliefUpdateRoute.HISTORICAL_SIGNATURE_V1
                     isCast -> ObservedBeliefUpdateRoute.UNSUPPORTED_FAMILY_SIGNATURE_COMPATIBILITY_V1
                     else -> ObservedBeliefUpdateRoute.QUALIFIED_EXACT_MEMBER_V1
-                }, assertNotNull(preparation.lastObservedUpdate).route)
+                }, assertNotNull(policy.lastObservedUpdate).route)
             }
         }
         assertNotEquals(identities.getValue(qualified),
@@ -157,7 +164,7 @@ class ObservedBeliefActivationTest {
             if (includeSubmission) put("observedSubmission", world.observedActionBehaviorId())
             put("maintenance", CONDITIONED_BELIEF_INFERENCE_MAINTENANCE)
         })
-        val actual = preparation(world).beliefSnapshot().queries.binding.inferenceModelIdentity
+        val actual = backend(world).snapshot().queries.binding.inferenceModelIdentity
         assertNotEquals(identity(includeSubmission = false), actual,
             "Changed observed-history provenance must not retain the historical inference identity")
         assertEquals(identity(includeSubmission = true), actual)
@@ -177,14 +184,12 @@ class ObservedBeliefActivationTest {
         assertEquals(ObservedBeliefUpdateRoute.HISTORICAL_SIGNATURE_V1, runtime.lastObservedUpdate?.route)
 
         val actual = root.fork() as ArgentumSearchWorld
-        val preparation = BeliefPreparation(actual, actor, decks,
-            BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1),
-            UniformOpponentPolicy, "legacy-observed-actor")
-        val before = preparation.beliefSnapshot()
+        val policy = session(actual, actor, "legacy-observed-actor")
+        val before = policy.beliefSnapshot()
         val observed = actual.applyObservedAction(action)
         assertTrue(observed.result.accepted)
-        preparation.observeAccepted(actual, actor, observed.choice, 0, observed.result.privateToActor)
-        val after = preparation.beliefSnapshot()
+        policy.observeAccepted(actual, actor, observed.choice, 0, observed.result.privateToActor)
+        val after = policy.beliefSnapshot()
         assertNotEquals(before.queries.binding.epistemicDigest, after.queries.binding.epistemicDigest)
         assertEquals(before.queries.binding.inferenceModelIdentity, after.queries.binding.inferenceModelIdentity)
         val expected = actual.informationState(actor)
@@ -197,7 +202,7 @@ class ObservedBeliefActivationTest {
         assertEquals(expected, live.informationState(actor))
     }
 
-    @Test fun `legacy live runtime and preparation propagate native empty combat and pending actor responses`() {
+    @Test fun `legacy live runtime and search policy session propagate native empty combat and pending actor responses`() {
         val root = world(PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1)
         val players = root.authoritativeStateForHost().turnOrder
         fun accept(action: GameAction) { assertTrue(root.applyObservedAction(action).result.accepted) }

@@ -21,21 +21,6 @@ class RolloutTurnHorizonTest {
     }
 
     @Test
-    fun `first-edge diagnostics require the original root even when that edge crosses a turn`() {
-        val probe = TurnProbe()
-        val child = TurnWorld(probe)
-        assertTrue(child.step(child.expandChoices().candidates.first()).accepted)
-        assertEquals(8, child.informationState("p0").observation.turnNumber)
-        val search = search(probe, 1)
-        assertFailsWith<IllegalArgumentException> { search.settleFirstUnvisitedEdge(child, "p0", 618L, 0) }
-        val before = probe.actedTurns.size
-        val value = search.settleFirstUnvisitedEdge(child, "p0", 618L, 0, rootTurnNumber = 7)
-        assertEquals(SearchSettlementOrigin.HEURISTIC_SETTLEMENT, value.origin)
-        assertEquals(listOf(8), probe.evaluatedTurns)
-        assertEquals(before, probe.actedTurns.size)
-    }
-
-    @Test
     fun `decision safety limit is a typed failure rather than an earlier heuristic leaf`() {
         val probe = TurnProbe()
         val failure = assertFailsWith<RolloutTurnHorizonException> {
@@ -169,6 +154,4 @@ private class TurnWorld(
     override fun fork(): SearchWorld = TurnWorld(probe, tick, branch, terminalAtTick, missingAtTick)
     override fun terminalPayoff(rootPlayer: String): Double? =
         if (terminalAtTick != null && tick >= terminalAtTick) 1.0 else null
-    override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double =
-        error("information evaluator only")
 }

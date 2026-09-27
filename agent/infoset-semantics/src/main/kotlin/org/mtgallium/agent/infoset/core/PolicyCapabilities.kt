@@ -166,14 +166,6 @@ data class Weighted<out T>(val value: T, val weight: Double) {
 fun PolicyComponent.decisionView(limit: Int? = null): DecisionView = DecisionView(limit,
     if (requiresProductionAdmission) DecisionAdmission.PRODUCTION else DecisionAdmission.SEMANTIC, requiresPolicyAnnotations)
 
-/** Safe, deterministic policy preferences. Implementations never receive a sampled world. */
-interface RootSelectionPolicy {
-    val configurationId: String
-    fun scores(site: DecisionSite): Map<String, Double> = scores(site.information(), site.expansion.candidates)
-    fun scores(information: InformationStateRepresentation, candidates: List<SemanticChoice>): Map<String, Double>
-}
-
-
 /** Actual-player policy over an admitted context, independent of any search result or engine. */
 interface DecisionPolicy {
     val configurationId: String

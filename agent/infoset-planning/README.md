@@ -1,7 +1,7 @@
 # Information-set planning algorithms
 
 This module depends only on `infoset-semantics`. It owns information-set search,
-hypothesis and particle algorithms, rollouts, terminal continuations, and root
+hypothesis and particle algorithms, rollouts, and root
 dispatch.
 
 Each search starts with fresh statistics. The exact within-search transition cache

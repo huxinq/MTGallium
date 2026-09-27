@@ -10,11 +10,8 @@ import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.neural.FactualPolicyEncoder
 import org.mtgallium.agent.neural.FactualTensorSchema
 import org.mtgallium.agent.argentum.policy.*
-import org.mtgallium.agent.monored.LinearValueEvaluator
 import org.mtgallium.agent.monored.MonoRedInformationEvaluator
 import org.mtgallium.agent.monored.ValueFeatures
-import org.mtgallium.agent.monored.LinearValueLink
-import org.mtgallium.agent.monored.LinearWeights
 
 /** Live world and native policy state. */
 class PythonGame internal constructor(
@@ -49,15 +46,6 @@ class PythonGame internal constructor(
                 put("turn", information.observation.turnNumber)
                 factualSchema?.let { put("view", researchJson.encodeToJsonElement(FactualPolicyEncoder(it).view(information))) }
             })
-        }
-    }
-
-    fun valueScore(player: String, weights: LinearWeights, link: LinearValueLink): JsonObject {
-        require(player in actors) { "Unknown player '$player'" }
-        val estimate = LinearValueEvaluator(weights, link).evaluateDetailed(world.informationState(player), player)
-        return buildJsonObject {
-            put("rawScore", estimate.rawScore)
-            put("deployedValue", estimate.deployedValue)
         }
     }
 
@@ -302,10 +290,6 @@ class PythonResearchConnection {
             "value-snapshot" -> game().valueSnapshot(request["factualSchema"]?.let {
                 researchJson.decodeFromJsonElement<FactualTensorSchema>(it)
             })
-            "value-score" -> game().valueScore(
-                request.getValue("player").jsonPrimitive.content,
-                researchJson.decodeFromJsonElement(request.getValue("weights")),
-                request["link"]?.let { researchJson.decodeFromJsonElement(it) } ?: LinearValueLink.CLIP)
             "state" -> researchJson.encodeToJsonElement(game().world.authoritativeStateForHost())
             "fit" -> researchJson.encodeToJsonElement(fitRootActionKernel(
                 researchJson.decodeFromJsonElement(request.getValue("roots")),

@@ -17,8 +17,6 @@ import kotlinx.serialization.json.putJsonObject
 /** Independent of event ordering; legacy snapshot locators remain the default. */
 enum class PerspectiveHistoryObjectReference {
     LEGACY_SNAPSHOT_V1,
-    REMEMBERED_BATTLEFIELD_V1,
-    REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1,
     /**
      * Acquired battlefield handles also identify current visible objects; unordered combat rows normalize.
      * Accepted-choice optionality uses bounded native witnesses on both search and observed routes;
@@ -28,7 +26,6 @@ enum class PerspectiveHistoryObjectReference {
 
     internal val remembersBattlefield: Boolean get() = when (this) {
         LEGACY_SNAPSHOT_V1 -> false
-        REMEMBERED_BATTLEFIELD_V1, REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1,
         QUALIFIED_OBSERVED_OBJECTS_V2 -> true
     }
 }
@@ -72,9 +69,6 @@ internal class RememberedHistoryReferences(
     private val origins: MutableMap<String, ObjectRef> = mutableMapOf(),
 ) {
     fun fork() = RememberedHistoryReferences(origins.toMutableMap())
-
-    fun swapNativeIds(swap: ArgentumNativeIdSwap) = RememberedHistoryReferences(
-        origins.mapValues { (_, ref) -> ref.copy(entityId = swap.id(ref.entityId)) }.toMutableMap())
 
     fun qualifiedAt(state: GameState, handles: Map<EntityId, String>): Map<EntityId, String> =
         handles.filter { (id, handle) ->

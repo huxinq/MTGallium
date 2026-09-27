@@ -10,10 +10,10 @@ class PlanningRuntimeIsolationTest {
             "org.mtgallium.agent.monored.MonoRedInformationEvaluator", "org.mtgallium.agent.argentum.policy.LivePolicySession")) {
             assertFailsWith<ClassNotFoundException> { Class.forName(name) }
         }
-        val leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_SAMPLED_WORLD)
+        val leaf = LeafEvaluationConfig(LeafStateSource.CURRENT_INFORMATION_STATE)
         val planner = InformationSetSearch(InformationSetSearchConfig(simulations = 32, leaf = leaf),
             UniformOpponentPolicy, UniformOpponentPolicy, UniformOpponentPolicy,
-            LeafValueSource.SampledWorld("argentum-board-v1"))
+            LeafValueSource.Information(testInformationEvaluator()))
         val world = ToyWorld()
         val belief = BeliefBatch(listOf(Weighted<SearchWorld>(world, 1.0)),
             BeliefDiagnostics(BeliefMode.CONSISTENCY_ONLY_V1, 1, 1, 0, 1.0, 1.0, 0.0, 0))
@@ -46,7 +46,6 @@ class PlanningRuntimeIsolationTest {
         }
         override fun fork(): SearchWorld = ToyWorld(payoff)
         override fun terminalPayoff(rootPlayer: String) = payoff
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String) = 0.0
     }
 
     companion object {
