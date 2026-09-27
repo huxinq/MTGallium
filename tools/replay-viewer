@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo=$(cd "$(dirname "$0")/.." && pwd)
+main=$(cd "$(git -C "$repo" rev-parse --git-common-dir)/.." && pwd)
+export MTG_REPLAY_CLIENT="$main/third_party/argentum-engine/web-client"
+export MTG_REPLAY_EXPORT="${1:?usage: tools/replay-viewer /absolute/export-folder}"
+[[ -f $MTG_REPLAY_EXPORT/index.json ]] || { echo "No export index at $MTG_REPLAY_EXPORT" >&2; exit 1; }
+[[ -x $MTG_REPLAY_CLIENT/node_modules/.bin/vite ]] || npm ci --prefix "$MTG_REPLAY_CLIENT" --silent
+exec "$MTG_REPLAY_CLIENT/node_modules/.bin/vite" --config "$repo/tools/replay-viewer.vite.mjs"
