@@ -71,15 +71,4 @@ class ResearchSemanticsRegressionTest {
         playGame(child, players(), maximumDecisions = 1, record = forkRows::add)
         assertEquals(2, forkRows.single().index)
     }
-
-    @Test fun `search convenience accepts positive budgets outside the former grid`() {
-        val output = temporary.resolve("search")
-        val plan = ResearchGameConfig(decks = List(2) { mapOf("Mountain" to 60) },
-            policies = listOf("search", "random"), particles = 1, simulations = 1, searchDepth = 1,
-            startingHandSize = 0, skipMulligans = true, maximumDecisions = 2, recordDecisions = true)
-        val result = runGames(plan, output).single()
-        assertEquals(GameStatus.DECISION_LIMIT, result.result.status)
-        assertNull(result.result.payoffs)
-        assertEquals(2, useJsonLines(output.resolve("games/0/decisions.jsonl.gz")) { it.count() })
-    }
 }

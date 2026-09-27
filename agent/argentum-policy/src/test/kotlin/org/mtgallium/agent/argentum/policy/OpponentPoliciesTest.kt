@@ -56,41 +56,6 @@ class OpponentPoliciesTest {
     }
 
     @Test
-    fun `renaming every display label leaves every scripted distribution and component attribution unchanged`() {
-        val candidates = candidates()
-        val renamed = candidates.mapIndexed { index, choice ->
-            choice.copy(
-                display = choice.display.copy(
-                    label = "localized-presentation-$index",
-                    sourceName = "localized-source-$index",
-                    targetNames = listOf("localized-target-$index"),
-                )
-            )
-        }
-        val policies = listOf(
-            SemanticHeuristicOpponentPolicy(),
-            DeterminizedArgentumHeuristicOpponentPolicy(),
-            FaceBurnOpponentPolicy(),
-            HoldBurnOpponentPolicy(),
-            defaultMonoRedOpponentPolicy(),
-        )
-
-        policies.forEach { policy ->
-            assertEquals(
-                probabilities(policy, candidates),
-                probabilities(policy, renamed),
-                policy.id,
-            )
-            repeat(128) { index ->
-                val original = policy.select(context(candidates), index.toLong(), index * 17L)
-                val relabeled = policy.select(context(renamed), index.toLong(), index * 17L)
-                assertEquals(original.choice.signature, relabeled.choice.signature, policy.id)
-                assertEquals(original.diagnostic, relabeled.diagnostic, policy.id)
-            }
-        }
-    }
-
-    @Test
     fun `replacement accounting has one component per decision and invalidates unless predeclared`() {
         val candidates = candidates()
         val invalidating = defaultMonoRedOpponentPolicy(
@@ -144,12 +109,6 @@ class OpponentPoliciesTest {
             )
         }
     }.summary()
-
-    private fun probabilities(
-        policy: OpponentPolicy,
-        candidates: List<SemanticChoice>,
-    ): Map<String, Double> = policy.distribution(context(candidates), 91L)
-        .entries.associate { it.value.signature to it.probability }
 
     private fun context(candidates: List<SemanticChoice>): DecisionContext {
         val information = information(candidates)

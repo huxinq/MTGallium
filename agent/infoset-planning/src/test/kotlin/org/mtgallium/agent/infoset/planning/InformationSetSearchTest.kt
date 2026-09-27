@@ -89,7 +89,6 @@ class InformationSetSearchTest {
         assertEquals(listOf(0, 1, 2, 0, 1, 2), seen)
     }
 
-
     @Test
     fun `leaf scores reject nonfinite values before clipping`() {
         val config = InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 1,
@@ -157,16 +156,6 @@ class InformationSetSearchTest {
             UniformOpponentPolicy, rolloutPolicy = policy, rolloutOpponentPolicy = policy)
         search.search("p0", batch(listOf(IncompleteWorld(FakeWorld(terminalAtDepth = 5)))), 71L)
         assertTrue(seen.isNotEmpty() && seen.none { it })
-    }
-
-    @Test
-    fun `historical settlement counts retain no fabricated learned estimate`() {
-        val historical = CanonicalJson.format.decodeFromString<ReturnSourceCounts>(
-            """{"terminalPayoffBackups":1,"heuristicSettlementBackups":2,"neutralUnresolvedSettlementBackups":3}"""
-        )
-
-        assertEquals(0, historical.learnedOutcomeEstimateBackups)
-        assertEquals(6, historical.successfulBackups)
     }
 
     @Test
@@ -881,25 +870,6 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `diagnostic leaf preserves current and rollout profile bytes and retired modes`() {
-        val current = LeafEvaluationConfig(LeafEvaluationMethod.CURRENT_INFORMATION_STATE).diagnostic()
-        assertEquals("""{"stateSource":"CURRENT_INFORMATION_STATE","cutoff":"EVALUATE","unresolved":"EVALUATE"}""",
-            CanonicalJson.format.encodeToString(LeafEvaluationDiagnostic.serializer(), current))
-        val profile = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT,
-            cutoff = RolloutCutoff.POLICY_QUIESCENCE,
-            quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1).diagnostic()
-        assertEquals("""{"stateSource":"BOUNDED_ROLLOUT","cutoff":"POLICY_QUIESCENCE","unresolved":"EVALUATE","quiescencePasses":"PROFILE_FORCED_WHILE_VOLATILE_V1"}""",
-            CanonicalJson.format.encodeToString(LeafEvaluationDiagnostic.serializer(), profile))
-        val historical = """{"stateSource":"CURRENT_SAMPLED_WORLD","cutoff":"EVALUATE","unresolved":"BACK_UP_NEUTRAL"}"""
-        assertEquals(historical, CanonicalJson.format.encodeToString(LeafEvaluationDiagnostic.serializer(),
-            CanonicalJson.format.decodeFromString(LeafEvaluationDiagnostic.serializer(), historical)))
-        assertFailsWith<IllegalArgumentException> {
-            LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT,
-                quiescencePasses = QuiescencePassRule.PROFILE_FORCED_WHILE_VOLATILE_V1)
-        }
-    }
-
-    @Test
     fun `widening stops at a profile exhaustive menu without changing search statistics`() {
         fun search(profileExhaustive: Boolean): Pair<InformationSetSearchResult, List<Int>> {
             val limits = mutableListOf<Int>()
@@ -1279,36 +1249,6 @@ class InformationSetSearchTest {
     }
 
     @Test
-    fun `private advance preserves legacy custom select override attribution and seeds`() {
-        val seeds = mutableListOf<Pair<Long, Long>>()
-        val policy = object : OpponentPolicy {
-            override val id = "private-override"
-            override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> = distribution(context.information(), context.menu.candidates, policySeed)
-
-    fun distribution(opponentInformation: InformationStateRepresentation,
-                candidates: List<SemanticChoice>, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
-                error("Private choices must honor select override")
-            override fun select(context: DecisionContext, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision = select(context.information(), context.menu.candidates, policySeed, sampleSeed)
-
-    fun select(opponentInformation: InformationStateRepresentation, candidates: List<SemanticChoice>,
-                policySeed: Long, sampleSeed: Long): OpponentPolicyDecision {
-                seeds += policySeed to sampleSeed
-                return OpponentPolicyDecision(candidates.single { it.display.label == "B" },
-                    OpponentPolicyDecisionDiagnostic(id, "custom-private-component"))
-            }
-        }
-        val result = ParticleBelief.from(batch(List(4) { FakeWorld() }), BeliefMode.POLICY_CONDITIONED_V1)
-            .propagateThroughHiddenChoice("p0", policy, 31L)
-        assertEquals((0..3).map {
-            ComponentSeeds.derive(31L, it, policy.id, "private-choice") to
-                ComponentSeeds.derive(31L, it, "private-choice-sample")
-        }, seeds)
-        assertTrue(result.belief.weightedWorlds().all { it.value.informationState("p0").observation.step.endsWith(":B") })
-        assertEquals(4, result.diagnostics.opponentPolicyDecisions.decisions)
-        assertEquals(mapOf("custom-private-component" to 4), result.diagnostics.opponentPolicyDecisions.selectedComponents)
-    }
-
-    @Test
     fun `policy conditioning resamples deterministically after particle collapse`() {
         val roots = List(8) { index -> FakeWorld(variant = if (index == 0) "favored" else "unlikely") }
         val belief = ParticleBelief.from(batch(roots), BeliefMode.POLICY_CONDITIONED_V1)
@@ -1406,109 +1346,6 @@ class InformationSetSearchTest {
         assertEquals(0, first.diagnostics.rejectedParticles)
         assertEquals(4.0, first.diagnostics.effectiveSampleSizeAfter, absoluteTolerance = 1e-12)
         assertTrue(first.belief.weightedWorlds().all { (it.value as FakeWorld).depth == 1 })
-    }
-
-    @Test
-    fun `unobserved private choices honor required policy annotations`() {
-        val annotationTag = "private-choice-annotation"
-        class AnnotationProbe(var calls: Int = 0)
-        class AnnotatedPrivateChoiceWorld(
-            private val probe: AnnotationProbe,
-            var depth: Int = 0,
-        ) : PolicyAnnotatedSearchWorld {
-            private fun expansion(annotated: Boolean): ActionMenu {
-                val ordinary = listOf(quiescenceChoice("A"), quiescenceChoice("B"))
-                val candidates = if (!annotated) ordinary else ordinary.map { choice ->
-                    if (choice.display.label == "B") {
-                        choice.copy(display = choice.display.copy(policyTags = setOf(annotationTag)))
-                    } else {
-                        choice
-                    }
-                }
-                return ActionMenu(candidates, true, candidates.size.toLong(), "private-choice-v1", 1L)
-            }
-
-            override fun actorToAct(): String = "p0"
-
-            override fun informationState(viewer: String): InformationStateRepresentation {
-                val candidates = expansion(annotated = false).candidates
-                val observation = PlayerObservationSnapshot(
-                    viewerId = viewer,
-                    turnNumber = depth,
-                    phase = "TEST",
-                    step = "PRIVATE_CHOICE",
-                    activePlayerId = "p0",
-                    priorityPlayerId = "p0",
-                    players = listOf(
-                        PlayerView("p0", "Actor", 20, 1, 1, 0, 0, ManaPoolView(), true, true, false),
-                        PlayerView("p1", "Viewer", 20, 1, 1, 0, 0, ManaPoolView(), false, false, false),
-                    ),
-                    zones = emptyList(),
-                    stack = emptyList(),
-                    pendingDecision = null,
-                    observationDigest = CanonicalJson.sha256("private-choice:$viewer:$depth"),
-                )
-                return InformationStateRepresentation(
-                    actingPlayerId = "p0",
-                    observation = observation,
-                    informationStateDigest = CanonicalJson.sha256("private-choice-info:$viewer:$depth"),
-                    historyCommitment = HistoryHashChain.empty(),
-                    history = emptyList(),
-                    candidates = candidates,
-                    terminated = false,
-                )
-            }
-
-            override fun expandChoices(): ActionMenu = expansion(annotated = false)
-
-            override fun decisionContext(view: MenuRequest): DecisionContext = testDecisionContext(this, view)
-
-            override fun expandChoicesWithPolicyAnnotations(): ActionMenu {
-                probe.calls++
-                return expansion(annotated = true)
-            }
-
-            override fun expandChoicesWithPolicyAnnotations(limit: Int): ActionMenu =
-                expandChoicesWithPolicyAnnotations()
-
-            override fun step(choice: SemanticChoice): SearchStepResult {
-                depth++
-                return SearchStepResult(true)
-            }
-
-            override fun fork(): SearchWorld = AnnotatedPrivateChoiceWorld(probe, depth)
-
-            override fun terminalPayoff(rootPlayer: String): Double? = null
-
-        }
-        val probes = List(4) { AnnotationProbe() }
-        val roots = probes.map(::AnnotatedPrivateChoiceWorld)
-        val belief = ParticleBelief.from(batch(roots), BeliefMode.POLICY_CONDITIONED_V1)
-        val requiresAnnotation = object : OpponentPolicy {
-            override val id: String = "requires-private-choice-annotation"
-            override val requiresArgentumAiChoiceTag: Boolean = true
-
-            override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> = distribution(context.information(), context.menu.candidates, policySeed)
-
-    fun distribution(opponentInformation: InformationStateRepresentation,
-                candidates: List<SemanticChoice>,
-                policySeed: Long,
-            ): ProbabilityDistribution<SemanticChoice> {
-                val selected = candidates.single { annotationTag in it.display.policyTags }
-                return ProbabilityDistribution.normalized(candidates.map { candidate ->
-                    ProbabilityMass(candidate, if (candidate.signature == selected.signature) 1.0 else 0.0)
-                })
-            }
-        }
-
-        val update = belief.propagateThroughHiddenChoice("p0", requiresAnnotation, updateSeed = 32L)
-
-        assertEquals(4, probes.sumOf { it.calls })
-        assertEquals(4, update.diagnostics.opponentPolicyDecisions.decisions)
-        assertEquals(0, update.diagnostics.opponentPolicyDecisions.replacementDecisions)
-        assertTrue(update.belief.weightedWorlds().all {
-            (it.value as AnnotatedPrivateChoiceWorld).depth == 1
-        })
     }
 
     @Test

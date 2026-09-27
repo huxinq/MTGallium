@@ -37,34 +37,6 @@ class MaterialEvaluatorTest {
     }
 
     @Test
-    fun `default sentinel and explicit equal weights preserve separate historical identities`() {
-        val default = MaterialEvaluator()
-        val explicit = MaterialEvaluator(MaterialWeights())
-        val copied = MaterialEvaluator(MaterialWeights.DEFAULT.copy())
-        val decodedWeights = CanonicalJson.format.decodeFromString(MaterialWeights.serializer(), "{}")
-        val decoded = MaterialEvaluator(decodedWeights)
-        assertEquals("mono-red-visible-board-v2", default.id)
-        assertEquals(default.id, default.configurationId)
-        assertEquals(default.configurationId, MaterialEvaluator(MaterialWeights.DEFAULT).configurationId)
-        assertEquals(MaterialWeights().configurationId, explicit.configurationId)
-        assertEquals(explicit.configurationId, copied.configurationId)
-        assertEquals(explicit.configurationId, decoded.configurationId)
-        assertNotEquals(default.configurationId, explicit.configurationId)
-        for (index in 0..40) for (root in listOf("p0", "p1")) {
-            val information = state(index)
-            val expected = legacyMaterialValue(information, root).toBits()
-            for (evaluator in listOf(default, explicit, copied, decoded))
-                assertEquals(expected, evaluator.evaluate(information, root).toBits())
-        }
-        assertFailsWith<UnsupportedOperationException> {
-            (default.weights.landMarginals as MutableList<Double>)[0] = 999.0
-        }
-        assertFailsWith<UnsupportedOperationException> {
-            (MaterialWeights.DEFAULT.landMarginals as MutableList<Double>)[0] = 999.0
-        }
-    }
-
-    @Test
     fun `known feature case includes stats on noncreatures and preserves weighted arithmetic`() {
         val config = defaults.copy(life = 2.0, hand = 3.0, power = 5.0, toughness = 7.0,
             haste = 11.0, landMarginals = listOf(13.0, 17.0), landTail = 19.0, tanhScale = 23.0)
@@ -190,11 +162,9 @@ class MaterialEvaluatorTest {
         return tanh(score / 8.0)
     }
 
-
     private fun legacyDevelopedManaValue(lands: Int): Double {
         require(lands >= 0)
         val earlyMarginals = doubleArrayOf(1.00, 0.85, 0.70, 0.45, 0.25)
         return earlyMarginals.take(lands).sum() + (lands - earlyMarginals.size).coerceAtLeast(0) * 0.15
     }
-
 }

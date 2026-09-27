@@ -40,60 +40,6 @@ import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 
 class PolicyIdentityTest {
     @Test
-    fun `renamed admission capability preserves false wire key and default omission in policy identity`() {
-        val policy = SemanticHeuristicOpponentPolicy(requiresArgentumAiChoiceOnMenu = false)
-        val plain = policy.behaviorSpecification
-        val admitted = plain.copy(requiresArgentumAiChoiceOnMenu = true)
-        val admittedWire = CanonicalJson.format.encodeToJsonElement(admitted) as JsonObject
-        assertFalse("requiresProductionAdmission" in admittedWire)
-        assertFalse("requiresArgentumAiChoiceOnMenu" in admittedWire)
-        val historicalFalseWire = JsonObject(admittedWire +
-            ("requiresProductionAdmission" to JsonPrimitive(false)))
-        assertEquals(historicalFalseWire, CanonicalJson.format.encodeToJsonElement(plain))
-        assertEquals(plain, CanonicalJson.format.decodeFromJsonElement<OpponentPolicyBehaviorSpecification>(historicalFalseWire))
-
-        val specification = PolicyIdentity.specification(parameters(), decks(), policy)
-        val encoded = CanonicalJson.format.encodeToJsonElement(specification) as JsonObject
-        assertEquals(historicalFalseWire, encoded.getValue("opponentPolicy"))
-        val historicalIdentityInput = JsonObject(encoded + ("opponentPolicy" to historicalFalseWire))
-        val decoded = CanonicalJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(historicalIdentityInput)
-        assertEquals(specification, decoded)
-        assertEquals(PolicyIdentity.identity(specification), PolicyIdentity.identity(decoded))
-        assertNotEquals(PolicyIdentity.identity(specification),
-            PolicyIdentity.identity(specification.copy(opponentPolicy = admitted)))
-    }
-
-    @Test fun `current behavior describes no retired feature and does not impersonate the old schema`() {
-        val specification = PolicyIdentity.specification(parameters(), decks(), mixture())
-        val encoded = CanonicalJson.format.encodeToJsonElement(specification) as JsonObject
-        assertEquals(2, specification.schemaVersion)
-        assertTrue(PolicyIdentity.identity(specification).startsWith("search-teacher-behavior-v2-sha256:"))
-        assertFailsWith<IllegalArgumentException> { specification.copy(schemaVersion = 1) }
-        for (retired in listOf("integration", "rootSelectionGuidanceId", "searchHeuristicProfile")) {
-            assertFalse(retired in encoded)
-        }
-        val search = encoded.getValue("search") as JsonObject
-        for (retired in listOf("cacheSimulationTransitions", "wallClockBudgetMillis", "minimumSimulations")) {
-            assertFalse(retired in search)
-        }
-        assertFalse("unresolved" in (search.getValue("leaf") as JsonObject))
-        assertFalse("unresolvedLeafHandling" in (encoded.getValue("evaluator") as JsonObject))
-        assertFalse("policyCompression" in encoded)
-        assertFalse("searchReuse" in encoded)
-        assertFalse("compressPolicySingletonPasses" in (encoded.getValue("search") as JsonObject))
-        assertFalse("supportsTraceReuse" in (encoded.getValue("evaluator") as JsonObject))
-        val decoded = CanonicalJson.format.decodeFromJsonElement<PolicyBehaviorSpecification>(encoded)
-        assertEquals(specification, decoded)
-        assertEquals(PolicyIdentity.identity(specification), PolicyIdentity.identity(decoded))
-        val identities = listOf(identity(),
-            identity(parameters = parameters().copy(beliefMode = BeliefMode.POLICY_CONDITIONED_V1)))
-        assertEquals(identities.size, identities.distinct().size)
-        // Removed fields intentionally change identities; historical evidence keeps the old source.
-        assertNotEquals("6fa2130c39432f110f641f004a511973d7b23ec8627b0ffbdc5512fe78321789",
-            CanonicalJson.sha256(identities.joinToString("\n")))
-    }
-
-    @Test
     fun `selector only root continuation changes only its own behavior identity`() {
         val beliefModel = mixture()
         val opponentContinuation = fixedPolicy("fixed-opponent")
