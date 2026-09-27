@@ -3,6 +3,8 @@ package org.mtgallium.research.workbench
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.engine.registry.CardRegistry
+import com.wingedsheep.engine.state.GameState
+import com.wingedsheep.engine.view.ClientStateTransformer
 import com.wingedsheep.sdk.model.Deck
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
@@ -235,6 +237,15 @@ private fun decodeView(value: JsonObject?): MenuRequest = MenuRequest(
     annotations = value?.get("annotations")?.jsonPrimitive?.booleanOrNull ?: false,
 )
 
+private fun replayViews(state: GameState, registry: CardRegistry): JsonObject {
+    val transformer = ClientStateTransformer(registry)
+    return buildJsonObject {
+        for ((index, player) in state.turnOrder.withIndex()) {
+            put("p$index", researchJson.encodeToJsonElement(transformer.transform(state, player)))
+        }
+    }
+}
+
 /** One private, synchronous connection; the protocol the Python session speaks. */
 class GameServerConnection {
     private val registry by lazy(::buildRegistry)
@@ -292,6 +303,9 @@ class GameServerConnection {
                 researchJson.decodeFromJsonElement<ByteTokenSchema>(it)
             })
             "state" -> researchJson.encodeToJsonElement(game().world.trueState())
+            "replay-views" -> replayViews(game().world.trueState(), registry)
+            "render-replay-state" -> replayViews(
+                researchJson.decodeFromJsonElement(request.getValue("state")), registry)
             "fit" -> researchJson.encodeToJsonElement(fitKernelRidge(
                 researchJson.decodeFromJsonElement(request.getValue("roots")),
                 request["ridge"]?.jsonPrimitive?.double ?: 0.001,

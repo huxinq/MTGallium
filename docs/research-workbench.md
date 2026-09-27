@@ -26,6 +26,24 @@ directory.
 Keep private research inputs, replays and results outside the checkout, and keep
 each result's [source context](research-runs.md#source-context) with it.
 
+### Watch recorded games
+
+After exporting a recorded run on Linux with `tools/replay_export.py`, copy its
+export folder to the private evidence share. On the Mac, start the local viewer
+with one command:
+
+```bash
+tools/replay-viewer /absolute/private/replay-export
+```
+
+Open `http://127.0.0.1:5173/`. The index links to hindsight (both hands shown)
+and each player's own view. The decision log beside the board follows the
+scrubber. The command installs the pinned web client's npm dependencies when
+needed. The exporter verifies each recorded pre-state against a seed-and-action
+rebuild. If verification diverges, the index reports the first mismatch and the
+viewer continues from the captured states. Exports contain privileged states
+and belong only in private evidence.
+
 ## Runnable public examples
 
 The checked-in examples are small technical fixtures:
