@@ -33,6 +33,14 @@ the task owner.
 - Use a word in one sense: MTG rules terms only in their Comprehensive Rules
   meaning, search and statistics terms in their standard meaning. Put versions in
   identifier strings rather than type or constant names.
+- Validate at trust boundaries: engine responses, deserialized files, and plan or
+  command-line input. Inside the code, let types and tests carry invariants; do not
+  add a check that restates a type, a caller's check or a golden.
+- Tests assert behavior. A golden is a committed file compared with the current
+  output, with no provenance or capture protocol around it.
+- Write plain code and plain English. Prefer the direct version over a defensive
+  or clever one, and say in names, comments, commit messages and reports what the
+  change does and why, with only the caveats a reader needs.
 
 ## Verification
 

@@ -373,46 +373,7 @@ class SearchCharacterizationMatrixTest {
     }
 
     private fun compareOrCaptureMatrixGoldens(behavior: String, identities: String) {
-        val artifacts = mapOf(
-            "search-matrix.behavior.jsonl" to behavior,
-            "search-matrix.policy-identity.jsonl" to identities,
-        )
-        if (System.getenv("MTG_CAPTURE_GOLDENS") == "1") {
-            val source = Path.of(requireNotNull(System.getenv("MTG_SOURCE_JSON")))
-            val expectedSha = requireNotNull(System.getenv("MTG_GOLDEN_BASELINE_SHA"))
-            val provenance = researchJson.parseToJsonElement(Files.readString(source)).jsonObject
-            check(provenance.getValue("commit").jsonPrimitive.content == expectedSha)
-            check(provenance.getValue("diff").jsonPrimitive.content.isEmpty() &&
-                provenance.getValue("status").jsonPrimitive.content.isEmpty())
-            val directory = Path.of("build", "golden-capture")
-            Files.createDirectories(directory)
-            for ((name, bytes) in artifacts) {
-                val output = directory.resolve(name)
-                Files.writeString(output, bytes)
-                Files.writeString(output.resolveSibling("$name.source.json"), buildJsonObject {
-                    put("sourceSha", expectedSha)
-                    put("bytesSha256", MessageDigest.getInstance("SHA-256")
-                        .digest(bytes.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) })
-                }.toString() + "\n")
-            }
-            error("Captured both matrix goldens in $directory; review and pin before comparison. Capture is not verification.")
-        }
-        val expected = artifacts.keys.associateWith { name ->
-            val pinned = requireNotNull(javaClass.getResourceAsStream("/goldens/$name")) {
-                "Missing $name golden; capture and accept it on the recorded unretired baseline first"
-            }.bufferedReader().use { it.readText() }
-            val metadata = requireNotNull(javaClass.getResourceAsStream("/goldens/$name.source.json")) {
-                "Missing $name.source.json; accept payload and provenance together"
-            }.bufferedReader().use { researchJson.parseToJsonElement(it.readText()).jsonObject }
-            val sourceSha = metadata.getValue("sourceSha").jsonPrimitive.content
-            val bytesSha = metadata.getValue("bytesSha256").jsonPrimitive.content
-            check(Regex("[0-9a-f]{40}").matches(sourceSha)) { "Invalid $name source SHA" }
-            check(Regex("[0-9a-f]{64}").matches(bytesSha)) { "Invalid $name byte SHA-256" }
-            val pinnedSha = MessageDigest.getInstance("SHA-256")
-                .digest(pinned.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-            assertEquals(bytesSha, pinnedSha, "$name provenance does not match pinned bytes")
-            pinned
-        }
-        artifacts.forEach { (name, actual) -> assertEquals(expected.getValue(name), actual, name) }
+        compareOrCaptureGolden("search-matrix.behavior.jsonl", behavior)
+        compareOrCaptureGolden("search-matrix.policy-identity.jsonl", identities)
     }
 }

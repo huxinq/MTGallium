@@ -4,7 +4,6 @@ import org.mtgallium.agent.infoset.core.*
 
 import java.nio.file.Files
 import java.nio.file.Path
-import java.security.MessageDigest
 import java.lang.reflect.Proxy
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -294,48 +293,18 @@ class PlanningCallTranscriptTest {
     )
 }
 
+/** Compares with the committed golden; MTG_CAPTURE_GOLDENS=1 writes a candidate under build/ instead. */
 private fun compareOrCapturePlanningGolden(actual: String) {
     val name = "planning-call-transcript.txt"
     if (System.getenv("MTG_CAPTURE_GOLDENS") == "1") {
-        val source = Path.of(requireNotNull(System.getenv("MTG_SOURCE_JSON")) {
-            "Golden capture requires a tools/remote source snapshot"
-        })
-        val expectedSha = requireNotNull(System.getenv("MTG_GOLDEN_BASELINE_SHA")) {
-            "Golden capture requires the recorded unretired baseline source SHA"
-        }
-        val provenance = CanonicalJson.format.parseToJsonElement(Files.readString(source)).jsonObject
-        check(provenance.getValue("commit").jsonPrimitive.content == expectedSha) {
-            "Capture source SHA differs from the recorded unretired baseline"
-        }
-        check(provenance.getValue("diff").jsonPrimitive.content.isEmpty() &&
-            provenance.getValue("status").jsonPrimitive.content.isEmpty()) {
-            "Capture requires a clean committed source snapshot"
-        }
         val output = Path.of("build", "golden-capture", name)
         Files.createDirectories(output.parent)
         Files.writeString(output, actual)
-        val digest = MessageDigest.getInstance("SHA-256").digest(actual.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-        Files.writeString(output.resolveSibling("$name.source.json"), buildJsonObject {
-            put("sourceSha", JsonPrimitive(expectedSha))
-            put("bytesSha256", JsonPrimitive(digest))
-        }.toString() + "\n")
-        error("Captured $output; review and pin it before comparison. Capture is not verification.")
+        error("Captured $output; review it before replacing the golden")
     }
     val expected = requireNotNull(PlanningCallTranscriptTest::class.java.getResourceAsStream("/goldens/$name")) {
-        "Missing $name golden; capture and accept it on the recorded unretired baseline first"
+        "Missing golden $name"
     }.bufferedReader().use { it.readText() }
-    val metadata = requireNotNull(PlanningCallTranscriptTest::class.java
-        .getResourceAsStream("/goldens/$name.source.json")) {
-        "Missing $name.source.json; accept payload and provenance together"
-    }.bufferedReader().use { CanonicalJson.format.parseToJsonElement(it.readText()).jsonObject }
-    val sourceSha = metadata.getValue("sourceSha").jsonPrimitive.content
-    val bytesSha = metadata.getValue("bytesSha256").jsonPrimitive.content
-    check(Regex("[0-9a-f]{40}").matches(sourceSha)) { "Invalid $name source SHA" }
-    check(Regex("[0-9a-f]{64}").matches(bytesSha)) { "Invalid $name byte SHA-256" }
-    val pinnedSha = MessageDigest.getInstance("SHA-256")
-        .digest(expected.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-    assertEquals(bytesSha, pinnedSha, "$name provenance does not match pinned bytes")
     assertEquals(expected, actual)
 }
 
