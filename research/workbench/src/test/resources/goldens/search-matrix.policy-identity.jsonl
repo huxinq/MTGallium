@@ -1,0 +1,13 @@
+{"scenario":"S1-defaults","policyIdentity":"search-teacher-behavior-v1-sha256:5902eeaf6439ba62dae2345c39668c5479ada9fbd0c88ed49e3187a97e0dbb64"}
+{"scenario":"S2-V2-order-objects","policyIdentity":"search-teacher-behavior-v1-sha256:ec6d727228102a04cb59ab34f72b634b35730c38f723ad0c5e71b9c2883b788f"}
+{"scenario":"S3-conditioned","policyIdentity":"search-teacher-behavior-v1-sha256:7fbe5778f4947591587cf8dffe617493daa83f30c7957e7e669bf893bc879e7e"}
+{"scenario":"S4-snapshot","policyIdentity":"search-teacher-behavior-v1-sha256:07c87bafd22b46cefd26af4ef0eb21599368013b5964f533e615ea13c7c63e1f"}
+{"scenario":"S5-privileged","policyIdentity":"search-teacher-behavior-v1-sha256:d53d147bfbd64c57093c2cab63020341a239ed7257efeaff42a0de1d576eb23c"}
+{"scenario":"S6-widening","policyIdentity":"search-teacher-behavior-v1-sha256:c4106a86b7fabaaf0098bcc74c04f2db7830e2fa41eab212410b06e8e78c2334"}
+{"scenario":"S7-prior-schedule","policyIdentity":"search-teacher-behavior-v1-sha256:7acbcf20f6eb786aa8b82bd38b741b38fd4cdfe16afd179a95e65073e62ef638"}
+{"scenario":"S8-evaluate","policyIdentity":"search-teacher-behavior-v1-sha256:31eee56f16c66bd20ad7b4be98afc04b2f4e9cd422d0adc7cc9499263af36100"}
+{"scenario":"S8-quiescence","policyIdentity":"search-teacher-behavior-v1-sha256:f6eaedacfaeac3ce1b758324009ba74821a956c4c0ff960ad38b0ae88e18dfd1"}
+{"scenario":"S8-policy-quiescence","policyIdentity":"search-teacher-behavior-v1-sha256:8c9370013d7d25ca8c7a87755ac8f2551dc8b877e1c5294fb6e84bcba5b1a7d9"}
+{"scenario":"S9-current-information","policyIdentity":"search-teacher-behavior-v1-sha256:707a9b2ff723a3f0b06ecb7fc536627a652f569f5ebaf05acef86765af854b38"}
+{"scenario":"S10-turn-horizon","policyIdentity":"search-teacher-behavior-v1-sha256:cad17051917b04a19148bd1a64e9c49a905803e56d75c68742a1dfcf4e7ee1ed"}
+{"scenario":"S3-rebuild-required","policyIdentity":"search-teacher-behavior-v1-sha256:a1f2ebcbb07b5b1e8f6e9f29f9d615b7b80a8d55f00efac1f2d8ae9f136a54f9"}

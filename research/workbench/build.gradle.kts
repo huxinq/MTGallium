@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.Test
+
 plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
@@ -30,6 +32,15 @@ tasks.named<JavaExec>("run") {
 }
 
 tasks.test { maxHeapSize = "1g" }
+
+tasks.register<Test>("searchBench") {
+    dependsOn(tasks.named("testClasses"))
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    filter { includeTestsMatching("org.mtgallium.research.workbench.RefactorSearchCpuProbeTest") }
+    environment("MTG_RUN_REFACTOR_CPU_PROBE", "1")
+    outputs.upToDateWhen { false }
+}
 
 // Include dependency changes when refreshing the launcher's classpath.
 val researchJava = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
