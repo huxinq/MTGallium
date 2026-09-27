@@ -20,6 +20,8 @@ dependencies {
     implementation("org.mtgallium.argentum:rules-engine")
     implementation(libs.kotlinx.serialization.json)
     implementation("org.apache.commons:commons-math3:3.6.1")
+    testImplementation(platform(libs.spring.boot.dependencies))
+    testImplementation("org.mtgallium.argentum:game-server")
     testImplementation(kotlin("test-junit5"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

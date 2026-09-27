@@ -359,6 +359,24 @@ own copy, so later edits never change a running job.
 
 ## Hidden-information conformance
 
+For client-seat stream diagnostics, `SeatStreamAuditTest` compares snapshot and
+delta sensitivity to rule-state perturbations. An unchanged snapshot does not
+prove that prior events omit the fact. `SeatStreamPropertiesTest` checks private
+choices, face-down identities, draw names and resolution context through the
+server envelope. Set `SEAT_STREAM_REQUIRE_PRIVATE=1` to enable the desired
+hidden-library and hidden-draw-ID invariance contracts; these expose failures at
+the current Argentum pin.
+
+`SeatStreamRecordsTest` is opt-in: pass `SEAT_STREAM_RECORDS` (a directory of
+recorded game JSONL gzip files), `SEAT_STREAM_GAME` (one complete tape) and
+`SEAT_STREAM_OUTPUT` (a private output directory) through `tools/remote`.
+It measures server updates without serialization, then JSON and independent
+gzip message sizes. The snapshot pass supplies no events; the transition pass
+reapplies accepted choices from each recorded pre-state and includes the emitted
+events. This is distinct from seed-and-action replay verification. Hidden swaps
+rebuild printed components and report unsupported materializations separately.
+Keep these private corpus runs separate from `just check`.
+
 `hidden-information` compares fresh native policies on factual positions and
 same-information hidden-truth permutations. The default policy list includes
 all built-ins and ServiceLoader providers. It does not change their interface.
