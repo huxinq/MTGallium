@@ -1,22 +1,22 @@
 package org.mtgallium.agent.argentum.policy
 
-import org.mtgallium.agent.infoset.core.RootActionSelection
-import org.mtgallium.agent.infoset.core.SingletonSelectionConfig
+import org.mtgallium.agent.infoset.planning.RootActionSelection
+import org.mtgallium.agent.infoset.planning.SingletonMenuShortcutConfig
 import com.wingedsheep.engine.core.GameAction
 import org.mtgallium.agent.infoset.argentum.ArgentumObservedStep
 import org.mtgallium.agent.infoset.argentum.ArgentumResolvedChoice
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.BeliefDiagnostics
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
+import org.mtgallium.agent.infoset.core.BeliefApproximation
 import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ComponentSeeds
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.LeafValueSource
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.LeafValueSource
 import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.SemanticChoice
-import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
-import org.mtgallium.agent.monored.MonoRedInformationEvaluator
+import org.mtgallium.agent.infoset.core.ActionSpaceProfile
+import org.mtgallium.agent.value.MaterialEvaluator
 
 data class LivePolicyConfig(
     val profileId: String = SEARCH_POLICY_UNPROFILED_RUNTIME_ID,
@@ -25,19 +25,19 @@ data class LivePolicyConfig(
     val maxPolicyDecisions: Int = 32,
     val explorationConstant: Double = 1.4,
     val leaf: LeafEvaluationConfig = LeafEvaluationConfig(
-        LeafStateSource.BOUNDED_ROLLOUT,
+        LeafEvaluationMethod.BOUNDED_ROLLOUT,
     ),
-    val actionSpaceProfile: SearchActionSpaceProfile =
-        SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+    val actionSpaceProfile: ActionSpaceProfile =
+        ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
     val beliefMode: BeliefMode = BeliefMode.CONSISTENCY_ONLY_V1,
-    val beliefArchitecture: BeliefArchitecture = BeliefArchitecture.SEQUENTIAL_B_V1,
+    val beliefArchitecture: BeliefApproximation = BeliefApproximation.SEQUENTIAL_B_V1,
     val baseSeed: Long = 20260825L,
     val initialExpansionLimit: Int = 64,
     val wideningThresholds: List<Int> = listOf(64, 256, 1024),
     val wideningLimits: List<Int> = listOf(128, 256, 512),
     val maxQuiescenceDecisions: Int = 32,
     val maxQuiescenceForcedPasses: Int = 256,
-    val singletonSelection: SingletonSelectionConfig = SingletonSelectionConfig(),
+    val singletonSelection: SingletonMenuShortcutConfig = SingletonMenuShortcutConfig(),
 ) {
     init {
         require(particles > 0)
@@ -108,7 +108,7 @@ class LivePolicySession(
     private val gameId: String,
     private val config: LivePolicyConfig = LivePolicyConfig(),
     private val opponentModel: OpponentPolicy = defaultMonoRedOpponentPolicy(),
-    private val valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
+    private val valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
 ) {
     private val parameters = config.policyParameters()
     private val policy = SearchPolicySession(
@@ -123,7 +123,8 @@ class LivePolicySession(
     private var decisionIndex = 0
 
     val appliedActions: Int get() = decisionIndex
-    val authoritativeFingerprint: String get() = world.authoritativeFingerprint()
+
+    val stateFingerprint: String get() = world.stateFingerprint()
     val canChoose: Boolean get() = world.actorToAct() == player
     val lastObservedUpdate: ObservedBeliefUpdateEvidence? get() = policy.lastObservedUpdate
 

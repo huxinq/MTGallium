@@ -8,7 +8,7 @@ Native sessions observe accepted actions and own their particle beliefs. Forking
 a factual continuation copies that state alongside the world. Each search starts
 with a fresh tree.
 
-`ArgentumParticleBeliefBackend` publishes a `BeliefSnapshot` with aggregate
+`ArgentumParticleFilter` publishes a `BeliefSnapshot` with aggregate
 queries and independently materialized weighted worlds. See [belief
 maintenance](../../docs/architecture/policies-and-beliefs.md#belief-maintenance).
 

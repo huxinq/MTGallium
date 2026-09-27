@@ -1,5 +1,8 @@
 package org.mtgallium.research.workbench
 
+import org.mtgallium.agent.monored.ValueEvaluationStop
+import org.mtgallium.agent.monored.ValueEvaluationException
+
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.sdk.model.Deck
@@ -18,9 +21,9 @@ class ResearchGamesTest {
             startingHandSize = hand, skipMulligans = true, startingPlayerIndex = 0, seed = 11),
             mapOf("p0" to deck, "p1" to deck), registry)
     }
-    private fun pass() = Player { context, _ ->
-        context.expansion.candidates.firstOrNull { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
-            ?: context.expansion.candidates.first()
+    private fun pass() = GameAgent { context, _ ->
+        context.menu.candidates.firstOrNull { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
+            ?: context.menu.candidates.first()
     }
     private fun players() = mapOf("p0" to pass(), "p1" to pass())
 
@@ -41,7 +44,7 @@ class ResearchGamesTest {
         for (row in decisions) {
             assertTrue(row.accepted)
             assertTrue(row.selectedIndex in row.information.candidates.indices)
-            assertEquals(row.information.actingPlayerId, row.information.observation.perspectivePlayerId)
+            assertEquals(row.information.actingPlayerId, row.information.observation.viewerId)
             assertTrue(row.profileExhaustive || !row.rulesExhaustive)
         }
     }
@@ -49,17 +52,17 @@ class ResearchGamesTest {
     @Test fun `recorded decision information uses the player requested menu and digest`() {
         val game = world(cards = 8, hand = 2)
         for (ignored in 0 until 32) {
-            if (game.actorToAct() == "p0" && game.decisionContext().expansion.candidates.size > 1) break
+            if (game.actorToAct() == "p0" && game.decisionContext().menu.candidates.size > 1) break
             val pass = game.expandChoices().candidates.single { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
             check(game.step(pass).accepted)
         }
         val unrestricted = game.decisionContext()
         assertEquals("p0", game.actorToAct())
-        assertTrue(unrestricted.expansion.candidates.size > 1)
-        val contexts = mutableListOf<DecisionSiteRequest>()
-        val player = Player(view = DecisionView(limit = 1)) { context, _ ->
+        assertTrue(unrestricted.menu.candidates.size > 1)
+        val contexts = mutableListOf<DecisionContext>()
+        val player = GameAgent(view = MenuRequest(limit = 1)) { context, _ ->
             contexts += context
-            context.expansion.candidates.single()
+            context.menu.candidates.single()
         }
         val rows = mutableListOf<GameDecision>()
         playGame(game, mapOf("p0" to player, "p1" to pass()), maximumDecisions = 1, record = rows::add)
@@ -67,23 +70,23 @@ class ResearchGamesTest {
         val row = rows.single()
         val information = row.information
         assertEquals(1, information.candidates.size)
-        assertEquals(context.expansion.candidates, information.candidates)
+        assertEquals(context.menu.candidates, information.candidates)
         assertEquals(InformationStateRepresentationDigest.compute(
             information.observation.observationDigest,
             information.historyCommitment,
             information.knowledge.knowledgeDigest,
             context.actor,
-            context.expansion.candidates.map { it.signature },
-            context.expansion.proposalVersion,
+            context.menu.candidates.map { it.signature },
+            context.menu.proposalVersion,
         ), information.informationStateDigest)
     }
 
     @Test fun `policy and observer failures propagate rather than produce outcomes`() {
-        val broken = Player { _, _ -> error("policy failure") }
+        val broken = GameAgent { _, _ -> error("policy failure") }
         assertEquals("policy failure", assertFailsWith<IllegalStateException> {
             playGame(world(), mapOf("p0" to broken, "p1" to pass()), maximumDecisions = 1)
         }.message)
-        val badObserver = Player(observe = { _, _, _, _ -> error("observer failure") }, choose = pass().choose)
+        val badObserver = GameAgent(observe = { _, _, _, _ -> error("observer failure") }, choose = pass().choose)
         assertEquals("observer failure", assertFailsWith<IllegalStateException> {
             playGame(world(), mapOf("p0" to badObserver, "p1" to pass()), maximumDecisions = 1)
         }.message)
@@ -91,17 +94,17 @@ class ResearchGamesTest {
 
     @Test fun `a factual branch can be played without changing its parent`() {
         val parent = world()
-        val before = parent.authoritativeFingerprint()
+        val before = parent.stateFingerprint()
         val branch = parent.fork() as ArgentumSearchWorld
         val result = playGame(branch, players(), maximumDecisions = 1)
         assertEquals(1, result.decisions)
-        assertEquals(before, parent.authoritativeFingerprint())
-        assertNotEquals(before, branch.authoritativeFingerprint())
+        assertEquals(before, parent.stateFingerprint())
+        assertNotEquals(before, branch.stateFingerprint())
     }
 
     @Test fun `semantic encoding remains normalized centered and independent of fresh native ids`() {
-        val first = rootActionKernelFeatures(world(8, 2).decisionContext().site())
-        val second = rootActionKernelFeatures(world(8, 2).decisionContext().site())
+        val first = kernelActionFeatures(world(8, 2).decisionContext().site())
+        val second = kernelActionFeatures(world(8, 2).decisionContext().site())
         assertEquals(first, second)
         assertEquals(1.0, first.first().state.values.sumOf { it * it }, 1e-12)
         val sums = mutableMapOf<Int, Double>()
@@ -121,17 +124,17 @@ class ResearchGamesTest {
                 put("ordered", buildJsonArray { values.forEach { add(it) } })
             })
         val menu = listOf(choice(listOf("first", "second")), choice(listOf("second", "first")))
-        val encoded = rootActionKernelFeatures(information, menu)
+        val encoded = kernelActionFeatures(information, menu)
         assertNotEquals(encoded[0].centeredCandidate, encoded[1].centeredCandidate)
         assertEquals(encoded[0].state, encoded[1].state)
-        assertEquals(rootActionKernelFeatures(information).first().state, encoded[0].state)
+        assertEquals(kernelActionFeatures(information).first().state, encoded[0].state)
         assertTrue(encoded[0].centeredCandidate.values.any { it != 0.0 })
     }
 
     @Test fun `CLI records decisions and privileged playback as ordinary files`() {
         val directory = Files.createTempDirectory("research-games-")
         try {
-            val plan = GamesPlan(decks = List(2) { mapOf("Mountain" to 1) }, policies = listOf("random", "random"),
+            val plan = ResearchGameConfig(decks = List(2) { mapOf("Mountain" to 1) }, policies = listOf("random", "random"),
                 startingHandSize = 0, skipMulligans = true, maximumDecisions = 2,
                 recordDecisions = true, recordReplay = true)
             val output = directory.resolve("run")

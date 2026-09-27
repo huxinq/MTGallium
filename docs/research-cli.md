@@ -6,7 +6,7 @@ games, plus the numerical file commands. Start with the
 
 ## Games plan
 
-The `games` command reads `GamesPlan` JSON:
+The `games` command reads `ResearchGameConfig` JSON:
 
 ```json
 {
@@ -60,16 +60,16 @@ runs information-set search with the plan's search settings.
 
 A separate Gradle build can add native policies without editing this checkout.
 It includes this build with `includeBuild`, depends on `:research:workbench`, and
-names its `NativePolicyProvider` implementation in
-`META-INF/services/org.mtgallium.research.workbench.NativePolicyProvider`. A
+names its `JvmPolicyProvider` implementation in
+`META-INF/services/org.mtgallium.research.workbench.JvmPolicyProvider`. A
 provider lists its policy names and the plan settings it reads. Those settings
 sit beside the plan fields (`myModel` in JSON, `my_model` from Python);
-`GamesPlan` keeps them in `extensions`, and the provider decodes them with
+`ResearchGameConfig` keeps them in `extensions`, and the provider decodes them with
 `NativePolicyContext.settings`. Game creation rejects an unknown policy name,
 including a shadow, and any setting no provider claims.
 
-A provider returns `NativePolicy.Direct` for a player without memory, or
-`NativePolicy.Search` for a `SearchPolicySession`. The game creates a search
+A provider returns `JvmPolicy.Memoryless` for a player without memory, or
+`JvmPolicy.SearchSession` for a `SearchPolicySession`. The game creates a search
 session once per player, feeds it accepted moves, forks it with the game and
 reports its search as it does for `search`.
 
@@ -102,19 +102,19 @@ python3 tools/mtgallium-research replay-state replay.jsonl.gz 3 state.json
 python3 tools/mtgallium-research show any-producers-data.jsonl.gz
 ```
 
-`fit` takes an array of `RootActionKernelTrainingRoot` values: `rootId`,
+`fit` takes an array of `KernelTrainingRoot` values: `rootId`,
 `seedGroupId`, `features`, and `actionMeans`. Each feature has a sparse `state` and
 `centeredCandidate`, each stored as aligned `indices` and `values` arrays.
 The kernel is `(1 + state·state′) (candidate·candidate′)`. Targets are centered
 within each root. By default the loss gives equal mass to each seed group, then
-each root, then each action. `fitRootActionKernel` in Kotlin also accepts
+each root, then each action. `fitKernelRidge` in Kotlin also accepts
 explicit positive `actionWeights` and uses them as supplied. Scores are not
 clipped.
 
 `predict` takes rows containing `features` and adds `scores` and `predictedIndex`,
 keeping other fields such as `selectedIndex`. `encode` normalizes state and
 candidate vectors, centers candidates within the menu, and keeps rejection and
-completeness information. `rootActionKernelFeatures` reads player schema 6 and
+completeness information. `kernelActionFeatures` reads player schema 6 and
 candidate schema 4, from a live decision site or recorded information, with an
 optional explicit menu.
 

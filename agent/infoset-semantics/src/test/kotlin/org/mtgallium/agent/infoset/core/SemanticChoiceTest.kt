@@ -39,13 +39,13 @@ class SemanticChoiceTest {
     @Test
     fun `profile singleton pass is distinct from rules forced pass`() {
         val pass = choice(SemanticOperationFamily.PASS_PRIORITY)
-        val profiled = PolicyExpansion(
+        val profiled = ActionMenu(
             candidates = listOf(pass),
             isExhaustive = false,
             estimatedCandidateCount = null,
             proposalVersion = "profile-singleton-test-v1",
             isProfileExhaustive = true,
-            omissionReasons = setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA),
+            omissionReasons = setOf(ActionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA),
         )
 
         assertNull(profiled.exactSingletonPassOrNull())
@@ -64,7 +64,7 @@ class SemanticChoiceTest {
         canonicalPayload = payload,
     )
 
-    private fun expansion(candidates: List<SemanticChoice>, exhaustive: Boolean) = PolicyExpansion(
+    private fun expansion(candidates: List<SemanticChoice>, exhaustive: Boolean) = ActionMenu(
         candidates = candidates,
         isExhaustive = exhaustive,
         estimatedCandidateCount = candidates.size.toLong(),

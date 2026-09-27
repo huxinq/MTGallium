@@ -44,7 +44,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.mtgallium.agent.infoset.core.PolicyDecisionChoiceSpec
+import org.mtgallium.agent.infoset.core.PendingDecisionOptions
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 
@@ -177,7 +177,7 @@ class CombatEdgeReferenceTest {
     fun `ordinary strings that resemble native edge ids are never parsed`() {
         val fixture = combatFixture()
         val ordinary = fixture.firstEdgeNative
-        val projected = assertIs<PolicyDecisionChoiceSpec.ManaSources>(
+        val projected = assertIs<PendingDecisionOptions.ManaSources>(
             project(fixture.observation, manaSpec(fixture, ordinary)),
         ).contract
         assertEquals(ordinary, projected.getValue("requiredCost").jsonPrimitive.content)
@@ -187,7 +187,7 @@ class CombatEdgeReferenceTest {
                 .getValue("entityId").jsonPrimitive.content,
         )
 
-        val response = UnifiedSemanticExpander().encodePreparedChoice(
+        val response = ArgentumActionGenerator().encodePreparedChoice(
             ArgentumEngineChoice.Decision(
                 ManaSourcesSelectedResponse("routing", selectedSources = listOf(fixture.attacker)),
             ),
@@ -197,6 +197,7 @@ class CombatEdgeReferenceTest {
     }
 
     @Test
+
     fun `asymmetric combat response round trip binds the intended native edges`() {
         val registry = CardRegistry().apply {
             register(PortalSet.cards)
@@ -270,7 +271,7 @@ class CombatEdgeReferenceTest {
             knownDecks = knownDecks,
         )
         val information = world.informationState("p0")
-        val contract = assertIs<PolicyDecisionChoiceSpec.CombatResolution>(
+        val contract = assertIs<PendingDecisionOptions.CombatResolution>(
             requireNotNull(information.observation.pendingDecision?.choiceSpec),
         ).contract
         val blockerRefs = contract.getValue("blockers").jsonArray
@@ -303,11 +304,11 @@ class CombatEdgeReferenceTest {
         )
         assertTrue(world.step(candidate).accepted)
         assertTrue(
-            ArgentumStateFingerprint.routingNormalizedEquals(direct.state, world.authoritativeStateForHost()),
+            ArgentumStateFingerprint.routingNormalizedEquals(direct.state, world.trueState()),
             "Semantic response did not execute the native binding it resolved to",
         )
 
-        val after = world.authoritativeStateForHost()
+        val after = world.trueState()
         val otherBlocker = decision.blockers.first { it.id != chosenTarget }.id
         assertTrue(chosenTarget in after.getGraveyard(p1))
         assertTrue(otherBlocker in after.getBattlefield(p1))
@@ -374,7 +375,7 @@ class CombatEdgeReferenceTest {
         ),
     ): IdentifiedContract {
         val projected = project(fixture.observation, spec)
-        return IdentifiedContract(assertIs<PolicyDecisionChoiceSpec.CombatResolution>(projected).contract)
+        return IdentifiedContract(assertIs<PendingDecisionOptions.CombatResolution>(projected).contract)
     }
 
     private fun combatResponse(fixture: CombatFixture, vararg amounts: Pair<String, Int>): SemanticChoice {
@@ -391,33 +392,33 @@ class CombatEdgeReferenceTest {
     private fun encode(
         prepared: PreparedSemanticExpansionInput,
         response: CombatResolutionResponse,
-    ): SemanticChoice = UnifiedSemanticExpander().encodePreparedChoice(
+    ): SemanticChoice = ArgentumActionGenerator().encodePreparedChoice(
         ArgentumEngineChoice.Decision(response),
         prepared,
     )
 
-    private fun project(observation: TrainingObservation, choice: DecisionChoiceSpec): PolicyDecisionChoiceSpec {
-        val refs = SafeReferenceMap(observation).also { it.admitAuthorizedChoiceReferences(choice) }
-        return SafeObservationProjector().projectChoice(choice, refs)
+    private fun project(observation: TrainingObservation, choice: DecisionChoiceSpec): PendingDecisionOptions {
+        val refs = ObservationReferenceMap(observation).also { it.admitAuthorizedChoiceReferences(choice) }
+        return PlayerObservationProjector().projectChoice(choice, refs)
     }
 
     private fun prepared(
         fixture: CombatFixture,
         choice: DecisionChoiceSpec,
     ): PreparedSemanticExpansionInput {
-        val visible = SafeObservationProjector().project(fixture.observation)
-        val references = SafeReferenceMap(fixture.observation)
+        val visible = PlayerObservationProjector().project(fixture.observation)
+        val references = ObservationReferenceMap(fixture.observation)
             .also { it.admitAuthorizedChoiceReferences(choice) }
         return PreparedSemanticExpansionInput(
             actor = fixture.chooser,
             legalActions = emptyList(),
             observation = fixture.observation,
-            projection = SafeObservationProjection(visible.observation, references),
+            projection = PlayerObservationProjection(visible.observation, references),
         )
     }
 
     private fun safeReference(observation: TrainingObservation, entityId: EntityId): String =
-        SafeReferenceMap(observation).reference(entityId)
+        ObservationReferenceMap(observation).reference(entityId)
 
     private fun edgeIds(contract: JsonObject): List<String> = contract.getValue("edges").jsonArray.map {
         it.jsonObject.getValue("id").jsonPrimitive.content

@@ -2,14 +2,15 @@ package org.mtgallium.agent.argentum.policy
 
 import kotlin.test.*
 import org.mtgallium.agent.infoset.core.*
-import org.mtgallium.agent.monored.*
+import org.mtgallium.agent.infoset.planning.*
+import org.mtgallium.agent.value.*
 
 class FrozenModelCompositionTest {
     @Test fun `host binds actual model configuration into unchanged behavior vocabulary`() {
         fun model(weight: Double) = LinearValueEvaluator(
             LinearWeights(weights = mapOf("state/synthetic" to weight)))
         val parameters = LivePolicyConfig(leaf = LeafEvaluationConfig(
-            LeafStateSource.CURRENT_INFORMATION_STATE,
+            LeafEvaluationMethod.CURRENT_INFORMATION_STATE,
             RolloutCutoff.EVALUATE,
         )).policyParameters()
         val decks = mapOf("p0" to mapOf("Mountain" to 20, "Shock" to 4), "p1" to mapOf("Mountain" to 20, "Shock" to 4))

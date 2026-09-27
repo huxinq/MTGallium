@@ -1,8 +1,10 @@
 package org.mtgallium.agent.infoset.core
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 /** Canonical representation JSON retains its exact field vocabulary across source renames. */
 class InformationRepresentationCompatibilityTest {
@@ -15,12 +17,12 @@ class InformationRepresentationCompatibilityTest {
 
     @Test
     fun `snapshot round trips canonical JSON bytes`() {
-        val snapshot = PolicyJson.format.decodeFromString(
+        val snapshot = CanonicalJson.format.decodeFromString(
             PlayerObservationSnapshot.serializer(), legacySnapshotJson,
         )
         assertEquals(
-            PolicyJson.canonical(PolicyJson.format.parseToJsonElement(legacySnapshotJson)),
-            PolicyJson.canonical(PolicyJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(), snapshot)),
+            CanonicalJson.canonical(CanonicalJson.format.parseToJsonElement(legacySnapshotJson)),
+            CanonicalJson.canonical(CanonicalJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(), snapshot)),
         )
     }
 
@@ -28,19 +30,19 @@ class InformationRepresentationCompatibilityTest {
     fun `information representation retains exact wire fields`() {
         val information = InformationStateRepresentation(
             actingPlayerId = "p0",
-            observation = PolicyJson.format.decodeFromString(PlayerObservationSnapshot.serializer(), legacySnapshotJson),
+            observation = CanonicalJson.format.decodeFromString(PlayerObservationSnapshot.serializer(), legacySnapshotJson),
             informationStateDigest = "information",
-            historyCommitment = PolicyHistoryCommitment.empty(),
+            historyCommitment = HistoryHashChain.empty(),
             history = emptyList(), candidates = emptyList(), terminated = false,
         )
         val serializer = InformationStateRepresentation.serializer()
-        val encoded = PolicyJson.format.encodeToJsonElement(serializer, information) as JsonObject
+        val encoded = CanonicalJson.format.encodeToJsonElement(serializer, information) as JsonObject
         assertEquals(
             setOf("schemaVersion", "actingPlayerId", "observation", "informationStateDigest",
                 "historyCommitment", "history", "knowledge", "candidates", "candidateSchemaVersion",
                 "terminated", "winnerId"),
             encoded.keys,
         )
-        assertEquals(information, PolicyJson.format.decodeFromJsonElement(InformationStateRepresentation.serializer(), encoded))
+        assertEquals(information, CanonicalJson.format.decodeFromJsonElement(InformationStateRepresentation.serializer(), encoded))
     }
 }

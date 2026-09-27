@@ -5,7 +5,7 @@ import kotlin.test.*
 
 class ComparisonChoiceSeedTest {
     private fun run(seed: Long?): Pair<JsonElement, JsonElement> {
-        val connection = PythonResearchConnection()
+        val connection = GameServerConnection()
         val created = connection.request(buildJsonObject {
             put("command", "create")
             put("plan", buildJsonObject {

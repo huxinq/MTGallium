@@ -19,7 +19,7 @@ data class OpponentPolicyBehaviorSpecification(
     val components: List<OpponentPolicyComponentSpecification> = emptyList(),
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
-    val requiresProductionAdmission: Boolean = true,
+    @kotlinx.serialization.SerialName("requiresProductionAdmission") val requiresArgentumAiChoiceOnMenu: Boolean = true,
 ) {
     init {
         require(schemaVersion == OPPONENT_POLICY_BEHAVIOR_SCHEMA_V1)

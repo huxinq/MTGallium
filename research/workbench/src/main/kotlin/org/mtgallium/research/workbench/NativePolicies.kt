@@ -6,38 +6,39 @@ import kotlinx.serialization.json.JsonObject
 import org.mtgallium.agent.infoset.argentum.ARGENTUM_HEURISTIC_CHOICE_TAG_V1
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 import org.mtgallium.agent.argentum.policy.*
-import org.mtgallium.agent.monored.LinearValueEvaluator
-import org.mtgallium.agent.monored.LinearValueLink
-import org.mtgallium.agent.monored.MonoRedInformationEvaluator
+import org.mtgallium.agent.value.LinearValueEvaluator
+import org.mtgallium.agent.value.InverseLink
+import org.mtgallium.agent.value.MaterialEvaluator
 
 /**
  * Named policies that play inside the JVM. Other modules on the research classpath add
  * policies by listing an implementation in
- * `META-INF/services/org.mtgallium.research.workbench.NativePolicyProvider`.
+ * `META-INF/services/org.mtgallium.research.workbench.JvmPolicyProvider`.
  */
-interface NativePolicyProvider {
+interface JvmPolicyProvider {
     /** Policy names this provider constructs; a name belongs to one provider. */
     val policies: Set<String>
 
-    /** Plan settings this provider reads from [GamesPlan.extensions]; no [GamesPlan] field may be named. */
+    /** Plan settings this provider reads from [ResearchGameConfig.extensions]; no [ResearchGameConfig] field may be named. */
     val settings: Set<String> get() = emptySet()
 
-    /** Construct [name] for [actor]; the game keeps a [NativePolicy.Search] session and asks again for others. */
-    fun create(name: String, game: NativePolicyContext, actor: String): NativePolicy
+    /** Construct [name] for [actor]; the game keeps a [JvmPolicy.SearchSession] session and asks again for others. */
+    fun create(name: String, game: NativePolicyContext, actor: String): JvmPolicy
 }
 
-sealed interface NativePolicy {
+sealed interface JvmPolicy {
     /** A player without memory between decisions. */
-    class Direct(val player: Player) : NativePolicy
+    class Memoryless(val player: GameAgent) : JvmPolicy
 
     /** One session per actor, created once; the game observes accepted moves, forks it and reports its search. */
-    class Search(val session: SearchPolicySession) : NativePolicy
+    class SearchSession(val session: SearchPolicySession) : JvmPolicy
 }
 
 /** The game a native policy is constructed for. */
 class NativePolicyContext internal constructor(
-    val plan: GamesPlan,
+    val plan: ResearchGameConfig,
     val world: ArgentumSearchWorld,
     val gameId: String,
     val knownDecks: Map<String, Map<String, Int>>,
@@ -50,24 +51,24 @@ class NativePolicyContext internal constructor(
         else -> error("Unknown opponent model '${plan.opponentModel}'")
     }
 
-    /** Decode a provider's settings from [GamesPlan.extensions]; other providers' settings are ignored. */
+    /** Decode a provider's settings from [ResearchGameConfig.extensions]; other providers' settings are ignored. */
     fun <T> settings(deserializer: DeserializationStrategy<T>): T =
         researchJson.decodeFromJsonElement(deserializer, JsonObject(plan.extensions))
 }
 
 /** The action Argentum's determinized heuristic marks in the menu; a missing mark stops the game. */
-fun productionChoice(context: DecisionSiteRequest): SemanticChoice =
-    context.expansion.candidates.single { ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags }
+fun argentumAiChoice(context: DecisionContext): SemanticChoice =
+    context.menu.candidates.single { ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags }
 
-internal object BuiltinNativePolicies : NativePolicyProvider {
+internal object BuiltinNativePolicies : JvmPolicyProvider {
     override val policies = setOf("random", "heuristic", "production", "search")
 
-    override fun create(name: String, game: NativePolicyContext, actor: String): NativePolicy = when (name) {
-        "random" -> NativePolicy.Direct(selectorPlayer(UniformOpponentPolicy))
-        "heuristic" -> NativePolicy.Direct(selectorPlayer(DeterminizedArgentumHeuristicOpponentPolicy()))
-        "production" -> NativePolicy.Direct(Player(DecisionView(admission = DecisionAdmission.PRODUCTION,
-            annotations = true)) { context, _ -> productionChoice(context) })
-        "search" -> NativePolicy.Search(search(game, actor))
+    override fun create(name: String, game: NativePolicyContext, actor: String): JvmPolicy = when (name) {
+        "random" -> JvmPolicy.Memoryless(selectorPlayer(UniformOpponentPolicy))
+        "heuristic" -> JvmPolicy.Memoryless(selectorPlayer(DeterminizedArgentumHeuristicOpponentPolicy()))
+        "production" -> JvmPolicy.Memoryless(GameAgent(MenuRequest(admission = MenuSource.PRODUCTION,
+            annotations = true)) { context, _ -> argentumAiChoice(context) })
+        "search" -> JvmPolicy.SearchSession(search(game, actor))
         else -> error("Unknown built-in policy '$name'")
     }
 
@@ -81,14 +82,14 @@ internal object BuiltinNativePolicies : NativePolicyProvider {
             rolloutPolicy = PolicyDefaults.rootRolloutPolicy(),
             rolloutOpponentPolicy = PolicyDefaults.opponentRolloutPolicy(),
             valueSource = LeafValueSource.Information(
-                plan.valueWeights?.let { LinearValueEvaluator(it, plan.valueLink ?: LinearValueLink.CLIP) }
-                    ?: MonoRedInformationEvaluator))
+                plan.valueWeights?.let { LinearValueEvaluator(it, plan.valueLink ?: InverseLink.CLIP) }
+                    ?: MaterialEvaluator()))
     }
 }
 
 /** The built-in policies and those found on the classpath. */
-internal class NativePolicies(val providers: List<NativePolicyProvider>) {
-    private val owners: Map<String, NativePolicyProvider> = buildMap {
+internal class NativePolicies(val providers: List<JvmPolicyProvider>) {
+    private val owners: Map<String, JvmPolicyProvider> = buildMap {
         providers.forEach { provider ->
             provider.policies.forEach { name ->
                 val previous = put(name, provider)
@@ -99,15 +100,15 @@ internal class NativePolicies(val providers: List<NativePolicyProvider>) {
 
     /** Settings some provider reads; providers may share one. */
     val settings: Set<String> = providers.flatMap { it.settings }.toSet().also { names ->
-        val fields = settingNames(GamesPlan.serializer())
+        val fields = settingNames(ResearchGameConfig.serializer())
         check(names.none { it in fields }) { "Extension settings name plan fields: ${names.filter { it in fields }}" }
     }
 
-    fun create(name: String, game: NativePolicyContext, actor: String): NativePolicy =
+    fun create(name: String, game: NativePolicyContext, actor: String): JvmPolicy =
         (owners[name] ?: error("Unknown native policy '$name'; Python policies supply their selected action directly"))
             .create(name, game, actor)
 
-    fun checkSettings(plan: GamesPlan) {
+    fun checkSettings(plan: ResearchGameConfig) {
         val unknown = plan.extensions.keys - settings
         require(unknown.isEmpty()) { "Unknown plan settings: ${unknown.sorted()}" }
     }
@@ -115,7 +116,7 @@ internal class NativePolicies(val providers: List<NativePolicyProvider>) {
     companion object {
         val installed: NativePolicies by lazy {
             NativePolicies(listOf(BuiltinNativePolicies) + ServiceLoader.load(
-                NativePolicyProvider::class.java, NativePolicyProvider::class.java.classLoader).toList())
+                JvmPolicyProvider::class.java, JvmPolicyProvider::class.java.classLoader).toList())
         }
     }
 }

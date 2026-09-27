@@ -9,22 +9,22 @@ class BoundedPolicyInputTest {
     @Test
     fun `recent event window keeps byte cutoff and oversized event refusal`() {
         val history = (0L until 100L).map { event(it, null) }
-        val eventBytes = PolicyJson.format.encodeToString(PolicyHistoryEvent.serializer(), history.last())
+        val eventBytes = CanonicalJson.format.encodeToString(ObservedEvent.serializer(), history.last())
             .toByteArray(Charsets.UTF_8).size
-        val config = BoundedPolicyInputConfig(recentEventByteLimit = eventBytes * 3)
-        val window = BoundedPolicyInputCompiler.recentEventWindow(history, config)
+        val config = PolicyInputLimits(recentEventByteLimit = eventBytes * 3)
+        val window = PolicyInputCompiler.recentEventWindow(history, config)
         assertEquals(history.takeLast(3), window.events)
         assertEquals(4, window.eventsExamined)
         assertFailsWith<IllegalArgumentException> {
-            BoundedPolicyInputCompiler.recentEventWindow(history, config.copy(recentEventByteLimit = 1))
+            PolicyInputCompiler.recentEventWindow(history, config.copy(recentEventByteLimit = 1))
         }
     }
 
-    private fun event(id: Long, detail: PerspectiveEventDetail?) = PolicyHistoryEvent(
+    private fun event(id: Long, detail: ObservedEventDetail?) = ObservedEvent(
         eventId = id,
-        audience = PolicyAudience(PolicyAudienceScope.PUBLIC),
+        audience = EventAudience(EventAudienceScope.PUBLIC),
         actor = null,
-        kind = PolicyHistoryEventKind.TURN_STRUCTURE,
+        kind = ObservedEventKind.TURN_STRUCTURE,
         payload = buildJsonObject { },
         detail = detail,
     )

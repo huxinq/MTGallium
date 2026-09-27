@@ -25,20 +25,20 @@ SOURCES = {
         "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/BeliefTracker.kt",
         "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/BeliefPreparation.kt",
         "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/PolicyDefaults.kt",
-        "agent/mono-red-models/src/main/kotlin/org/mtgallium/agent/monored/MonoRedInformationEvaluator.kt",
+        "agent/mono-red-models/src/main/kotlin/org/mtgallium/agent/monored/MonoRedInformationEvaluator.kt", # persisted: reviewed source path
         "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyContract.kt",
     ),
     "behavior": (
         "agent/mono-red-models/src/main/kotlin/org/mtgallium/agent/monored/ValueFeatures.kt",
         "agent/neural-policy/src/main/kotlin/org/mtgallium/agent/neural/FactualPolicyTensors.kt",
-        "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/SemanticFeatures.kt",
+        "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/SemanticFeatures.kt", # persisted: reviewed source path
         "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/Kernel.kt",
         "research/workbench/src/main/kotlin/org/mtgallium/research/workbench/Games.kt",
         "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyContract.kt",
-        "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyHistoryCommitment.kt",
+        "agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyHistoryCommitment.kt", # persisted: reviewed source path
         "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt",
-        "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryEventOrder.kt",
-        "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryObjectReference.kt",
+        "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryEventOrder.kt", # persisted: reviewed source path
+        "agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistoryObjectReference.kt", # persisted: reviewed source path
     ),
 }
 

@@ -23,9 +23,9 @@ import com.wingedsheep.sdk.model.EntityId
 import org.mtgallium.agent.infoset.argentum.ArgentumResolvedChoice
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumStateFingerprint
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
+import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
 import org.mtgallium.agent.argentum.policy.ResolvedPolicyDecision
-import org.mtgallium.agent.infoset.core.RootActionSelection
+import org.mtgallium.agent.infoset.planning.RootActionSelection
 import org.mtgallium.agent.argentum.policy.LivePolicyConfig
 import org.mtgallium.agent.argentum.policy.LivePolicySession
 import org.springframework.boot.SpringApplication
@@ -183,7 +183,7 @@ private class SearchPolicyController(
             rebuild(history.setup, history.actions)
         }
         val authoritative = ArgentumStateFingerprint.of(snapshot.state)
-        val shadow = next.runtime.authoritativeFingerprint
+        val shadow = next.runtime.stateFingerprint
         if (authoritative != shadow) {
             publishInsight(
                 SearchPolicyInsight(
@@ -251,7 +251,7 @@ private class SearchPolicyController(
             environment = environment,
             gameId = gameSessionId,
             seedBase = config.baseSeed,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = config.actionSpaceProfile),
+            expander = ArgentumActionGenerator(actionSpaceProfile = config.actionSpaceProfile),
             effectiveSetupSeed = setup.seed,
             knownDecks = knownDecks,
         )
@@ -263,7 +263,7 @@ private class SearchPolicyController(
             config = config,
         )
         actions.forEach(runtime::applyObserved)
-        return SynchronizedRuntime(runtime, actions.toList(), runtime.authoritativeFingerprint, playerSeat)
+        return SynchronizedRuntime(runtime, actions.toList(), runtime.stateFingerprint, playerSeat)
     }
 
     private fun checkSuppliedDeckList(seat: String) {
@@ -294,7 +294,7 @@ private class SearchPolicyController(
                         signature = candidate.choice.signature,
                         visits = candidate.visits,
                         meanValue = candidate.meanValue,
-                        policyProbability = candidate.policyProbability,
+                        policyProbability = candidate.visitFraction,
                         chosen = candidate.choice.signature == decision.choice.signature,
                     )
                 } ?: listOf(
@@ -348,7 +348,7 @@ private class SearchPolicyController(
                 failureCode = code,
                 diagnostic = (failure.message ?: failure::class.simpleName ?: "Search policy failure").take(500),
                 authoritativeFingerprint = snapshot?.state?.let(ArgentumStateFingerprint::of),
-                shadowFingerprint = synchronized?.runtime?.authoritativeFingerprint,
+                shadowFingerprint = synchronized?.runtime?.stateFingerprint,
             )
         )
         throw PolicyControllerFailure("$code: ${failure.message}", failure)

@@ -1,6 +1,7 @@
 package org.mtgallium.agent.argentum.policy
 
-import org.mtgallium.agent.monored.*
+import org.mtgallium.agent.monored.ValueEvaluationException
+import org.mtgallium.agent.value.*
 import org.mtgallium.agent.monored.ValueEvaluationStop
 import java.util.Base64
 import kotlin.math.ln1p
@@ -16,52 +17,52 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
-import org.mtgallium.agent.infoset.core.BeliefBatch
+import org.mtgallium.agent.infoset.core.BeliefApproximation
+import org.mtgallium.agent.infoset.planning.ParticleSet
 import org.mtgallium.agent.infoset.core.BeliefDiagnostics
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.LeafValueSource
-import org.mtgallium.agent.infoset.core.RolloutCutoff
-import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
-import org.mtgallium.agent.infoset.core.PolicyAudience
-import org.mtgallium.agent.infoset.core.PolicyAudienceScope
-import org.mtgallium.agent.infoset.core.PolicyCardView
-import org.mtgallium.agent.infoset.core.PolicyCombatView
-import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
-import org.mtgallium.agent.infoset.core.PolicyHistoryEvent
-import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
+import org.mtgallium.agent.infoset.planning.InformationSetSearchConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.LeafValueSource
+import org.mtgallium.agent.infoset.planning.RolloutCutoff
+import org.mtgallium.agent.infoset.core.ObservedEventDetail
+import org.mtgallium.agent.infoset.core.EventAudience
+import org.mtgallium.agent.infoset.core.EventAudienceScope
+import org.mtgallium.agent.infoset.core.ObjectView
+import org.mtgallium.agent.infoset.core.CombatView
+import org.mtgallium.agent.infoset.core.HistoryHashChain
+import org.mtgallium.agent.infoset.core.ObservedEvent
+import org.mtgallium.agent.infoset.core.ObservedEventKind
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
-import org.mtgallium.agent.infoset.core.DecisionSiteRequest
-import org.mtgallium.agent.infoset.core.DecisionView
-import org.mtgallium.agent.infoset.core.EpistemicState
-import org.mtgallium.agent.infoset.core.PolicyJson
-import org.mtgallium.agent.infoset.core.PolicyKnownLibraryOrder
-import org.mtgallium.agent.infoset.core.PolicyKnownObject
-import org.mtgallium.agent.infoset.core.PolicyKnowledgeState
-import org.mtgallium.agent.infoset.core.PolicyManaPool
+import org.mtgallium.agent.infoset.core.DecisionContext
+import org.mtgallium.agent.infoset.core.MenuRequest
+import org.mtgallium.agent.infoset.core.InformationState
+import org.mtgallium.agent.infoset.core.CanonicalJson
+import org.mtgallium.agent.infoset.core.KnownLibraryOrder
+import org.mtgallium.agent.infoset.core.KnownObject
+import org.mtgallium.agent.infoset.core.PlayerKnowledge
+import org.mtgallium.agent.infoset.core.ManaPoolView
 import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
-import org.mtgallium.agent.infoset.core.PolicyPendingDecisionView
-import org.mtgallium.agent.infoset.core.PolicyPlayerView
-import org.mtgallium.agent.infoset.core.PolicyStackItemView
-import org.mtgallium.agent.infoset.core.PolicyZoneKnowledge
-import org.mtgallium.agent.infoset.core.PolicyZoneView
-import org.mtgallium.agent.infoset.core.SearchSettlementOrigin
-import org.mtgallium.agent.infoset.core.SearchStepResult
-import org.mtgallium.agent.infoset.core.SearchWorld
+import org.mtgallium.agent.infoset.core.PendingDecisionView
+import org.mtgallium.agent.infoset.core.PlayerView
+import org.mtgallium.agent.infoset.core.StackObjectView
+import org.mtgallium.agent.infoset.core.ZoneKnowledge
+import org.mtgallium.agent.infoset.core.ZoneView
+import org.mtgallium.agent.infoset.core.ReturnSource
+import org.mtgallium.agent.infoset.planning.SearchStepResult
+import org.mtgallium.agent.infoset.planning.SearchWorld
 import org.mtgallium.agent.infoset.core.SemanticChoice
 import org.mtgallium.agent.infoset.core.SemanticChoiceDisplay
 import org.mtgallium.agent.infoset.core.SemanticChoiceKind
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
-import org.mtgallium.agent.infoset.core.PolicyDecisionChoiceSpec
-import org.mtgallium.agent.infoset.core.PolicyExpansion
+import org.mtgallium.agent.infoset.core.PendingDecisionOptions
+import org.mtgallium.agent.infoset.core.ActionMenu
 import org.mtgallium.agent.infoset.core.Weighted
 
 class LearnedOutcomeDeploymentTest {
     private val learnedLeaf = LeafEvaluationConfig(
-        LeafStateSource.CURRENT_INFORMATION_STATE,
+        LeafEvaluationMethod.CURRENT_INFORMATION_STATE,
         RolloutCutoff.EVALUATE,
     )
 
@@ -162,7 +163,7 @@ class LearnedOutcomeDeploymentTest {
     private fun identity(name: String, digit: Char): String =
         "$name-sha256:${digit.toString().repeat(64)}"
 
-    private fun belief(world: SearchWorld): BeliefBatch<Weighted<SearchWorld>> = BeliefBatch(
+    private fun belief(world: SearchWorld): ParticleSet<Weighted<SearchWorld>> = ParticleSet(
         particles = listOf(Weighted(world, 1.0)),
         diagnostics = BeliefDiagnostics(
             mode = BeliefMode.CONSISTENCY_ONLY_V1,
@@ -173,7 +174,7 @@ class LearnedOutcomeDeploymentTest {
             effectiveSampleSizeAfter = 1.0,
             entropy = 0.0,
             resamplingCount = 0,
-            architecture = BeliefArchitecture.SEQUENTIAL_B_V1,
+            architecture = BeliefApproximation.SEQUENTIAL_B_V1,
         ),
     )
 
@@ -187,13 +188,13 @@ class LearnedOutcomeDeploymentTest {
         repeatedPermanentCount: Int = 1,
     ): InformationStateRepresentation {
         val history = List(repeatedHistoryCount) { eventIndex ->
-            PolicyHistoryEvent(
+            ObservedEvent(
                 eventId = eventIndex.toLong(),
-                audience = PolicyAudience(PolicyAudienceScope.PUBLIC),
+                audience = EventAudience(EventAudienceScope.PUBLIC),
                 actor = rootPlayer,
-                kind = PolicyHistoryEventKind.DAMAGE,
+                kind = ObservedEventKind.DAMAGE,
                 payload = buildJsonObject { put("excluded", JsonPrimitive(excludedSalt)) },
-                detail = PerspectiveEventDetail.Damage(
+                detail = ObservedEventDetail.Damage(
                     sourceName = "Shock",
                     sourceObjectRef = "source-$eventIndex-$excludedSalt",
                     targetName = "Opponent",
@@ -228,14 +229,14 @@ class LearnedOutcomeDeploymentTest {
             )
         }
         val observation = PlayerObservationSnapshot(
-            perspectivePlayerId = rootPlayer,
+            viewerId = rootPlayer,
             turnNumber = 4,
             phase = "PRECOMBAT_MAIN",
             step = "PRECOMBAT_MAIN",
             activePlayerId = rootPlayer,
             priorityPlayerId = actor,
             players = listOf(
-                PolicyPlayerView(
+                PlayerView(
                     playerId = rootPlayer,
                     name = "Root",
                     life = 14,
@@ -243,7 +244,7 @@ class LearnedOutcomeDeploymentTest {
                     librarySize = 40,
                     graveyardSize = 2,
                     exileSize = 0,
-                    mana = PolicyManaPool(red = 1),
+                    mana = ManaPoolView(red = 1),
                     active = true,
                     priority = actor == rootPlayer,
                     lost = false,
@@ -251,7 +252,7 @@ class LearnedOutcomeDeploymentTest {
                     redNoncombatDamageDealtThisTurn = 2,
                     landPlaysRemainingThisTurn = 1,
                 ),
-                PolicyPlayerView(
+                PlayerView(
                     playerId = opponentPlayer,
                     name = "Opponent",
                     life = 12,
@@ -259,26 +260,26 @@ class LearnedOutcomeDeploymentTest {
                     librarySize = 40,
                     graveyardSize = 1,
                     exileSize = 0,
-                    mana = PolicyManaPool(),
+                    mana = ManaPoolView(),
                     active = false,
                     priority = actor == opponentPlayer,
                     lost = false,
                 ),
             ),
             zones = listOf(
-                PolicyZoneView(rootPlayer, "HAND", hidden = true, size = 1, cards = listOf(rootCard)),
-                PolicyZoneView(opponentPlayer, "HAND", hidden = true, size = 1, cards = listOf(opponentHidden)),
-                PolicyZoneView(
+                ZoneView(rootPlayer, "HAND", hidden = true, size = 1, cards = listOf(rootCard)),
+                ZoneView(opponentPlayer, "HAND", hidden = true, size = 1, cards = listOf(opponentHidden)),
+                ZoneView(
                     rootPlayer,
                     "BATTLEFIELD",
                     hidden = false,
                     size = repeatedPermanentCount,
                     cards = permanents,
                 ),
-                PolicyZoneView(opponentPlayer, "BATTLEFIELD", hidden = false, size = 0, cards = emptyList()),
+                ZoneView(opponentPlayer, "BATTLEFIELD", hidden = false, size = 0, cards = emptyList()),
             ),
             stack = listOf(
-                PolicyStackItemView(
+                StackObjectView(
                     objectRef = "stack-$excludedSalt",
                     controllerId = rootPlayer,
                     name = "Shock",
@@ -287,13 +288,13 @@ class LearnedOutcomeDeploymentTest {
                     targets = listOf("stack-target-$excludedSalt"),
                 )
             ),
-            combat = PolicyCombatView(
+            combat = CombatView(
                 attackingPlayerId = rootPlayer,
                 attackers = emptyList(),
                 blockers = emptyList(),
             ),
             currentTurnStateComplete = currentTurnStateComplete,
-            pendingDecision = PolicyPendingDecisionView(
+            pendingDecision = PendingDecisionView(
                 decisionKind = "ChooseTargets",
                 playerId = actor,
                 prompt = "excluded-$excludedSalt",
@@ -302,7 +303,7 @@ class LearnedOutcomeDeploymentTest {
                 phase = "PRECOMBAT_MAIN",
                 subjectObjectRef = "decision-subject-$excludedSalt",
                 canRespond = true,
-                choiceSpec = PolicyDecisionChoiceSpec.Targets(
+                choiceSpec = PendingDecisionOptions.Targets(
                     requirements = kotlinx.serialization.json.JsonArray(emptyList()),
                     legalTargets = mapOf(0 to listOf("target-$excludedSalt")),
                     canCancel = false,
@@ -310,27 +311,27 @@ class LearnedOutcomeDeploymentTest {
             ),
             observationDigest = "excluded-observation-$excludedSalt",
         )
-        val knowledge = PolicyKnowledgeState(
-            perspectivePlayerId = rootPlayer,
+        val knowledge = PlayerKnowledge(
+            viewerId = rootPlayer,
             deckCardCounts = mapOf(
                 rootPlayer to mapOf("Mountain" to 20, "Shock" to 4),
                 opponentPlayer to mapOf("Mountain" to 20, "Shock" to 4),
             ),
             zones = listOf(
-                PolicyZoneKnowledge(rootPlayer, "HAND", 1, mapOf("Shock" to 1)),
-                PolicyZoneKnowledge(opponentPlayer, "HAND", 1),
+                ZoneKnowledge(rootPlayer, "HAND", 1, mapOf("Shock" to 1)),
+                ZoneKnowledge(opponentPlayer, "HAND", 1),
             ),
             knownObjects = listOf(
-                PolicyKnownObject("knowledge-$excludedSalt", rootPlayer, "HAND", "Shock")
+                KnownObject("knowledge-$excludedSalt", rootPlayer, "HAND", "Shock")
             ),
             knownLibraryOrders = listOf(
-                PolicyKnownLibraryOrder(rootPlayer, 0, top = listOf("Mountain"))
+                KnownLibraryOrder(rootPlayer, 0, top = listOf("Mountain"))
             ),
             unlocatedCardCounts = mapOf(
                 rootPlayer to mapOf("Mountain" to 19, "Shock" to 3),
                 opponentPlayer to mapOf("Mountain" to 20, "Shock" to 4),
             ),
-            epistemicallyComplete = true,
+            isComplete = true,
             unsupportedReasons = emptyList(),
             knowledgeDigest = "excluded-knowledge-$excludedSalt",
         )
@@ -338,7 +339,7 @@ class LearnedOutcomeDeploymentTest {
             actingPlayerId = actor,
             observation = observation,
             informationStateDigest = "excluded-information-$excludedSalt",
-            historyCommitment = PolicyHistoryCommitment.replay(history),
+            historyCommitment = HistoryHashChain.replay(history),
             history = history,
             knowledge = knowledge,
             candidates = listOf(choice("candidate-$excludedSalt")),
@@ -353,7 +354,7 @@ class LearnedOutcomeDeploymentTest {
         zone: String,
         excludedSalt: String,
         types: Set<String> = emptySet(),
-    ): PolicyCardView = PolicyCardView(
+    ): ObjectView = ObjectView(
         objectRef = ref,
         definitionId = "excluded-definition-$excludedSalt",
         name = name,
@@ -392,10 +393,10 @@ class LearnedOutcomeDeploymentTest {
     ) : SearchWorld {
         override fun actorToAct(): String? = if (depth == 0) "p0" else "p1"
 
-        override fun decisionContext(view: DecisionView): DecisionSiteRequest {
+        override fun decisionContext(view: MenuRequest): DecisionContext {
             val actor = requireNotNull(actorToAct())
             val information = informationState(actor)
-            return DecisionSiteRequest.capture(actor, expandChoices(), { EpistemicState.capture(information) }, view)
+            return DecisionContext.capture(actor, expandChoices(), { InformationState.capture(information) }, view)
         }
 
         override fun informationState(viewer: String): InformationStateRepresentation {
@@ -407,15 +408,15 @@ class LearnedOutcomeDeploymentTest {
             )
         }
 
-        override fun expandChoices(): PolicyExpansion = if (depth == 0) {
-            PolicyExpansion(
+        override fun expandChoices(): ActionMenu = if (depth == 0) {
+            ActionMenu(
                 candidates = listOf(choice("advance")),
                 isExhaustive = true,
                 estimatedCandidateCount = 1,
                 proposalVersion = "learned-test-v1",
             )
         } else {
-            PolicyExpansion(
+            ActionMenu(
                 candidates = emptyList(),
                 isExhaustive = true,
                 estimatedCandidateCount = 0,

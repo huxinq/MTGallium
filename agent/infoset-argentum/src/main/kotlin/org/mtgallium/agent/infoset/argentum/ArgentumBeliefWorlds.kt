@@ -6,15 +6,15 @@ import com.wingedsheep.engine.state.components.identity.RevealedToComponent
 import com.wingedsheep.sdk.model.EntityId
 import com.wingedsheep.sdk.model.GameRng
 import kotlin.math.ln
-import org.mtgallium.agent.infoset.core.BeliefBatch
+import org.mtgallium.agent.infoset.planning.ParticleSet
 import org.mtgallium.agent.infoset.core.BeliefDiagnostics
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.BeliefWorldSource
+import org.mtgallium.agent.infoset.planning.DeterminizationSampler
 import org.mtgallium.agent.infoset.core.ComponentSeeds
-import org.mtgallium.agent.infoset.core.ParticleBelief
-import org.mtgallium.agent.infoset.core.ParticleRejuvenator
+import org.mtgallium.agent.infoset.planning.ParticleBelief
+import org.mtgallium.agent.infoset.planning.ParticleRejuvenator
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
-import org.mtgallium.agent.infoset.core.SearchWorld
+import org.mtgallium.agent.infoset.planning.SearchWorld
 import org.mtgallium.agent.infoset.core.Weighted
 
 private val SAFE_BELIEF_SUPPORT_CODE = Regex("[A-Z][A-Z0-9_]*")
@@ -153,7 +153,7 @@ class ArgentumKnownDeckBeliefWorldSource(
     private val root: ArgentumSearchWorld,
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "known-deck-construction",
-) : BeliefWorldSource {
+) : DeterminizationSampler {
     private val materializer = KnownDeckWorldMaterializer(root.cardRegistry())
 
     override fun sample(
@@ -161,9 +161,9 @@ class ArgentumKnownDeckBeliefWorldSource(
         knownDecks: Map<String, Map<String, Int>>,
         beliefSeed: Long,
         count: Int,
-    ): BeliefBatch<Weighted<SearchWorld>> {
+    ): ParticleSet<Weighted<SearchWorld>> {
         require(count > 0) { "Particle count must be positive" }
-        val viewerAlias = rootInformation.observation.perspectivePlayerId
+        val viewerAlias = rootInformation.observation.viewerId
         val expected = root.informationState(viewerAlias)
         require(expected.informationStateDigest == rootInformation.informationStateDigest) {
             val differences = buildList {
@@ -180,7 +180,7 @@ class ArgentumKnownDeckBeliefWorldSource(
         val rawDecks = knownDecks.mapKeys { (alias, _) -> players.getValue(alias) }
         val viewer = players.getValue(viewerAlias)
         val pins = pinRememberedObjects(
-            root.authoritativeState(),
+            root.trueState(),
             viewer,
             root.rememberedKnowledgeObjectIds(viewerAlias, expected),
         )
@@ -199,9 +199,9 @@ class ArgentumKnownDeckBeliefWorldSource(
             )) {
                 is KnownDeckWorldMaterializationResult.Materialized -> {
                     // The proposal seed continues to define hidden assignment exactly as before.
-                    // withSampledState domain-separates a future game-chance stream from the same
+                    // withDeterminizedState domain-separates a future game-chance stream from the same
                     // stable particle identity instead of retaining result.state.rng from the referee.
-                    val candidate = root.withSampledState(
+                    val candidate = root.withDeterminizedState(
                         pins.restore(result.state),
                         futureChanceStreamIdentity = seed,
                     )
@@ -275,7 +275,7 @@ class ArgentumKnownDeckBeliefWorldSource(
             "Known-deck sampling",
         )
         val weight = 1.0 / accepted.size
-        return BeliefBatch(
+        return ParticleSet(
             particles = accepted.map { Weighted<SearchWorld>(it, weight) },
             diagnostics = BeliefDiagnostics(
                 mode = BeliefMode.CONSISTENCY_ONLY_V1,
@@ -295,12 +295,12 @@ class ArgentumKnownDeckBeliefWorldSource(
     }
 
     private fun handMarginals(worlds: List<ArgentumSearchWorld>, viewer: EntityId): Map<String, Double> {
-        val opponents = root.authoritativeState().turnOrder.filter { it != viewer }
+        val opponents = root.trueState().turnOrder.filter { it != viewer }
         val counts = mutableMapOf<String, Int>()
         worlds.forEach { world ->
             opponents.forEach { opponent ->
-                world.authoritativeState().getHand(opponent).mapNotNull { id ->
-                    world.authoritativeState().getEntity(id)?.get<CardComponent>()?.name
+                world.trueState().getHand(opponent).mapNotNull { id ->
+                    world.trueState().getEntity(id)?.get<CardComponent>()?.name
                 }.toSet().forEach { name -> counts[name] = counts.getOrDefault(name, 0) + 1 }
             }
         }
@@ -315,6 +315,7 @@ class ArgentumConditionalRejuvenator(
     private val proposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
     private val proposalContext: String = "conditional-rejuvenation",
 ) : ParticleRejuvenator {
+
     override fun rejuvenate(world: SearchWorld, duplicateIndex: Int, seed: Long): SearchWorld {
         require(duplicateIndex > 0) { "Only duplicate particles require rejuvenation" }
         val trusted = world as? ArgentumSearchWorld
@@ -326,7 +327,7 @@ class ArgentumConditionalRejuvenator(
         val rawDecks = knownDecks.mapKeys { (alias, _) -> players.getValue(alias) }
         val viewer = players.getValue(viewerAlias)
         val pins = pinRememberedObjects(
-            trusted.authoritativeState(),
+            trusted.trueState(),
             viewer,
             trusted.rememberedKnowledgeObjectIds(viewerAlias, expected),
         )
@@ -343,7 +344,7 @@ class ArgentumConditionalRejuvenator(
                 futureRng = GameRng.seeded(ComponentSeeds.derive(attemptSeed, "known-deck-future")),
             )) {
                 is KnownDeckWorldMaterializationResult.Materialized -> {
-                    val candidate = trusted.withSampledState(
+                    val candidate = trusted.withDeterminizedState(
                         pins.restore(result.state),
                         futureChanceStreamIdentity = attemptSeed,
                     )

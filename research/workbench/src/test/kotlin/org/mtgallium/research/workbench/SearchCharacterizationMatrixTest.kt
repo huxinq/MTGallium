@@ -28,23 +28,23 @@ import org.mtgallium.agent.argentum.policy.createSearch
 import org.mtgallium.agent.argentum.policy.defaultMonoRedOpponentPolicy
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.argentum.ArgentumResolvedChoice
-import org.mtgallium.agent.infoset.argentum.PerspectiveHistoryEventOrder
-import org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference
-import org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpander
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
+import org.mtgallium.agent.infoset.argentum.HistoryEventOrdering
+import org.mtgallium.agent.infoset.argentum.HistoryObjectReferencing
+import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
+import org.mtgallium.agent.infoset.core.BeliefApproximation
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.DecisionSiteRequest
-import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
-import org.mtgallium.agent.infoset.core.LeafStateSource
-import org.mtgallium.agent.infoset.core.RootActionSelection
-import org.mtgallium.agent.infoset.core.RolloutCutoff
-import org.mtgallium.agent.infoset.core.RolloutTurnHorizon
-import org.mtgallium.agent.infoset.core.RolloutPolicySchedule
+import org.mtgallium.agent.infoset.core.DecisionContext
+import org.mtgallium.agent.infoset.planning.LeafEvaluationConfig
+import org.mtgallium.agent.infoset.planning.LeafEvaluationMethod
+import org.mtgallium.agent.infoset.planning.RootActionSelection
+import org.mtgallium.agent.infoset.planning.RolloutCutoff
+import org.mtgallium.agent.infoset.planning.RolloutTurnHorizon
+import org.mtgallium.agent.infoset.planning.RolloutPolicySchedule
 import org.mtgallium.agent.infoset.core.ActionSelector
 import org.mtgallium.agent.infoset.core.OpponentPolicyDecision
-import org.mtgallium.agent.infoset.core.SearchPrior
-import org.mtgallium.agent.infoset.core.SearchWorld
-import org.mtgallium.agent.infoset.core.SimulationWorldSchedule
+import org.mtgallium.agent.infoset.planning.SearchPrior
+import org.mtgallium.agent.infoset.planning.SearchWorld
+import org.mtgallium.agent.infoset.planning.SimulationWorldSchedule
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -57,8 +57,8 @@ class SearchCharacterizationMatrixTest {
     private data class Scenario(
         val id: String,
         val config: LivePolicyConfig,
-        val order: PerspectiveHistoryEventOrder = PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1,
-        val objects: PerspectiveHistoryObjectReference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1,
+        val order: HistoryEventOrdering = HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1,
+        val objects: HistoryObjectReferencing = HistoryObjectReferencing.LEGACY_SNAPSHOT_V1,
         val throughLive: Boolean = false,
         val priorAndSchedule: Boolean = false,
         val expectedCutoff: RolloutCutoff? = null,
@@ -71,22 +71,22 @@ class SearchCharacterizationMatrixTest {
         val scenarios = listOf(
             Scenario("S1-defaults", LivePolicyConfig()),
             Scenario("S2-V2-order-objects", compact,
-                PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2,
-                PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2, throughLive = true),
+                HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2,
+                HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2, throughLive = true),
             Scenario("S3-conditioned", compact.copy(beliefMode = BeliefMode.POLICY_CONDITIONED_V1)),
-            Scenario("S4-snapshot", compact.copy(beliefArchitecture = BeliefArchitecture.SNAPSHOT_A_V1)),
-            Scenario("S5-privileged", compact.copy(beliefArchitecture = BeliefArchitecture.PRIVILEGED_O_V1)),
+            Scenario("S4-snapshot", compact.copy(beliefArchitecture = BeliefApproximation.SNAPSHOT_A_V1)),
+            Scenario("S5-privileged", compact.copy(beliefArchitecture = BeliefApproximation.PRIVILEGED_O_V1)),
             Scenario("S6-widening", compact.copy(initialExpansionLimit = 1,
                 wideningThresholds = listOf(1), wideningLimits = listOf(2))),
             Scenario("S7-prior-schedule", compact, priorAndSchedule = true),
-            Scenario("S8-evaluate", compact.copy(leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+            Scenario("S8-evaluate", compact.copy(leaf = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT,
                 RolloutCutoff.EVALUATE)), expectedCutoff = RolloutCutoff.EVALUATE),
-            Scenario("S8-quiescence", compact.copy(leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+            Scenario("S8-quiescence", compact.copy(leaf = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT,
                 RolloutCutoff.QUIESCENCE)), expectedCutoff = RolloutCutoff.QUIESCENCE),
-            Scenario("S8-policy-quiescence", compact.copy(leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT,
+            Scenario("S8-policy-quiescence", compact.copy(leaf = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT,
                 RolloutCutoff.POLICY_QUIESCENCE)), expectedCutoff = RolloutCutoff.POLICY_QUIESCENCE),
             Scenario("S9-current-information", compact.copy(leaf = LeafEvaluationConfig(
-                LeafStateSource.CURRENT_INFORMATION_STATE))),
+                LeafEvaluationMethod.CURRENT_INFORMATION_STATE))),
             Scenario("S10-turn-horizon", compact, horizon = RolloutTurnHorizon(1, 64)),
         )
         val deck = publicDeck()
@@ -132,17 +132,17 @@ class SearchCharacterizationMatrixTest {
                 rolloutScheduleCalls += step
                 return UniformOpponentPolicy
             }
-            override fun select(context: DecisionSiteRequest, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision =
+            override fun select(context: DecisionContext, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision =
                 UniformOpponentPolicy.select(context, policySeed, sampleSeed)
         } else null
         val prior = if (scenario.priorAndSchedule) object : SearchPrior {
             override val configurationId = "characterization-prior"
             override val candidateLimit = 64
             override val explorationConstant = 1.0
-            override fun probabilities(context: DecisionSiteRequest): Map<String, Double> {
-                priorCalls += context.expansion.candidates.size
-                val count = context.expansion.candidates.size
-                return context.expansion.candidates.associate { it.signature to 1.0 / count }
+            override fun probabilities(context: DecisionContext): Map<String, Double> {
+                priorCalls += context.menu.candidates.size
+                val count = context.menu.candidates.size
+                return context.menu.candidates.associate { it.signature to 1.0 / count }
             }
         } else null
         val session = SearchPolicySession(world, actor, knownDecks, parameters,
@@ -161,7 +161,7 @@ class SearchCharacterizationMatrixTest {
             val action = when (val resolved = decision.resolved) {
                 is ArgentumResolvedChoice.Action -> resolved.value
                 is ArgentumResolvedChoice.Decision -> SubmitDecision(
-                    requireNotNull(liveWorld.authoritativeStateForHost().pendingDecision).playerId, resolved.value)
+                    requireNotNull(liveWorld.trueState().pendingDecision).playerId, resolved.value)
             }
             assertTrue(live.applyObserved(action).result.accepted)
             assertEquals(1, live.appliedActions)
@@ -251,14 +251,14 @@ class SearchCharacterizationMatrixTest {
         environment.reset(GameConfig(players = listOf(PlayerConfig("A", cards), PlayerConfig("B", cards)),
             seed = 811L, startingHandSize = 7, skipMulligans = true, startingPlayerIndex = 0))
         return ArgentumSearchWorld.create(environment, "matrix-${scenario.id}", 811L, 811L,
-            expander = UnifiedSemanticExpander(actionSpaceProfile = scenario.config.actionSpaceProfile),
+            expander = ArgentumActionGenerator(actionSpaceProfile = scenario.config.actionSpaceProfile),
             knownDecks = knownDecks, historyEventOrder = scenario.order,
             historyObjectReference = scenario.objects)
     }
 
     private fun advanceToChoice(world: ArgentumSearchWorld) {
         repeat(64) {
-            val menu = world.decisionContext().expansion.candidates
+            val menu = world.decisionContext().menu.candidates
             if (menu.size > 1) return
             check(world.step(menu.single()).accepted)
         }
@@ -271,12 +271,12 @@ class SearchCharacterizationMatrixTest {
         }
     }
 
-    private fun stableSearch(result: org.mtgallium.agent.infoset.core.InformationSetSearchResult): JsonObject {
+    private fun stableSearch(result: org.mtgallium.agent.infoset.planning.InformationSetSearchResult): JsonObject {
         val raw = researchJson.encodeToJsonElement(result).jsonObject
         return JsonObject(raw + ("diagnostics" to JsonObject(raw.getValue("diagnostics").jsonObject - "evaluatorNanos")))
     }
 
-    private fun workDigest(result: org.mtgallium.agent.infoset.core.InformationSetSearchResult): String {
+    private fun workDigest(result: org.mtgallium.agent.infoset.planning.InformationSetSearchResult): String {
         val diagnostics = stableSearch(result).getValue("diagnostics").jsonObject
         val counters = diagnostics.filterKeys { it in setOf("searchWorldSteps", "evaluatorCalls",
             "transitionCacheHits", "transitionCacheMisses", "quiescenceForcedPasses",
@@ -310,35 +310,35 @@ class SearchCharacterizationMatrixTest {
             "p1" to mapOf("Characterization Bear" to 40))
         val world = ArgentumSearchWorld.create(environment, "matrix-S3-rebuild", 42613L, 42613L,
             knownDecks = known,
-            historyObjectReference = PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2)
-        fun pass() = PassPriority(requireNotNull(world.authoritativeStateForHost().priorityPlayerId))
+            historyObjectReference = HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2)
+        fun pass() = PassPriority(requireNotNull(world.trueState().priorityPlayerId))
         fun accept(action: GameAction) { check(world.applyObservedAction(action).result.accepted) }
         fun advanceUntil(predicate: () -> Boolean) {
             repeat(256) {
                 if (predicate()) return
-                check(world.authoritativeStateForHost().pendingDecision == null)
+                check(world.trueState().pendingDecision == null)
                 accept(pass())
             }
             error("S3 authored fixture did not reach its declared boundary")
         }
-        advanceUntil { world.authoritativeStateForHost().step == Step.PRECOMBAT_MAIN }
-        val players = world.authoritativeStateForHost().turnOrder
-        fun cast() = CastSpell(requireNotNull(world.authoritativeStateForHost().priorityPlayerId),
-            world.authoritativeStateForHost().getHand(requireNotNull(world.authoritativeStateForHost().priorityPlayerId)).first())
+        advanceUntil { world.trueState().step == Step.PRECOMBAT_MAIN }
+        val players = world.trueState().turnOrder
+        fun cast() = CastSpell(requireNotNull(world.trueState().priorityPlayerId),
+            world.trueState().getHand(requireNotNull(world.trueState().priorityPlayerId)).first())
         accept(cast())
-        advanceUntil { val state = world.authoritativeStateForHost()
+        advanceUntil { val state = world.trueState()
             state.activePlayerId == players[1] && state.step == Step.PRECOMBAT_MAIN &&
                 state.priorityPlayerId == players[1] && state.stack.isEmpty() }
         accept(cast())
-        advanceUntil { world.authoritativeStateForHost().stack.isEmpty() &&
-            world.authoritativeStateForHost().priorityPlayerId == players[1] }
+        advanceUntil { world.trueState().stack.isEmpty() &&
+            world.trueState().priorityPlayerId == players[1] }
         accept(cast())
-        advanceUntil { val state = world.authoritativeStateForHost()
+        advanceUntil { val state = world.trueState()
             state.activePlayerId == players[0] && state.step == Step.DECLARE_ATTACKERS }
-        val attacker = world.authoritativeStateForHost().getBattlefield(players[0]).single()
+        val attacker = world.trueState().getBattlefield(players[0]).single()
         accept(DeclareAttackers(players[0], mapOf(attacker to players[1])))
-        advanceUntil { world.authoritativeStateForHost().step == Step.DECLARE_BLOCKERS }
-        val blockers = world.authoritativeStateForHost().getBattlefield(players[1])
+        advanceUntil { world.trueState().step == Step.DECLARE_BLOCKERS }
+        val blockers = world.trueState().getBattlefield(players[1])
         assertEquals(2, blockers.size)
         val representative = world.expandChoices().candidates.mapNotNull {
             ((world.resolveChoice(it) as? org.mtgallium.agent.infoset.argentum.ArgentumResolvedChoice.Action)?.value

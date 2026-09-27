@@ -17,28 +17,30 @@ snapshot. See [fields][policy-contract].
 
 `InformationStateRepresentation` combines a snapshot, player-visible event history,
 represented exact knowledge, and candidate choices. Its digest includes the
-candidate expansion. `BoundedPolicyInputCompiler.recentEventWindow` selects a
+candidate expansion. `PolicyInputCompiler.recentEventWindow` selects a
 recent-event suffix bounded by event count and serialized bytes, returning a
-`PolicyRecentEventWindow`. See [fields][policy-contract].
+`RecentEventWindow`. See [fields][policy-contract].
 
-### Epistemic state and decision site
+<a id="epistemic-state-and-decision-site"></a>
 
-`EpistemicState` captures one player's represented observation, history, and
+### Information state and decision point
+
+`InformationState` captures one player's represented observation, history, and
 knowledge independently of action enumeration. Despite its name, it describes
-one player, not a [world](terminology.md#game-and-information). `DecisionSite`
+one player, not a [world](terminology.md#game-and-information). `DecisionPoint`
 adds the actor and an ordered menu with completeness and proposal metadata. Its
 `information()` record and digest use that same menu.
 
 ### Captured decision view
 
-`DecisionView` requests menu expansion, optional policy annotations, and an
-expansion limit. `DecisionSiteRequest` captures that demand at one world revision;
+`MenuRequest` requests menu expansion, optional policy annotations, and an
+expansion limit. `DecisionContext` captures that demand at one world revision;
 expensive information projection can remain lazy.
 
 ### Represented knowledge
 
 Exact facts recoverable from declared known decks and the player's visible history
-(`PolicyKnowledgeState`), including remembered card identities and library
+(`PlayerKnowledge`), including remembered card identities and library
 positions. Tracking can be explicitly incomplete after a visible transition the
 adapter cannot represent exactly. See [the knowledge contract][knowledge-contract].
 
@@ -161,7 +163,9 @@ Numeric model state computed from the events delivered to a player so far.
 Each game, player, and branch owns separate memory. Observation updates advance
 its history cursor; repeated scoring does not. See [neural policies](neural-policy.md).
 
-### Factual policy tensors
+<a id="factual-policy-tensors"></a>
+
+### Byte-token policy tensors
 
 Numeric inputs encoding player information, delivered events, and candidate
 actions as normalized UTF-8 bytes. The schema fixes bounds, padding, and masks.

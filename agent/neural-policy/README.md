@@ -1,6 +1,6 @@
-# Factual neural policy tensors
+# Byte-token policy tensors
 
-This module encodes `DecisionSite` and `EpistemicState` values as factual byte
+This module encodes `DecisionPoint` and `InformationState` values as byte-token
 tensors for neural policy training and inference.
 
 The tensor schema and byte vocabulary remain stable for existing models and

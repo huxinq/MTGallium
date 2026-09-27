@@ -15,7 +15,7 @@ class PolicyUtilityContractTest {
         is JsonPrimitive -> element.toString()
         is JsonArray -> element.joinToString(",", "[", "]") { legacyCanonical(it) }
         is JsonObject -> element.entries.sortedBy { it.key }.joinToString(",", "{", "}") {
-            PolicyJson.format.encodeToString(it.key) + ":" + legacyCanonical(it.value)
+            CanonicalJson.format.encodeToString(it.key) + ":" + legacyCanonical(it.value)
         }
     }
 
@@ -28,8 +28,8 @@ class PolicyUtilityContractTest {
         for (values in strings.chunked(512)) {
             val element = JsonObject(values.associateWith { JsonPrimitive(it) })
             val expected = legacyCanonical(element)
-            assertEquals(expected, PolicyJson.canonical(element))
-            assertEquals(PolicyJson.sha256(expected), PolicyJson.digest(element))
+            assertEquals(expected, CanonicalJson.canonical(element))
+            assertEquals(CanonicalJson.sha256(expected), CanonicalJson.digest(element))
         }
     }
 
@@ -47,8 +47,8 @@ class PolicyUtilityContractTest {
         repeat(50) {
             val input = element(3)
             val expected = legacyCanonical(input)
-            assertEquals(expected, PolicyJson.canonical(input))
-            assertEquals(PolicyJson.sha256(expected), PolicyJson.digest(input))
+            assertEquals(expected, CanonicalJson.canonical(input))
+            assertEquals(CanonicalJson.sha256(expected), CanonicalJson.digest(input))
         }
     }
 
@@ -69,7 +69,7 @@ class PolicyUtilityContractTest {
             put("a", kotlinx.serialization.json.JsonPrimitive(2))
             put("z", kotlinx.serialization.json.JsonPrimitive(1))
         }
-        assertEquals(PolicyJson.digest(left), PolicyJson.digest(right))
-        assertFalse(PolicyJson.canonical(left).startsWith("{\"z\""))
+        assertEquals(CanonicalJson.digest(left), CanonicalJson.digest(right))
+        assertFalse(CanonicalJson.canonical(left).startsWith("{\"z\""))
     }
 }

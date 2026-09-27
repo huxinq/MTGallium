@@ -25,7 +25,7 @@ class SimultaneousUntapHistoryTest {
     private data class Fixture(val parent: ArgentumSearchWorld, val action: SemanticChoice,
         val before: GameState, val after: GameState, val events: List<GameEvent>, val players: List<EntityId>, val range: IntRange)
 
-    private fun fixture(mode: PerspectiveHistoryEventOrder = PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2): Fixture {
+    private fun fixture(mode: HistoryEventOrdering = HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2): Fixture {
         val env = GameEnvironment.create(registry)
         env.reset(GameConfig(players = listOf("Alice", "Bob").map {
             PlayerConfig(it, Deck.of(*deck.entries.map { e -> e.key to e.value }.toTypedArray()))
@@ -55,10 +55,10 @@ class SimultaneousUntapHistoryTest {
 
     private fun projections(state: GameState, players: List<EntityId>) = players.associateWith { viewer ->
         val observation = ObservationBuilder(registry).build(state, viewer, emptyList()).observation as TrainingObservation
-        SafeObservationProjector().project(observation)
+        PlayerObservationProjector().project(observation)
     }
-    private fun record(f: Fixture, events: List<GameEvent>, mode: PerspectiveHistoryEventOrder): PerspectiveHistory {
-        val history = PerspectiveHistory(f.players, eventOrder = mode)
+    private fun record(f: Fixture, events: List<GameEvent>, mode: HistoryEventOrdering): InformationStateRecorder {
+        val history = InformationStateRecorder(f.players, eventOrder = mode)
         history.recordEngineEvents(events, f.players.first(), f.before, f.after,
             projections(f.before, f.players), projections(f.after, f.players))
         return history
@@ -72,11 +72,11 @@ class SimultaneousUntapHistoryTest {
         fun <T> permutations(items: List<T>): List<List<T>> = if (items.size <= 1) listOf(items) else
             items.indices.flatMap { i -> permutations(items.filterIndexed { j, _ -> j != i }).map { listOf(items[i]) + it } }
         assertTrue(f.range.count() in 2..4, "Keep exhaustive permutation test bounded")
-        val base = record(f, f.events, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
+        val base = record(f, f.events, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
         for (permutation in permutations(f.range.map { f.events[it] })) {
             val input = f.events.toMutableList().also { list -> f.range.zip(permutation).forEach { (i, e) -> list[i] = e } }.toList()
             val original = input.toList()
-            val actual = record(f, input, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
+            val actual = record(f, input, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
             for (viewer in f.players) {
                 assertEquals(base.forViewer(viewer), actual.forViewer(viewer))
                 assertEquals(base.commitmentForViewer(viewer), actual.commitmentForViewer(viewer))
@@ -84,16 +84,16 @@ class SimultaneousUntapHistoryTest {
             }
             assertEquals(original, input, "Raw engine evidence must not be reordered")
         }
-        val legacy = record(f, f.events, PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1)
-        val swapped = record(f, reversed(f), PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1)
+        val legacy = record(f, f.events, HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1)
+        val swapped = record(f, reversed(f), HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1)
         assertTrue(f.players.all { legacy.commitmentForViewer(it) != swapped.commitmentForViewer(it) },
             "The relational check must expose the original order sensitivity")
     }
 
     @Test fun `native entity-map permutation cannot change the qualified observer history`() {
         val f = fixture()
-        val left = f.parent.withSampledState(f.before, 913L)
-        val right = f.parent.withSampledState(f.before.copy(entities = f.before.entities.entries.reversed().associate { it.toPair() }), 913L)
+        val left = f.parent.withDeterminizedState(f.before, 913L)
+        val right = f.parent.withDeterminizedState(f.before.copy(entities = f.before.entities.entries.reversed().associate { it.toPair() }), 913L)
         for (viewer in listOf("p0", "p1")) assertEquals(left.informationState(viewer), right.informationState(viewer))
         val l = left.stepWithReplayTrace(f.action)
         val r = right.stepWithReplayTrace(f.action)
@@ -102,18 +102,18 @@ class SimultaneousUntapHistoryTest {
             "The test must actually perturb native event order")
         // Fingerprints intentionally preserve serialized map order; compare full structured
         // state with the existing routing-normalized equality instead of weakening state checks.
-        assertTrue(ArgentumStateFingerprint.routingNormalizedEquals(left.authoritativeStateForHost(), right.authoritativeStateForHost()),
-            ArgentumStateFingerprint.firstRoutingNormalizedDifference(left.authoritativeStateForHost(), right.authoritativeStateForHost()).toString())
+        assertTrue(ArgentumStateFingerprint.routingNormalizedEquals(left.trueState(), right.trueState()),
+            ArgentumStateFingerprint.firstRoutingNormalizedDifference(left.trueState(), right.trueState()).toString())
         for (viewer in listOf("p0", "p1")) assertEquals(left.informationState(viewer), right.informationState(viewer))
-        assertEquals(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2, (left.fork() as ArgentumSearchWorld).historyEventOrder)
+        assertEquals(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2, (left.fork() as ArgentumSearchWorld).historyEventOrder)
     }
 
     @Test fun `sequential untaps and ambiguous batches retain their original ordering`() {
         val f = fixture()
         val onlyUntaps = f.range.map { f.events[it] }
         assertNull(qualifiedTurnUntapRange(onlyUntaps, f.before, f.after))
-        val a = record(f, onlyUntaps, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
-        val b = record(f, onlyUntaps.reversed(), PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
+        val a = record(f, onlyUntaps, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
+        val b = record(f, onlyUntaps.reversed(), HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
         assertTrue(f.players.all { a.commitmentForViewer(it) != b.commitmentForViewer(it) })
         val interrupted = f.events.toMutableList().also { it.add(f.range.first + 1, StepChangedEvent(Step.UNTAP)) }
         assertNull(qualifiedTurnUntapRange(interrupted, f.before, f.after))
@@ -121,20 +121,20 @@ class SimultaneousUntapHistoryTest {
         assertNull(qualifiedTurnUntapRange(f.events, f.before, f.after.copy(step = Step.PRECOMBAT_MAIN)))
         val duplicate = f.events.toMutableList().also { it[f.range.last] = it[f.range.first] }
         assertNull(qualifiedTurnUntapRange(duplicate, f.before, f.after))
-        val retained = record(f, duplicate, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
+        val retained = record(f, duplicate, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
         for (viewer in f.players) assertEquals(f.events.size, retained.forViewer(viewer).size, "Do not deduplicate occurrences")
     }
 
     @Test fun `canonicalization preserves which objects untapped and the legacy default`() {
         val f = fixture()
         val missing = f.events.filterIndexed { i, _ -> i != f.range.first }
-        val full = record(f, f.events, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
-        val fewer = record(f, missing, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
+        val full = record(f, f.events, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
+        val fewer = record(f, missing, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
         assertTrue(f.players.all { full.commitmentForViewer(it) != fewer.commitmentForViewer(it) })
-        assertEquals(PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1, PerspectiveHistory(f.players).eventOrder)
-        assertEquals(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2, full.fork().eventOrder)
-        val legacy = fixture(PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1).parent
-        assertEquals(legacy.authoritativeFingerprint(), f.parent.authoritativeFingerprint())
+        assertEquals(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1, InformationStateRecorder(f.players).eventOrder)
+        assertEquals(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2, full.fork().eventOrder)
+        val legacy = fixture(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1).parent
+        assertEquals(legacy.stateFingerprint(), f.parent.stateFingerprint())
         assertNotEquals(legacy.exactRevision(), f.parent.exactRevision())
         assertFalse(legacy.copyDerivedCachesFrom(f.parent))
     }
@@ -144,24 +144,24 @@ class SimultaneousUntapHistoryTest {
         env.reset(GameConfig(players = listOf("Alice", "Bob").map {
             PlayerConfig(it, Deck.of(*deck.entries.map { e -> e.key to e.value }.toTypedArray()))
         }, seed = 711L, startingPlayerIndex = 0, skipMulligans = true, useHandSmoother = false))
-        fun world(mode: PerspectiveHistoryEventOrder) = ArgentumSearchWorld.create(
+        fun world(mode: HistoryEventOrdering) = ArgentumSearchWorld.create(
             env, "reuse-history-mode-fixture", 711L, 711L,
             knownDecks = mapOf("p0" to deck, "p1" to deck), historyEventOrder = mode,
         )
-        val legacy = world(PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1)
-        val v2 = world(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
-        val sameMode = world(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
-        assertEquals(PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1, legacy.historyEventOrder)
-        assertEquals(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2, v2.historyEventOrder)
+        val legacy = world(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1)
+        val v2 = world(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
+        val sameMode = world(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
+        assertEquals(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1, legacy.historyEventOrder)
+        assertEquals(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2, v2.historyEventOrder)
         // All three worlds share one environment state and decision index, so the mode is the only
         // relevant difference; a same-mode copy still succeeds.
-        assertSame(legacy.authoritativeStateForHost(), v2.authoritativeStateForHost())
-        assertEquals(legacy.authoritativeFingerprint(), v2.authoritativeFingerprint())
+        assertSame(legacy.trueState(), v2.trueState())
+        assertEquals(legacy.stateFingerprint(), v2.stateFingerprint())
         assertNotEquals(legacy.exactRevision(), v2.exactRevision())
         assertTrue(v2.copyDerivedCachesFrom(sameMode))
         assertFalse(legacy.copyDerivedCachesFrom(v2))
         assertFalse(v2.copyDerivedCachesFrom(legacy))
-        assertEquals(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2, (v2.fork() as ArgentumSearchWorld).historyEventOrder)
+        assertEquals(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2, (v2.fork() as ArgentumSearchWorld).historyEventOrder)
     }
 
     private data class CleanupDiscardFixture(val fixture: Fixture, val discardChoices: List<SemanticChoice>)
@@ -171,7 +171,7 @@ class SimultaneousUntapHistoryTest {
      * into the next player's automatic untaps, retaining the discard and turn-boundary events.
      */
     private fun cleanupDiscardFixture(
-        mode: PerspectiveHistoryEventOrder = PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2,
+        mode: HistoryEventOrdering = HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2,
         discardIndex: Int = 0,
     ): CleanupDiscardFixture {
         val env = GameEnvironment.create(registry)
@@ -263,10 +263,10 @@ class SimultaneousUntapHistoryTest {
         assertEquals(f.range, qualifiedTurnUntapRange(f.events, f.before, f.after))
         val reversedEvents = reversed(f)
         val rawInput = f.events.toList()
-        val v2 = record(f, f.events, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
-        val v2Permuted = record(f, reversedEvents, PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
-        val legacy = record(f, f.events, PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1)
-        val legacyPermuted = record(f, reversedEvents, PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1)
+        val v2 = record(f, f.events, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
+        val v2Permuted = record(f, reversedEvents, HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
+        val legacy = record(f, f.events, HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1)
+        val legacyPermuted = record(f, reversedEvents, HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1)
         for (viewer in f.players) {
             assertEquals(v2.forViewer(viewer), v2Permuted.forViewer(viewer))
             assertEquals(v2.commitmentForViewer(viewer), v2Permuted.commitmentForViewer(viewer))
@@ -286,13 +286,13 @@ class SimultaneousUntapHistoryTest {
                 )
             }
             val discard = repaired.indexOfFirst {
-                (it.detail as? PerspectiveEventDetail.Causal)?.eventType == "CARDS_DISCARDED"
+                (it.detail as? ObservedEventDetail.Causal)?.eventType == "CARDS_DISCARDED"
             }
             val turn = repaired.indexOfFirst {
-                (it.detail as? PerspectiveEventDetail.TurnStructure)?.activePlayerId != null
+                (it.detail as? ObservedEventDetail.TurnStructure)?.activePlayerId != null
             }
             val untap = repaired.indexOfFirst {
-                (it.detail as? PerspectiveEventDetail.ObjectState)?.change == "UNTAPPED"
+                (it.detail as? ObservedEventDetail.ObjectState)?.change == "UNTAPPED"
             }
             assertTrue(discard >= 0 && turn >= 0 && untap >= 0)
             assertTrue(
@@ -302,15 +302,15 @@ class SimultaneousUntapHistoryTest {
         }
         assertEquals(rawInput, f.events, "Raw engine evidence must not be reordered")
         assertEquals(
-            PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2,
+            HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2,
             v2.fork().eventOrder,
         )
     }
 
     @Test fun `v2 complete player information is invariant under native entity-map permutation`() {
         val f = cleanupDiscardFixture().fixture
-        val left = f.parent.withSampledState(f.before, 913L)
-        val right = f.parent.withSampledState(
+        val left = f.parent.withDeterminizedState(f.before, 913L)
+        val right = f.parent.withDeterminizedState(
             f.before.copy(entities = f.before.entities.entries.reversed().associate { it.toPair() }), 913L,
         )
         val l = left.stepWithReplayTrace(f.action)
@@ -323,11 +323,11 @@ class SimultaneousUntapHistoryTest {
         )
         assertTrue(
             ArgentumStateFingerprint.routingNormalizedEquals(
-                left.authoritativeStateForHost(), right.authoritativeStateForHost(),
+                left.trueState(), right.trueState(),
             ),
         )
         for (viewer in listOf("p0", "p1")) assertEquals(left.informationState(viewer), right.informationState(viewer))
-        assertEquals(PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2, (left.fork() as ArgentumSearchWorld).historyEventOrder)
+        assertEquals(HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2, (left.fork() as ArgentumSearchWorld).historyEventOrder)
     }
 
     @Test fun `v2 prefix guard keeps state-changing prefixes outside normalization`() {
@@ -364,9 +364,9 @@ class SimultaneousUntapHistoryTest {
         val secondWorld = f.parent.fork() as ArgentumSearchWorld
         val secondStep = secondWorld.stepWithReplayTrace(second)
         assertTrue(firstStep.result.accepted && secondStep.result.accepted)
-        fun historyFor(trace: ArgentumReplayStep): Map<EntityId, List<PolicyHistoryEvent>> {
+        fun historyFor(trace: ArgentumReplayStep): Map<EntityId, List<ObservedEvent>> {
             val raw = trace.rawTransitions.single()
-            val history = PerspectiveHistory(f.players, eventOrder = PerspectiveHistoryEventOrder.QUALIFIED_TURN_UNTAP_V2)
+            val history = InformationStateRecorder(f.players, eventOrder = HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2)
             history.recordEngineEvents(
                 raw.events, f.players.first(), raw.beforeState, raw.afterState,
                 projections(raw.beforeState, f.players), projections(raw.afterState, f.players),

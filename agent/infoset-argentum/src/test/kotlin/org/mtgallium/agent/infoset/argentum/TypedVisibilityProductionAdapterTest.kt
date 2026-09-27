@@ -49,9 +49,9 @@ class TypedVisibilityProductionAdapterTest {
         val legal = environment.legalActions()
         val observation = ObservationBuilder(registry).build(state, actor, legal).observation
             as TrainingObservation
-        val safe = SafeObservationProjector().project(observation).observation
+        val safe = PlayerObservationProjector().project(observation).observation
         val library = safe.zones.single { it.ownerId == "p0" && it.zone == Zone.LIBRARY.name }
-        val expansion = UnifiedSemanticExpander().expand(environment, registry, proposalSeed = 701L)
+        val expansion = ArgentumActionGenerator().expand(environment, registry, proposalSeed = 701L)
 
         assertTrue(library.hidden)
         assertEquals(1, library.cards.size)
@@ -79,10 +79,10 @@ class TypedVisibilityProductionAdapterTest {
         val legal = environment.legalActions()
         val observation = ObservationBuilder(registry).build(state, actor, legal).observation
             as TrainingObservation
-        val command = SafeObservationProjector().project(observation).observation.zones.single {
+        val command = PlayerObservationProjector().project(observation).observation.zones.single {
             it.ownerId == "p0" && it.zone == Zone.COMMAND.name
         }
-        val expansion = UnifiedSemanticExpander().expand(environment, registry, proposalSeed = 702L)
+        val expansion = ArgentumActionGenerator().expand(environment, registry, proposalSeed = 702L)
 
         assertFalse(command.hidden)
         assertTrue(command.cards.any { it.name == "Raging Goblin" })
@@ -106,7 +106,7 @@ class TypedVisibilityProductionAdapterTest {
 
         val observation = ObservationBuilder(registry).build(state, actor, emptyList()).observation
             as TrainingObservation
-        val safe = SafeObservationProjector().project(observation).observation
+        val safe = PlayerObservationProjector().project(observation).observation
         val masked = safe.zones.single {
             it.ownerId == "p1" && it.zone == Zone.BATTLEFIELD.name
         }.cards.single { it.faceDown }
@@ -135,8 +135,8 @@ class TypedVisibilityProductionAdapterTest {
         val legalWithMalicious = environment.legalActions() + malicious
         val built = ObservationBuilder(registry).build(environment.state, actor, legalWithMalicious)
         val observation = built.observation as TrainingObservation
-        val projection = SafeObservationProjector().project(observation)
-        val expansion = UnifiedSemanticExpander().expandPrepared(
+        val projection = PlayerObservationProjector().project(observation)
+        val expansion = ArgentumActionGenerator().expandPrepared(
             environment = environment,
             cardRegistry = registry,
             proposalSeed = 703L,

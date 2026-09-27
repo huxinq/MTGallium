@@ -507,7 +507,7 @@ $\mu$ can exploit it.
 \label{sec:settlement}
 
 A settlement is produced in one of four ways, and search records which one,
-its \term{settlement origin} (\code{SearchSettlementOrigin}):
+its \term{settlement origin} (\code{ReturnSource}):
 \begin{itemize}
 \item \emph{Terminal payoff.} The game ended in the simulation.
 \item \emph{Heuristic settlement.} An evaluator scored the leaf. This is either an
@@ -678,17 +678,17 @@ Links point to the public repository.
 Concept & Source\\
 \midrule\endhead
 \bottomrule\endfoot
-Observation snapshot & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyContract.kt}{PlayerObservationSnapshot}, projected by \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/SafeObservationProjector.kt}{SafeObservationProjector}\\
-Player-visible history & \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveHistory.kt}{PerspectiveHistory}, \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PerspectiveEventProjector.kt}{PerspectiveEventProjector}\\
-Knowledge & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/KnowledgeState.kt}{PolicyKnowledgeState}\\
-Information-state representation & \code{InformationStateRepresentation}; without a menu, \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/DecisionSite.kt}{EpistemicState}; with the acting player's menu, \code{DecisionSite}\\
-World & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/SearchBoundary.kt}{SearchWorld}, implemented by \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt}{ArgentumSearchWorld}\\
+Observation snapshot & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyContract.kt}{PlayerObservationSnapshot}, projected by \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/PlayerObservationProjector.kt}{PlayerObservationProjector}\\
+Player-visible history & \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/InformationStateRecorder.kt}{InformationStateRecorder}, \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/EventObservationProjector.kt}{EventObservationProjector}\\
+Knowledge & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/KnowledgeState.kt}{PlayerKnowledge}\\
+Information-state representation & \code{InformationStateRepresentation}; without a menu, \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/DecisionPoint.kt}{InformationState}; with the acting player's menu, \code{DecisionPoint}\\
+World & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/planning/SearchBoundary.kt}{SearchWorld}, implemented by \src{agent/infoset-argentum/src/main/kotlin/org/mtgallium/agent/infoset/argentum/ArgentumSearchWorld.kt}{ArgentumSearchWorld}\\
 Chance stream & \code{futureChanceStreamIdentity} in \code{ArgentumSearchWorld}; \code{SimulationWorldSchedule}\\
 Policy; opponent model & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyCapabilities.kt}{ActionSelector}, \code{ActionDistributionModel}, \code{OpponentPolicy}\\
-Belief, particles & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/BeliefContracts.kt}{BeliefMode} (\code{CONSISTENCY\_ONLY\_V1}, \code{POLICY\_CONDITIONED\_V1}); \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/ParticleBelief.kt}{ParticleBelief}\\
+Belief, particles & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/BeliefContracts.kt}{BeliefMode} (\code{UNIFORM\_CONSISTENT\_DEALS}, \code{OPPONENT\_MODEL\_POSTERIOR}); \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/planning/ParticleBelief.kt}{ParticleBelief}\\
 Evaluators & \code{InformationStateEvaluator}; \code{LeafValueSource.Information}\\
-Search, nodes, UCT & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearch.kt}{InformationSetSearch}; node key \code{PlanningContextKey}\\
-Settlement, origin & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearchContract.kt}{SearchSettlement}, \code{SearchSettlementOrigin}, \code{SearchSettlementCounts}\\
+Search, nodes, UCT & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/planning/InformationSetSearch.kt}{InformationSetSearch}; node key \code{TreeNodeKey}\\
+Settlement, origin & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/planning/InformationSetSearchContract.kt}{SimulationReturn}, \code{ReturnSource}, \code{ReturnSourceCounts}\\
 Leaf and rollout settings & \code{LeafEvaluationConfig}, \code{RolloutTurnHorizon}\\
 Search result & \code{InformationSetSearchResult}\\
 Semantic choice, rebinding & \code{SemanticChoice}; see the \href{https://github.com/huxinq/MTGallium/blob/main/docs/architecture/information-and-decisions.md}{information and decision contracts}\\

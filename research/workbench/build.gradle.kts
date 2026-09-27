@@ -12,7 +12,7 @@ dependencies {
     implementation(project(":agent:infoset-planning"))
     implementation(project(":agent:infoset-argentum"))
     implementation(project(":agent:argentum-policy"))
-    implementation(project(":agent:mono-red-models"))
+    implementation(project(":agent:value-models"))
     implementation("org.mtgallium.argentum:ai")
     implementation("org.mtgallium.argentum:gym")
     implementation("org.mtgallium.argentum:mtg-sdk")
@@ -24,7 +24,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-application { mainClass = "org.mtgallium.research.workbench.ResearchKt" }
+application { mainClass = "org.mtgallium.research.workbench.ResearchCliKt" }
 
 tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir

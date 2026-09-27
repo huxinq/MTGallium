@@ -34,10 +34,10 @@ class NativePolicyReplayTest {
         return "$choice [$candidates]"
     }
 
-    /** Recorded from the Python protocol before the built-in policies moved behind [NativePolicyProvider]. */
+    /** Recorded from the Python protocol before the built-in policies moved behind [JvmPolicyProvider]. */
     @Test fun `built-in policies replay their recorded same-seed games`() {
         val deck = deck()
-        val connection = PythonResearchConnection()
+        val connection = GameServerConnection()
         fun call(command: String, body: JsonObjectBuilder.() -> Unit = {}) =
             connection.request(buildJsonObject { put("command", command); body() })
         val probe = call("create") { putJsonObject("plan") {

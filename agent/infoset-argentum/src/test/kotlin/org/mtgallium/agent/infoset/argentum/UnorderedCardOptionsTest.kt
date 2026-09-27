@@ -12,12 +12,12 @@ import com.wingedsheep.mtg.sets.definitions.por.PortalSet
 import com.wingedsheep.sdk.model.Deck
 import com.wingedsheep.sdk.model.EntityId
 import kotlinx.serialization.json.*
-import org.mtgallium.agent.infoset.core.PolicyDecisionChoiceSpec
+import org.mtgallium.agent.infoset.core.PendingDecisionOptions
 import kotlin.test.*
 
 /** Projection-component fixtures; retained gameplay separately verifies observation assimilation. */
 class UnorderedCardOptionsTest {
-    private fun references(): Pair<SafeReferenceMap, List<EntityId>> {
+    private fun references(): Pair<ObservationReferenceMap, List<EntityId>> {
         val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
         val env = GameEnvironment.create(registry)
         val deck = Deck.of("Raging Goblin" to 60)
@@ -26,15 +26,15 @@ class UnorderedCardOptionsTest {
             skipMulligans = true, useHandSmoother = false))
         val viewer = env.playerIds.first()
         val observation = ObservationBuilder(registry).build(env.state, viewer, emptyList()).observation as TrainingObservation
-        val refs = SafeReferenceMap(observation)
+        val refs = ObservationReferenceMap(observation)
         val ids = env.state.getHand(viewer).take(3)
         assertEquals(3, ids.size)
         assertEquals(3, ids.map(refs::reference).distinct().size)
         return refs to ids
     }
-    private fun project(spec: CardsChoiceSpec, refs: SafeReferenceMap): PolicyDecisionChoiceSpec.Cards =
-        assertIs<PolicyDecisionChoiceSpec.Cards>(SafeObservationProjector().projectChoice(spec, refs))
-    private fun options(spec: PolicyDecisionChoiceSpec.Cards) =
+    private fun project(spec: CardsChoiceSpec, refs: ObservationReferenceMap): PendingDecisionOptions.Cards =
+        assertIs<PendingDecisionOptions.Cards>(PlayerObservationProjector().projectChoice(spec, refs))
+    private fun options(spec: PendingDecisionOptions.Cards) =
         spec.constraints.getValue("options").jsonArray.map { it.jsonPrimitive.content }
 
     @Test fun `unordered options have one canonical representation without input mutation`() {
@@ -58,7 +58,7 @@ class UnorderedCardOptionsTest {
         assertEquals(ids.map(refs::reference), a.options)
         assertEquals(a.options, options(a))
         assertNotEquals(a, b)
-        val projector = SafeObservationProjector()
+        val projector = PlayerObservationProjector()
         assertNotEquals(projector.projectChoice(OrderChoiceSpec(ids), refs),
             projector.projectChoice(OrderChoiceSpec(ids.reversed()), refs))
     }

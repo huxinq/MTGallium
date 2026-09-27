@@ -11,7 +11,7 @@ import org.mtgallium.agent.infoset.core.OpponentPolicyDecisionDiagnostic
 import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementDiagnostic
 import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementEvidenceDisposition
-import org.mtgallium.agent.infoset.core.DecisionSiteRequest
+import org.mtgallium.agent.infoset.core.DecisionContext
 import org.mtgallium.agent.infoset.core.ProbabilityDistribution
 import org.mtgallium.agent.infoset.core.ProbabilityMass
 import org.mtgallium.agent.infoset.core.SemanticChoice
@@ -28,12 +28,12 @@ private val burnNames = setOf("Shock", "Burst Lightning", "Lightning Strike", "S
 /** Safe approximation of Argentum's proactive heuristic using only projected choice metadata. */
 class SemanticHeuristicOpponentPolicy(
     override val id: String = "semantic-argentum-heuristic-v2",
-    override val requiresProductionAdmission: Boolean = true,
+    override val requiresArgentumAiChoiceOnMenu: Boolean = true,
 ) : OpponentPolicy {
     override val distributionIsSeedInvariant: Boolean = true
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification =
         OpponentPolicyBehaviorSpecification(
-            requiresProductionAdmission = requiresProductionAdmission,
+            requiresArgentumAiChoiceOnMenu = requiresArgentumAiChoiceOnMenu,
             implementationId = "semantic-typed-action-intent-score-table-v2",
             declaredId = id,
             distributionIsSeedInvariant = distributionIsSeedInvariant,
@@ -43,11 +43,11 @@ class SemanticHeuristicOpponentPolicy(
             ),
         )
 
-    override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
-        candidateDistribution(context.expansion.candidates)
+    override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
+        candidateDistribution(context.menu.candidates)
 
-    override fun select(context: DecisionSiteRequest, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision = OpponentPolicyDecision(
-        sampleOpponentPolicyDistribution(candidateDistribution(context.expansion.candidates), sampleSeed),
+    override fun select(context: DecisionContext, policySeed: Long, sampleSeed: Long): OpponentPolicyDecision = OpponentPolicyDecision(
+        sampleOpponentPolicyDistribution(candidateDistribution(context.menu.candidates), sampleSeed),
         OpponentPolicyDecisionDiagnostic(declaredPolicyId = id, selectedComponentId = id),
     )
 
@@ -75,7 +75,7 @@ class DeterminizedArgentumHeuristicOpponentPolicy(
     private val replacementEvidenceDisposition: OpponentPolicyReplacementEvidenceDisposition =
         OpponentPolicyReplacementEvidenceDisposition.INVALIDATES_EVIDENCE,
 ) : OpponentPolicy {
-    override val requiresPolicyAnnotations: Boolean = true
+    override val requiresArgentumAiChoiceTag: Boolean = true
     override val distributionIsSeedInvariant: Boolean = fallback.distributionIsSeedInvariant
     override val behaviorSpecification: OpponentPolicyBehaviorSpecification
         get() = OpponentPolicyBehaviorSpecification(
@@ -96,8 +96,8 @@ class DeterminizedArgentumHeuristicOpponentPolicy(
     override fun usedFallback(candidates: List<SemanticChoice>): Boolean =
         candidates.count { ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags } != 1
 
-    override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
-        val candidates = context.expansion.candidates
+    override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
+        val candidates = context.menu.candidates
         val selected = candidates.singleOrNull {
             ARGENTUM_HEURISTIC_CHOICE_TAG_V1 in it.display.policyTags
         } ?: return fallback.distribution(context, policySeed)
@@ -106,9 +106,9 @@ class DeterminizedArgentumHeuristicOpponentPolicy(
         })
     }
 
-    override fun decisionDiagnostic(context: DecisionSiteRequest, chosen: SemanticChoice, policySeed: Long,
+    override fun decisionDiagnostic(context: DecisionContext, chosen: SemanticChoice, policySeed: Long,
         attributionSeed: Long): OpponentPolicyDecisionDiagnostic {
-        val candidates = context.expansion.candidates
+        val candidates = context.menu.candidates
         if (!usedFallback(candidates)) {
             return OpponentPolicyDecisionDiagnostic(
                 declaredPolicyId = id,
@@ -144,8 +144,8 @@ class FaceBurnOpponentPolicy : OpponentPolicy {
             ),
         )
 
-    override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
-        val candidates = context.expansion.candidates
+    override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> {
+        val candidates = context.menu.candidates
         return softScores(candidates) { choice ->
             when {
                 choice.actionIntent.sourceCardName in burnNames &&
@@ -174,8 +174,8 @@ class HoldBurnOpponentPolicy : OpponentPolicy {
             ),
         )
 
-    override fun distribution(context: DecisionSiteRequest, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
-        softScores(context.expansion.candidates) { choice ->
+    override fun distribution(context: DecisionContext, policySeed: Long): ProbabilityDistribution<SemanticChoice> =
+        softScores(context.menu.candidates) { choice ->
         when {
             choice.actionIntent.sourceCardName in burnNames -> 0.5
             choice.actionIntent.kind == SemanticActionIntentKind.PASS_PRIORITY -> 5.0

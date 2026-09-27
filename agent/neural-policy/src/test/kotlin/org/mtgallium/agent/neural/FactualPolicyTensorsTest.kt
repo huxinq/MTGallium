@@ -5,7 +5,7 @@ import org.mtgallium.agent.infoset.core.*
 import kotlin.test.*
 
 class FactualPolicyTensorsTest {
-    private val encoder = FactualPolicyEncoder()
+    private val encoder = InformationStateByteEncoder()
 
     @Test fun `leaf view matches decision bytes and permits a nonacting perspective`() {
         val site = NeuralFixtures.site()
@@ -27,21 +27,21 @@ class FactualPolicyTensorsTest {
 
     @Test fun `identity bookkeeping and presentation never enter factual tokens`() {
         val first = NeuralFixtures.state()
-        val altered = EpistemicState.capture(first.observation.copy(observationDigest = "unrelated-digest",
+        val altered = InformationState.capture(first.observation.copy(observationDigest = "unrelated-digest",
             players = first.observation.players.map { it.copy(name = "seed-and-source-game-label") }),
             first.history, first.historyCommitment, first.knowledge.copy(knowledgeDigest = "different-knowledge-hash"), false)
         val site = NeuralFixtures.site(first)
-        val other = DecisionSite.create(altered, "p0", site.expansion.copy(proposalVersion = "another-proposer", proposalSeed = 87123,
-            candidates = site.expansion.candidates.map { it.copy(display = SemanticChoiceDisplay("oracle answer")) }))
+        val other = DecisionPoint.create(altered, "p0", site.menu.copy(proposalVersion = "another-proposer", proposalSeed = 87123,
+            candidates = site.menu.candidates.map { it.copy(display = SemanticChoiceDisplay("oracle answer")) }))
         assertEquals(encoder.decision(site), encoder.decision(other))
         assertFalse(text(encoder.decision(other).view).contains("seed-and-source-game-label"))
-        val roundtrip = PolicyJson.format.decodeFromJsonElement<InformationStateRepresentation>(
-            PolicyJson.format.encodeToJsonElement(site.information()))
-        assertEquals(encoder.decision(site), encoder.decision(DecisionSite.create(EpistemicState.capture(roundtrip), requireNotNull(roundtrip.actingPlayerId), site.expansion)))
+        val roundtrip = CanonicalJson.format.decodeFromJsonElement<InformationStateRepresentation>(
+            CanonicalJson.format.encodeToJsonElement(site.information()))
+        assertEquals(encoder.decision(site), encoder.decision(DecisionPoint.create(InformationState.capture(roundtrip), requireNotNull(roundtrip.actingPlayerId), site.menu)))
     }
 
     @Test fun `visible reference relabeling preserves relationships without merging distinct creatures`() {
-        fun inputs(prefix: String): FactualDecisionTensors {
+        fun inputs(prefix: String): DecisionByteTokens {
             val a = "$prefix:0"; val b = "$prefix:1"
             val state = NeuralFixtures.state(cards = listOf(NeuralFixtures.card(a), NeuralFixtures.card(b)))
             val actions = listOf(a, b).map { target -> SemanticChoice.create(kind = SemanticChoiceKind.ACTION,
@@ -94,13 +94,13 @@ class FactualPolicyTensorsTest {
     @Test fun `candidate order and completeness remain distinct from padding`() {
         val site = NeuralFixtures.site()
         val first = encoder.decision(site)
-        val reversed = encoder.decision(DecisionSite.create(site.epistemic, site.actor,
-            site.expansion.copy(candidates = site.expansion.candidates.reversed())))
+        val reversed = encoder.decision(DecisionPoint.create(site.epistemic, site.actor,
+            site.menu.copy(candidates = site.menu.candidates.reversed())))
         assertEquals(first.view, reversed.view)
         assertEquals(first.actions.reversed(), reversed.actions)
-        val bounded = encoder.decision(DecisionSite.create(site.epistemic, site.actor,
-            site.expansion.copy(isExhaustive = false, isProfileExhaustive = false,
-                omissionReasons = setOf(PolicyExpansionOmissionReason.RESPONSE_LIMIT))))
+        val bounded = encoder.decision(DecisionPoint.create(site.epistemic, site.actor,
+            site.menu.copy(isExhaustive = false, isProfileExhaustive = false,
+                omissionReasons = setOf(ActionOmissionReason.RESPONSE_LIMIT))))
         assertEquals(first.actions, bounded.actions)
         assertFalse(bounded.rulesExhaustive)
         assertFalse(bounded.profileExhaustive)
@@ -114,7 +114,7 @@ class FactualPolicyTensorsTest {
         assertNotEquals(encoder.event(event, "p0", listOf("p0", "p1")),
             encoder.event(NeuralFixtures.event(0, -1), "p0", listOf("p0", "p1")))
         assertFailsWith<IllegalArgumentException> {
-            encoder.event(event.copy(audience = PolicyAudience(PolicyAudienceScope.ENTITLED_PLAYERS, setOf("p1"))),
+            encoder.event(event.copy(audience = EventAudience(EventAudienceScope.ENTITLED_PLAYERS, setOf("p1"))),
                 "p0", listOf("p0", "p1"))
         }
         assertFailsWith<FactualEncodingException> { encoder.event(event.copy(detail = null), "p0", listOf("p0", "p1")) }
@@ -122,12 +122,12 @@ class FactualPolicyTensorsTest {
 
     @Test fun `input limits refuse instead of truncating and captured bytes are detached`() {
         assertFailsWith<FactualEncodingException> {
-            FactualPolicyEncoder(FactualTensorSchema(maximumViewBytes = 256)).decision(NeuralFixtures.site())
+            InformationStateByteEncoder(ByteTokenSchema(maximumViewBytes = 256)).decision(NeuralFixtures.site())
         }
         val tokens = encoder.decision(NeuralFixtures.site())
         assertFailsWith<UnsupportedOperationException> { (tokens.view as MutableList).clear() }
         assertFailsWith<UnsupportedOperationException> { (tokens.actions[0] as MutableList).clear() }
-        for (name in listOf("org.mtgallium.agent.infoset.core.SearchWorld",
+        for (name in listOf("org.mtgallium.agent.infoset.planning.SearchWorld",
             "org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld")) {
             assertFailsWith<ClassNotFoundException> { Class.forName(name) }
         }
@@ -135,8 +135,8 @@ class FactualPolicyTensorsTest {
 
     @Test fun `qualified remembered occurrences survive across events and align with current view`() {
         fun history(a: String, b: String) = listOf(a, b).mapIndexed { i, key ->
-            PolicyHistoryEvent(i.toLong(), PolicyAudience(PolicyAudienceScope.PUBLIC), "p0", PolicyHistoryEventKind.COUNTER_CHANGE,
-                buildJsonObject { }, PerspectiveEventDetail.CounterChange(objectRef = "history-object:v1:$key",
+            ObservedEvent(i.toLong(), EventAudience(EventAudienceScope.PUBLIC), "p0", ObservedEventKind.COUNTER_CHANGE,
+                buildJsonObject { }, ObservedEventDetail.CounterChange(objectRef = "history-object:v1:$key",
                     objectName = "Raging Goblin", counterType = "+1/+1", delta = 1))
         }
         val same = history("knowledge-object-1", "knowledge-object-1")
@@ -155,23 +155,23 @@ class FactualPolicyTensorsTest {
     }
 
     @Test fun `shuffle allocator names are not features and unsupported transitions refuse`() {
-        fun shuffle(key: String) = PolicyHistoryEvent(0, PolicyAudience(PolicyAudienceScope.PUBLIC), "p0",
-            PolicyHistoryEventKind.SHUFFLE, buildJsonObject { }, PerspectiveEventDetail.Shuffle(playerId = "p0",
+        fun shuffle(key: String) = ObservedEvent(0, EventAudience(EventAudienceScope.PUBLIC), "p0",
+            ObservedEventKind.SHUFFLE, buildJsonObject { }, ObservedEventDetail.Shuffle(playerId = "p0",
                 cause = "shuffle", invalidatedKnowledgeObjectKeys = listOf(key)))
         val first = encoder.event(shuffle("knowledge-object-1"), "p0", listOf("p0", "p1"))
         assertEquals(first, encoder.event(shuffle("knowledge-object-99"), "p0", listOf("p0", "p1")))
         assertFalse(text(first).contains("knowledge-object"))
         assertFailsWith<FactualEncodingException> {
-            encoder.event(shuffle("x").copy(kind = PolicyHistoryEventKind.UNSUPPORTED_VISIBLE_TRANSITION,
-                detail = PerspectiveEventDetail.UnsupportedVisibleTransition(engineEventType = "Unrepresented", reason = "test")),
+            encoder.event(shuffle("x").copy(kind = ObservedEventKind.UNSUPPORTED_VISIBLE_TRANSITION,
+                detail = ObservedEventDetail.UnsupportedVisibleTransition(engineEventType = "Unrepresented", reason = "test")),
                 "p0", listOf("p0", "p1"))
         }
     }
 
     @Test fun `legacy visible deltas admit only recorder facts and never observation hashes`() {
-        fun delta(before: String, after: String) = PolicyHistoryEvent(1,
-            PolicyAudience(PolicyAudienceScope.ENTITLED_PLAYERS, setOf("p0")), null,
-            PolicyHistoryEventKind.PUBLIC_ZONE_TRANSITION, buildJsonObject {
+        fun delta(before: String, after: String) = ObservedEvent(1,
+            EventAudience(EventAudienceScope.ENTITLED_PLAYERS, setOf("p0")), null,
+            ObservedEventKind.PUBLIC_ZONE_TRANSITION, buildJsonObject {
                 put("fromObservation", before); put("toObservation", after)
                 put("zoneDelta", buildJsonArray { add(buildJsonObject {
                     put("key", "p0:HAND:Mountain"); put("before", 1); put("after", 0)
@@ -189,7 +189,7 @@ class FactualPolicyTensorsTest {
                 "p0", listOf("p0", "p1"))
         }
         assertFailsWith<FactualEncodingException> {
-            encoder.event(first.copy(kind = PolicyHistoryEventKind.ACTION), "p0", listOf("p0", "p1"))
+            encoder.event(first.copy(kind = ObservedEventKind.ACTION), "p0", listOf("p0", "p1"))
         }
     }
 
@@ -197,27 +197,27 @@ class FactualPolicyTensorsTest {
 }
 
 internal object NeuralFixtures {
-    fun event(index: Int, cue: Int = 1) = PolicyHistoryEvent(index.toLong(), PolicyAudience(PolicyAudienceScope.PUBLIC),
-        "p1", PolicyHistoryEventKind.RESOURCE_CHANGE, buildJsonObject { },
-        PerspectiveEventDetail.ResourceChange(playerId = "p0", resource = "authored-cue", delta = cue, reason = null))
+    fun event(index: Int, cue: Int = 1) = ObservedEvent(index.toLong(), EventAudience(EventAudienceScope.PUBLIC),
+        "p1", ObservedEventKind.RESOURCE_CHANGE, buildJsonObject { },
+        ObservedEventDetail.ResourceChange(playerId = "p0", resource = "authored-cue", delta = cue, reason = null))
 
-    fun state(history: List<PolicyHistoryEvent> = emptyList(), player: String = "p0",
-        knowledge: PolicyKnowledgeState = PolicyKnowledgeState.empty(player), cards: List<PolicyCardView> = emptyList()): EpistemicState {
+    fun state(history: List<ObservedEvent> = emptyList(), player: String = "p0",
+        knowledge: PlayerKnowledge = PlayerKnowledge.empty(player), cards: List<ObjectView> = emptyList()): InformationState {
         val observation = PlayerObservationSnapshot(player, 1, "TEST", "TEST", "p0", "p0",
-            listOf("p0", "p1").map { id -> PolicyPlayerView(id, "display", 20, 0, 3, 0, 0, PolicyManaPool(), id == "p0", id == "p0", false) },
-            listOf(PolicyZoneView("p0", "BATTLEFIELD", false, cards.size, cards), PolicyZoneView("p1", "HAND", true, 1, emptyList())),
+            listOf("p0", "p1").map { id -> PlayerView(id, "display", 20, 0, 3, 0, 0, ManaPoolView(), id == "p0", id == "p0", false) },
+            listOf(ZoneView("p0", "BATTLEFIELD", false, cards.size, cards), ZoneView("p1", "HAND", true, 1, emptyList())),
             emptyList(), pendingDecision = null, observationDigest = "fixture")
-        return EpistemicState.capture(observation, history, PolicyHistoryCommitment.replay(history), knowledge, false)
+        return InformationState.capture(observation, history, HistoryHashChain.replay(history), knowledge, false)
     }
 
-    fun site(state: EpistemicState = state(), candidates: List<SemanticChoice> = choices()) =
-        DecisionSite.create(state, state.perspectivePlayerId, PolicyExpansion(candidates, true, candidates.size.toLong(), "fixture-v1"))
+    fun site(state: InformationState = state(), candidates: List<SemanticChoice> = choices()) =
+        DecisionPoint.create(state, state.viewerId, ActionMenu(candidates, true, candidates.size.toLong(), "fixture-v1"))
 
     fun choices() = listOf(false, true).map { answer -> SemanticChoice.create(kind = SemanticChoiceKind.DECISION,
         operationFamily = SemanticOperationFamily.DECISION_RESPONSE, display = SemanticChoiceDisplay("Answer"),
         canonicalPayload = buildJsonObject { put("answer", answer) }) }
 
-    fun card(ref: String) = PolicyCardView(objectRef = ref, definitionId = "registry-key", name = "Raging Goblin", zone = "BATTLEFIELD",
+    fun card(ref: String) = ObjectView(objectRef = ref, definitionId = "registry-key", name = "Raging Goblin", zone = "BATTLEFIELD",
         ownerId = "p0", controllerId = "p0", types = setOf("CREATURE"), subtypes = setOf("Goblin"), colors = setOf("RED"),
         keywords = setOf("HASTE"), manaCost = "{R}", manaValue = 1, oracleText = "Haste", power = 1, toughness = 1,
         tapped = false, summoningSick = false, faceDown = false, damageMarked = 0, counters = emptyMap(), attachedTo = null, attachments = emptyList())

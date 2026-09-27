@@ -13,7 +13,7 @@ import com.wingedsheep.sdk.model.GameRng
 import kotlin.test.*
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.SearchWorld
+import org.mtgallium.agent.infoset.planning.SearchWorld
 
 /** Conditioned resampling copies a hypothesis without also copying its future draws and shuffles. */
 class ConditionedFreshChanceTest {
@@ -30,7 +30,7 @@ class ConditionedFreshChanceTest {
             knownDecks = mapOf("p0" to mapOf("Chance Test Bear" to 40), "p1" to mapOf("Chance Test Bear" to 40)))
     }
 
-    private fun SearchWorld.state() = (this as ArgentumSearchWorld).authoritativeStateForHost()
+    private fun SearchWorld.state() = (this as ArgentumSearchWorld).trueState()
 
     @Test fun `a resampled duplicate keeps its hidden state and information but draws a fresh chance stream`() {
         val source = world()

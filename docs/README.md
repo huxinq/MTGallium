@@ -4,7 +4,7 @@
 
 - [Research quick start](research-workbench.md): build, public examples, live
   games from Python, and Kotlin experiments.
-- [Games and CLI reference](research-cli.md): `GamesPlan` settings, native
+- [Games and CLI reference](research-cli.md): `ResearchGameConfig` settings, native
   policies, output files and numerical commands.
 - [Batch research runs](research-runs.md): ladder evaluation, cost measurement,
   resumable game corpora, remote runs and source context.

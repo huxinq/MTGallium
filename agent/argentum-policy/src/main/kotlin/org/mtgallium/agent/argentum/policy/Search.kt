@@ -2,10 +2,10 @@ package org.mtgallium.agent.argentum.policy
 
 import org.mtgallium.agent.infoset.core.ActionDistributionModel
 import org.mtgallium.agent.infoset.core.ActionSelector
-import org.mtgallium.agent.infoset.core.InformationSetSearch
-import org.mtgallium.agent.infoset.core.InformationSetSearchConfig
-import org.mtgallium.agent.infoset.core.LeafValueSource
-import org.mtgallium.agent.monored.MonoRedInformationEvaluator
+import org.mtgallium.agent.infoset.planning.InformationSetSearch
+import org.mtgallium.agent.infoset.planning.InformationSetSearchConfig
+import org.mtgallium.agent.infoset.planning.LeafValueSource
+import org.mtgallium.agent.value.MaterialEvaluator
 
 /** Search with Argentum rollout policies and Mono-Red evaluator defaults. */
 fun createSearch(
@@ -13,8 +13,8 @@ fun createSearch(
     opponentPolicy: ActionDistributionModel = defaultMonoRedOpponentPolicy(),
     rolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
     rolloutOpponentPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
-    valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-    searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
+    valueSource: LeafValueSource = LeafValueSource.Information(MaterialEvaluator()),
+    searchPrior: org.mtgallium.agent.infoset.planning.SearchPrior? = null,
 ): InformationSetSearch = InformationSetSearch(
     config = config,
     opponentPolicy = opponentPolicy,

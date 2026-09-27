@@ -26,7 +26,7 @@ class SemanticFeaturesTest {
         fun payload(first: String, second: String) = buildJsonObject {
             put("ordered", JsonArray(listOf(JsonPrimitive(first), JsonPrimitive(second))))
         }
-        val features = SemanticFeatures(information, 1024, 4096)
+        val features = HashedKernelFeatures(information, 1024, 4096)
         assertNotEquals(features.candidate(choice(payload("alpha", "beta"))),
             features.candidate(choice(payload("beta", "alpha"))))
     }
@@ -40,17 +40,17 @@ class SemanticFeaturesTest {
         val original = choice(clean, "ordinary text")
         val changed = choice(bookkeeping, "a pretend outcome that is not policy information")
         assertNotEquals(original.signature, changed.signature)
-        val features = SemanticFeatures(information, 1024, 4096)
+        val features = HashedKernelFeatures(information, 1024, 4096)
         assertEquals(features.candidate(original), features.candidate(changed))
     }
 
     @Test fun `direct features need no chosen label or invented game identity`() {
         val menu = listOf(choice(buildJsonObject { put("mode", "alpha") }), choice(buildJsonObject { put("mode", "beta") }))
-        val forward = rootActionKernelFeatures(information, menu)
-        val reversed = rootActionKernelFeatures(information, menu.reversed())
+        val forward = kernelActionFeatures(information, menu)
+        val reversed = kernelActionFeatures(information, menu.reversed())
         assertEquals(forward, reversed.reversed())
         assertTrue(forward.isNotEmpty())
-        assertFailsWith<IllegalArgumentException> { rootActionKernelFeatures(information, emptyList()) }
-        assertFailsWith<IllegalArgumentException> { rootActionKernelFeatures(information, stateDimension = 0) }
+        assertFailsWith<IllegalArgumentException> { kernelActionFeatures(information, emptyList()) }
+        assertFailsWith<IllegalArgumentException> { kernelActionFeatures(information, stateDimension = 0) }
     }
 }

@@ -56,13 +56,13 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
-import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
-import org.mtgallium.agent.infoset.core.PolicyAudience
-import org.mtgallium.agent.infoset.core.PolicyAudienceScope
-import org.mtgallium.agent.infoset.core.PolicyHistoryCommitment
-import org.mtgallium.agent.infoset.core.PolicyHistoryEvent
-import org.mtgallium.agent.infoset.core.PolicyHistoryEventKind
+import org.mtgallium.agent.infoset.core.PolicyInputCompiler
+import org.mtgallium.agent.infoset.core.ObservedEventDetail
+import org.mtgallium.agent.infoset.core.EventAudience
+import org.mtgallium.agent.infoset.core.EventAudienceScope
+import org.mtgallium.agent.infoset.core.HistoryHashChain
+import org.mtgallium.agent.infoset.core.ObservedEvent
+import org.mtgallium.agent.infoset.core.ObservedEventKind
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.InformationStateRepresentationDigest
 import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
@@ -146,6 +146,7 @@ class ReachableSemanticTrustTest {
     }
 
     @Test
+
     fun `actual Warp cast exposes its battlefield lifecycle marker to bounded policy input`() {
         val deck = mapOf("Mountain" to 16, "Nova Hellkite" to 4)
         val env = environment(deck)
@@ -169,15 +170,15 @@ class ReachableSemanticTrustTest {
 
         assertTrue(world.step(warp).accepted)
         repeat(6) {
-            if (nova in world.authoritativeState().getBattlefield(player)) return@repeat
+            if (nova in world.trueState().getBattlefield(player)) return@repeat
             val pass = world.expandChoices().candidates.single {
                 it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
             }
             assertTrue(world.step(pass).accepted)
         }
 
-        assertTrue(nova in world.authoritativeState().getBattlefield(player))
-        assertTrue(world.authoritativeState().getEntity(nova)?.has<WarpedComponent>() == true)
+        assertTrue(nova in world.trueState().getBattlefield(player))
+        assertTrue(world.trueState().getEntity(nova)?.has<WarpedComponent>() == true)
         val policyNova = world.informationState("p0").observation.card("p0", "BATTLEFIELD", "Nova Hellkite")
         assertTrue(policyNova.isWarped)
         assertTrue(
@@ -228,6 +229,7 @@ class ReachableSemanticTrustTest {
     }
 
     @Test
+
     fun `Magebane spell memory remains explicit after its cast event leaves bounded history`() {
         val deck = mapOf("Mountain" to 14, "Magebane Lizard" to 1, "Shock" to 5)
         val base = environment(deck)
@@ -292,11 +294,12 @@ class ReachableSemanticTrustTest {
         resolveStack(first)
         resolveStack(second)
 
-        assertEquals(19, first.authoritativeState().lifeTotal(player))
-        assertEquals(18, second.authoritativeState().lifeTotal(player))
+        assertEquals(19, first.trueState().lifeTotal(player))
+        assertEquals(18, second.trueState().lifeTotal(player))
     }
 
     @Test
+
     fun `speed trigger-fired memory changes the next life-loss transition without changing the cast`() {
         val deck = mapOf("Mountain" to 16, "Shock" to 4)
         val base = environment(deck)
@@ -339,8 +342,8 @@ class ReachableSemanticTrustTest {
         resolveStack(first)
         resolveStack(second)
 
-        assertEquals(3, first.authoritativeState().speed(player))
-        assertEquals(2, second.authoritativeState().speed(player))
+        assertEquals(3, first.trueState().speed(player))
+        assertEquals(2, second.trueState().speed(player))
     }
 
     @Test
@@ -408,6 +411,7 @@ class ReachableSemanticTrustTest {
     }
 
     @Test
+
     fun `Temple damage tally survives combat timing and controls later transform legality`() {
         val deck = mapOf("Mountain" to 16, "Ojer Axonil, Deepest Might" to 4)
         val base = environment(deck)
@@ -449,22 +453,22 @@ class ReachableSemanticTrustTest {
         advanceToPostcombatMain(second)
         assertEquals(
             3,
-            first.authoritativeState().getEntity(player)
+            first.trueState().getEntity(player)
                 ?.get<RedNoncombatDamageDealtThisTurnComponent>()?.amount,
         )
         assertEquals(
             4,
-            second.authoritativeState().getEntity(player)
+            second.trueState().getEntity(player)
                 ?.get<RedNoncombatDamageDealtThisTurnComponent>()?.amount,
         )
         val laterFirst = world(
             base,
-            first.authoritativeState().updateEntity(player) { it.with(ManaPoolComponent(red = 3)) },
+            first.trueState().updateEntity(player) { it.with(ManaPoolComponent(red = 3)) },
             "temple-later",
         )
         val laterSecond = world(
             base,
-            second.authoritativeState().updateEntity(player) { it.with(ManaPoolComponent(red = 3)) },
+            second.trueState().updateEntity(player) { it.with(ManaPoolComponent(red = 3)) },
             "temple-later",
         )
         assertFalse(hasActivationFor(laterFirst, ojer, transformAbility))
@@ -473,6 +477,7 @@ class ReachableSemanticTrustTest {
     }
 
     @Test
+
     fun `remembered Temple keeps object continuity when its activated ability transforms it back`() {
         val deck = mapOf("Mountain" to 16, "Ojer Axonil, Deepest Might" to 4)
         val knownDecks = mapOf("p0" to deck, "p1" to deck)
@@ -483,13 +488,13 @@ class ReachableSemanticTrustTest {
             .updateEntity(player) { it.with(RedNoncombatDamageDealtThisTurnComponent(4)) }
         val before = move(state, ojer, ZoneKey(player, Zone.GRAVEYARD))
         fun projections(snapshot: GameState) = base.playerIds.associateWith { viewer ->
-            SafeObservationProjector().project(
+            PlayerObservationProjector().project(
                 com.wingedsheep.gym.contract.ObservationBuilder(registry)
                     .build(snapshot, viewer, emptyList()).observation as com.wingedsheep.gym.contract.TrainingObservation,
             )
         }
         // Reconstruct its publicly observed return as Temple, then use real player decisions.
-        val history = PerspectiveHistory(base.playerIds)
+        val history = InformationStateRecorder(base.playerIds)
         history.recordEngineEvents(
             listOf(com.wingedsheep.engine.core.ZoneChangeEvent(
                 ojer, "Temple of Power", Zone.GRAVEYARD, Zone.BATTLEFIELD, player,
@@ -505,7 +510,7 @@ class ReachableSemanticTrustTest {
         val ability = registry.requireCard("Temple of Power").activatedAbilities.single { !it.isManaAbility }.id
         assertTrue(world.step(activationChoice(world, ojer, ability)).accepted)
         resolveStack(world)
-        assertEquals("Ojer Axonil, Deepest Might", cardName(world.authoritativeState(), ojer))
+        assertEquals("Ojer Axonil, Deepest Might", cardName(world.trueState(), ojer))
         for (viewer in listOf("p0", "p1")) {
             val information = world.informationState(viewer)
             val remembered = information.knowledge.knownObjects.single()
@@ -523,6 +528,7 @@ class ReachableSemanticTrustTest {
     }
 
     @Test
+
     fun `remaining land play is explicit during combat and controls the later main-phase action`() {
         val deck = mapOf("Mountain" to 20)
         val base = environment(deck)
@@ -554,23 +560,24 @@ class ReachableSemanticTrustTest {
         advanceToPostcombatMain(second)
         assertEquals(
             1,
-            first.authoritativeState().getEntity(player)?.get<LandDropsComponent>()?.remaining,
+            first.trueState().getEntity(player)?.get<LandDropsComponent>()?.remaining,
         )
         assertEquals(
             0,
-            second.authoritativeState().getEntity(player)?.get<LandDropsComponent>()?.remaining,
+            second.trueState().getEntity(player)?.get<LandDropsComponent>()?.remaining,
         )
         val play = landChoice(first, mountain)
         assertFalse(hasLandPlayFor(second, mountain))
         assertTrue(first.step(play).accepted)
-        assertTrue(mountain in first.authoritativeState().getBattlefield(player))
+        assertTrue(mountain in first.trueState().getBattlefield(player))
         assertEquals(
             0,
-            first.authoritativeState().getEntity(player)?.get<LandDropsComponent>()?.remaining,
+            first.trueState().getEntity(player)?.get<LandDropsComponent>()?.remaining,
         )
     }
 
     @Test
+
     fun `London mulligan bottom order is private knowledge and a hard world-support constraint`() {
         val deck = mapOf(
             "Mountain" to 4,
@@ -596,13 +603,13 @@ class ReachableSemanticTrustTest {
             check(mulliganDecisions++ < 8)
             val rootActs = world.actorToAct() == "p0"
             val takeRootMulligan = rootActs && rootMulligans < 2
-            val expansion = world.expandChoices()
-            val choice = expansion.candidates.singleOrNull { candidate ->
+            val menu = world.expandChoices()
+            val choice = menu.candidates.singleOrNull { candidate ->
                 val action = (world.resolveChoice(candidate) as? ArgentumResolvedChoice.Action)?.value
                 if (takeRootMulligan) action is TakeMulligan else action is KeepHand
             } ?: error(
                 "No ${if (takeRootMulligan) "take" else "keep"} action for ${world.actorToAct()}: " +
-                    expansion.candidates.joinToString { it.display.label },
+                    menu.candidates.joinToString { it.display.label },
             )
             assertTrue(world.step(choice).accepted)
             if (takeRootMulligan) rootMulligans++
@@ -622,17 +629,17 @@ class ReachableSemanticTrustTest {
         }
         val bottomChoice = bottomExpansion.candidates.firstOrNull { choice ->
             val action = (world.resolveChoice(choice) as? ArgentumResolvedChoice.Action)?.value as? BottomCards
-            action != null && action.cardIds.map { cardName(world.authoritativeState(), it) }.distinct().size == 2
+            action != null && action.cardIds.map { cardName(world.trueState(), it) }.distinct().size == 2
         } ?: error("No distinct two-card bottom action: ${bottomExpansion.candidates.joinToString { it.display.label }}")
         val action = (world.resolveChoice(bottomChoice) as ArgentumResolvedChoice.Action).value as BottomCards
-        val expectedNames = action.cardIds.map { cardName(world.authoritativeState(), it) }
+        val expectedNames = action.cardIds.map { cardName(world.trueState(), it) }
 
         assertTrue(world.step(bottomChoice).accepted)
         val information = world.informationState("p0")
         assertEquals(expectedNames, information.knowledge.knownLibraryOrders.single { it.playerId == "p0" }.bottom)
         assertTrue(world.informationState("p1").knowledge.knownLibraryOrders
             .single { it.playerId == "p0" }.bottom.isEmpty())
-        assertEquals(action.cardIds, world.authoritativeState().getLibrary(env.playerIds[0]).takeLast(2))
+        assertEquals(action.cardIds, world.trueState().getLibrary(env.playerIds[0]).takeLast(2))
 
         val rebuilt = ArgentumKnownDeckBeliefWorldSource(world).sample(
             information,
@@ -642,18 +649,18 @@ class ReachableSemanticTrustTest {
         )
         rebuilt.particles.forEach { weighted ->
             val sampled = weighted.value as ArgentumSearchWorld
-            assertEquals(expectedNames, sampled.authoritativeState().getLibrary(env.playerIds[0])
-                .takeLast(2).map { cardName(sampled.authoritativeState(), it) })
+            assertEquals(expectedNames, sampled.trueState().getLibrary(env.playerIds[0])
+                .takeLast(2).map { cardName(sampled.trueState(), it) })
             assertNull(sampled.knowledgeConsistencyFailure("p0", information))
         }
 
-        val library = world.authoritativeState().getLibrary(env.playerIds[0])
+        val library = world.trueState().getLibrary(env.playerIds[0])
         val reversedBottom = library.dropLast(2) + library.takeLast(2).reversed()
-        val contradictoryState = world.authoritativeState().copy(
-            zones = world.authoritativeState().zones +
+        val contradictoryState = world.trueState().copy(
+            zones = world.trueState().zones +
                 (ZoneKey(env.playerIds[0], Zone.LIBRARY) to reversedBottom),
         )
-        val contradictory = world.withSampledState(contradictoryState, futureChanceStreamIdentity = 9_023L)
+        val contradictory = world.withDeterminizedState(contradictoryState, futureChanceStreamIdentity = 9_023L)
         assertEquals("LIBRARY_BOTTOM_ORDER_MISMATCH", contradictory.knowledgeConsistencyFailure("p0", information))
     }
 
@@ -812,10 +819,10 @@ class ReachableSemanticTrustTest {
 
     private fun resolveStack(world: ArgentumSearchWorld) {
         repeat(24) {
-            if (world.authoritativeState().stack.isEmpty()) return
+            if (world.trueState().stack.isEmpty()) return
             val pass = world.expandChoices().candidates.singleOrNull {
                 it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
-            } ?: error("No priority pass while resolving ${world.authoritativeState().stack}")
+            } ?: error("No priority pass while resolving ${world.trueState().stack}")
             assertTrue(world.step(pass).accepted)
         }
         error("Stack did not resolve within the focused test bound")
@@ -823,17 +830,17 @@ class ReachableSemanticTrustTest {
 
     private fun advanceToPostcombatMain(world: ArgentumSearchWorld) {
         repeat(64) {
-            val state = world.authoritativeState()
+            val state = world.trueState()
             if (state.phase == Phase.POSTCOMBAT_MAIN && state.step == Step.POSTCOMBAT_MAIN) return
-            val expansion = world.expandChoices()
-            val choice = expansion.candidates.singleOrNull {
+            val menu = world.expandChoices()
+            val choice = menu.candidates.singleOrNull {
                 it.operationFamily == SemanticOperationFamily.PASS_PRIORITY
-            } ?: expansion.candidates.singleOrNull {
+            } ?: menu.candidates.singleOrNull {
                 it.operationFamily == SemanticOperationFamily.DECLARE_ATTACKERS &&
                     it.actionIntent.kind == SemanticActionIntentKind.DECLINE_ATTACK
             } ?: error(
                 "No deterministic no-op route through combat at ${state.phase}/${state.step}: " +
-                    expansion.candidates.joinToString { it.display.label },
+                    menu.candidates.joinToString { it.display.label },
             )
             assertTrue(world.step(choice).accepted)
         }
@@ -867,13 +874,13 @@ class ReachableSemanticTrustTest {
         proposalVersion: String,
         cause: String,
     ): InformationStateRepresentation {
-        val causeEvent = PolicyHistoryEvent(
+        val causeEvent = ObservedEvent(
             eventId = 0,
-            audience = PolicyAudience(PolicyAudienceScope.PUBLIC),
+            audience = EventAudience(EventAudienceScope.PUBLIC),
             actor = "p0",
-            kind = PolicyHistoryEventKind.CAUSAL,
+            kind = ObservedEventKind.CAUSAL,
             payload = buildJsonObject { put("fixtureCause", JsonPrimitive(cause)) },
-            detail = PerspectiveEventDetail.Causal(
+            detail = ObservedEventDetail.Causal(
                 eventType = cause,
                 actorId = "p0",
                 sourceName = null,
@@ -882,13 +889,13 @@ class ReachableSemanticTrustTest {
             ),
         )
         val commonSuffix = (1L..65L).map { eventId ->
-            PolicyHistoryEvent(
+            ObservedEvent(
                 eventId = eventId,
-                audience = PolicyAudience(PolicyAudienceScope.PUBLIC),
+                audience = EventAudience(EventAudienceScope.PUBLIC),
                 actor = null,
-                kind = PolicyHistoryEventKind.CAUSAL,
+                kind = ObservedEventKind.CAUSAL,
                 payload = buildJsonObject { put("contextOrdinal", JsonPrimitive(eventId)) },
-                detail = PerspectiveEventDetail.Causal(
+                detail = ObservedEventDetail.Causal(
                     eventType = "VISIBLE_CONTEXT",
                     actorId = null,
                     sourceName = null,
@@ -898,7 +905,7 @@ class ReachableSemanticTrustTest {
             )
         }
         val history = listOf(causeEvent) + commonSuffix
-        val commitment = PolicyHistoryCommitment.replay(history)
+        val commitment = HistoryHashChain.replay(history)
         return information.copy(
             historyCommitment = commitment,
             history = history,
@@ -918,8 +925,8 @@ class ReachableSemanticTrustTest {
         second: InformationStateRepresentation,
         runtimeSemanticIdentityDiffers: Boolean = false,
     ) {
-        val firstWindow = BoundedPolicyInputCompiler.recentEventWindow(first.history)
-        val secondWindow = BoundedPolicyInputCompiler.recentEventWindow(second.history)
+        val firstWindow = PolicyInputCompiler.recentEventWindow(first.history)
+        val secondWindow = PolicyInputCompiler.recentEventWindow(second.history)
         assertEquals(64, firstWindow.events.size)
         assertEquals(firstWindow.events, secondWindow.events)
         assertEquals(2, first.history.size - firstWindow.events.size)

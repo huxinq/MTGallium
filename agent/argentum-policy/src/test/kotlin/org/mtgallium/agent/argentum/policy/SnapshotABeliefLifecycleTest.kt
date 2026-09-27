@@ -11,7 +11,7 @@ import com.wingedsheep.sdk.model.CardDefinition
 import com.wingedsheep.sdk.model.Deck
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
-import org.mtgallium.agent.infoset.core.BeliefArchitecture
+import org.mtgallium.agent.infoset.core.BeliefApproximation
 import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
 import kotlin.test.Test
@@ -23,6 +23,7 @@ import kotlin.test.assertTrue
 /** Pins the retained snapshot backend's rebuild and publication lifecycle. */
 class SnapshotABeliefLifecycleTest {
     @Test
+
     fun `accepted action rebuilds snapshot A and invalidates the published snapshot`() {
         val deck = mapOf("Mountain" to 20)
         val decks = mapOf("p0" to deck, "p1" to deck)
@@ -41,9 +42,9 @@ class SnapshotABeliefLifecycleTest {
         ))
         val world = ArgentumSearchWorld.create(environment, "snapshot-a-lifecycle", 44117L, 44117L,
             knownDecks = decks)
-        val backend = ArgentumParticleBeliefBackend(
+        val backend = ArgentumParticleFilter(
             world, "p0", decks,
-            BeliefConfig(4, BeliefMode.CONSISTENCY_ONLY_V1, BeliefArchitecture.SNAPSHOT_A_V1),
+            BeliefConfig(4, BeliefMode.CONSISTENCY_ONLY_V1, BeliefApproximation.SNAPSHOT_A_V1),
             UniformOpponentPolicy, "snapshot-a-lifecycle", ArgentumBeliefProposalAuditSink.NONE,
         )
         val before = backend.snapshot()
@@ -51,7 +52,7 @@ class SnapshotABeliefLifecycleTest {
         assertEquals(0, backend.lifecycleDiagnostics.rebuildCompletions)
 
         val actor = requireNotNull(world.actorToAct())
-        val priorityPlayer = requireNotNull(world.authoritativeStateForHost().priorityPlayerId)
+        val priorityPlayer = requireNotNull(world.trueState().priorityPlayerId)
         val observed = world.applyObservedAction(PassPriority(priorityPlayer))
         assertTrue(observed.result.accepted)
         backend.advance(world, actor, observed.choice, 0, observed.result.privateToActor)
@@ -63,7 +64,7 @@ class SnapshotABeliefLifecycleTest {
         assertEquals(1, backend.lifecycleDiagnostics.rebuildCompletions)
         assertEquals(0, backend.lifecycleDiagnostics.sequentialUpdateAttempts)
         assertEquals(1L, backend.continuityEpoch)
-        assertEquals(BeliefArchitecture.SNAPSHOT_A_V1, backend.latestDiagnostics.architecture)
+        assertEquals(BeliefApproximation.SNAPSHOT_A_V1, backend.latestDiagnostics.architecture)
         assertEquals(1, backend.latestDiagnostics.resamplingCount)
         assertEquals(world.informationState("p0").knowledge.knowledgeDigest,
             backend.latestDiagnostics.knowledgeDigest)

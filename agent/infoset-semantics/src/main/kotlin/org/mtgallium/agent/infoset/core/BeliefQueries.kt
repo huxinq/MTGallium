@@ -4,15 +4,15 @@ package org.mtgallium.agent.infoset.core
 class BeliefSnapshotToken internal constructor()
 
 class BeliefSnapshotBinding private constructor(
-    val perspectivePlayerId: String,
+    val viewerId: String,
     val epistemicDigest: String,
     val inferenceModelIdentity: String,
     val snapshotToken: BeliefSnapshotToken,
 ) {
     companion object {
-        fun create(perspectivePlayerId: String, epistemicDigest: String, inferenceModelIdentity: String): BeliefSnapshotBinding {
-            require(perspectivePlayerId.isNotBlank() && epistemicDigest.isNotBlank() && inferenceModelIdentity.isNotBlank())
-            return BeliefSnapshotBinding(perspectivePlayerId, epistemicDigest, inferenceModelIdentity, BeliefSnapshotToken())
+        fun create(viewerId: String, epistemicDigest: String, inferenceModelIdentity: String): BeliefSnapshotBinding {
+            require(viewerId.isNotBlank() && epistemicDigest.isNotBlank() && inferenceModelIdentity.isNotBlank())
+            return BeliefSnapshotBinding(viewerId, epistemicDigest, inferenceModelIdentity, BeliefSnapshotToken())
         }
     }
 }

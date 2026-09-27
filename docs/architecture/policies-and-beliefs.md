@@ -20,7 +20,7 @@ widened choices for menus whose smaller expansions are prefixes of larger ones.
 Direct root selection retains its existing menu contract.
 
 An optional `SearchPrior` replaces UCT with PUCT at searching-player nodes. It
-receives only the acting player's captured `DecisionSiteRequest`, scores up to
+receives only the acting player's captured `DecisionContext`, scores up to
 its declared candidate limit, and retains the highest-prior initial expansion
 budget (ties use semantic signatures). Selection uses mean value plus
 `c * prior * sqrt(parent visits + 1) / (edge visits + 1)`; unvisited means are zero.
@@ -35,7 +35,7 @@ players. It does not apply to quiescence.
 
 ## Belief maintenance
 
-`ArgentumParticleBeliefBackend` in `agent/argentum-policy` maintains a player's
+`ArgentumParticleFilter` in `agent/argentum-policy` maintains a player's
 particle population from an `ArgentumSearchWorld`, known decks, configured belief
 mode, opponent action distribution, and private-choice selector. Particle
 weights, order, RNG streams and policy identities belong to the belief state.

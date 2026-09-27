@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.CanonicalJson
 
 /**
  * Rewrites only serializer-typed entity references in an engine action payload.
@@ -17,7 +17,7 @@ import org.mtgallium.agent.infoset.core.PolicyJson
  * occurrence and collision-preserving JSON representation. Ordinary strings that happen to equal
  * an entity id never appear in the typed occurrence set and remain byte-for-byte unchanged.
  */
-internal fun SafeReferenceMap.semanticActionJson(
+internal fun ObservationReferenceMap.semanticActionJson(
     action: GameAction,
     encoded: JsonObject,
 ): JsonObject = maskTypedReferences(
@@ -31,7 +31,7 @@ internal fun SafeReferenceMap.semanticActionJson(
 )
 
 /** Rewrites serializer-typed entity references and contract-local combat edge references. */
-internal fun SafeReferenceMap.semanticDecisionResponseJson(
+internal fun ObservationReferenceMap.semanticDecisionResponseJson(
     response: DecisionResponse,
     encoded: JsonObject,
 ): JsonObject {
@@ -56,7 +56,7 @@ internal fun SafeReferenceMap.semanticDecisionResponseJson(
  * that contract, a repeated id, or a payload shape that disagrees with the serialized response is
  * refused explicitly rather than bound to an arbitrary native edge.
  */
-private fun SafeReferenceMap.combatResolutionResponseEdges(
+private fun ObservationReferenceMap.combatResolutionResponseEdges(
     response: CombatResolutionResponse,
     encoded: JsonObject,
 ): JsonObject {
@@ -83,7 +83,7 @@ private fun SafeReferenceMap.combatResolutionResponseEdges(
     })
 }
 
-private fun SafeReferenceMap.maskTypedReferences(
+private fun ObservationReferenceMap.maskTypedReferences(
     encoded: JsonObject,
     occurrences: List<TypedEntityReferences.Occurrence>,
 ): JsonObject {
@@ -95,7 +95,7 @@ private fun SafeReferenceMap.maskTypedReferences(
     return rewriteTypedNode(encoded, normalized) as JsonObject
 }
 
-private fun SafeReferenceMap.rewriteTypedNode(
+private fun ObservationReferenceMap.rewriteTypedNode(
     node: JsonElement,
     occurrences: List<TypedEntityReferences.Occurrence>,
 ): JsonElement {
@@ -139,7 +139,7 @@ private fun SafeReferenceMap.rewriteTypedNode(
     }
 }
 
-private fun SafeReferenceMap.rewriteTypedMap(
+private fun ObservationReferenceMap.rewriteTypedMap(
     node: JsonObject,
     occurrences: List<TypedEntityReferences.Occurrence>,
 ): JsonObject {
@@ -173,7 +173,7 @@ private fun SafeReferenceMap.rewriteTypedMap(
         if (equivalentEntries.size == 1) {
             converted[semanticKey] = equivalentEntries.single().value
         } else {
-            equivalentEntries.map(Entry::value).sortedBy(PolicyJson::canonical)
+            equivalentEntries.map(Entry::value).sortedBy(CanonicalJson::canonical)
                 .forEachIndexed { index, value -> converted["$semanticKey#$index"] = value }
         }
     }

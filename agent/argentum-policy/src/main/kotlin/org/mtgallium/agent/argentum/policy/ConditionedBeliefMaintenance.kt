@@ -2,7 +2,7 @@ package org.mtgallium.agent.argentum.policy
 
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.BeliefMode
-import org.mtgallium.agent.infoset.core.ParticleRejuvenator
+import org.mtgallium.agent.infoset.planning.ParticleRejuvenator
 
 /**
  * The observed-action likelihood uses the conditioning policy's declared decision view, and each
@@ -23,13 +23,13 @@ internal fun conditionedBeliefMaintenanceIdentity(mode: BeliefMode): String? =
  */
 internal val FRESH_CHANCE_COPY = ParticleRejuvenator { world, _, seed ->
     (world as? ArgentumSearchWorld ?: error("Conditioned resampling received an untrusted world implementation"))
-        .forkForHypotheticalSearch(seed)
+        .forkWithChanceStream(seed)
 }
 
 /** A non-game stop: no qualified reconstruction of the current action-conditioned population exists. */
 class ConditionedBeliefReconstructionRequired(
     val reasonCode: String,
-    val exactObservationFailure: org.mtgallium.agent.infoset.core.ExactObservationFailureReport? = null,
+    val exactObservationFailure: org.mtgallium.agent.infoset.planning.ExactObservationFailureReport? = null,
     cause: Throwable? = null,
 ) : IllegalStateException(
     "CONDITIONED_BELIEF_RECONSTRUCTION_REQUIRED:$reasonCode", cause,

@@ -1,6 +1,6 @@
 # Neural policy training
 
-`tools/neural_policy` provides PyTorch models over factual byte inputs,
+`tools/neural_policy` provides PyTorch models over byte-token inputs,
 whole-sequence training, checkpoints, and optional ONNX export. The provided
 models are current-view, GRU, and bounded-attention policies.
 
@@ -40,7 +40,7 @@ algorithms are the default; `--nondeterministic` opts out.
 ## Data and objective
 
 The input is ordinary JSON with `version: 1`, objective
-`equal-group-weighted-decision-cross-entropy-v1`, a factual-byte `schema`, and
+`equal-group-weighted-decision-cross-entropy-v1`, a byte-token `schema`, and
 `episodes`. Each episode supplies its `episodeId`, `groupId`, `playerId`, `split`,
 `events`, and `decisions`. `TRAIN` episodes supply optimizer batches; optional
 readouts report `TRAIN` and `EVALUATION` separately.

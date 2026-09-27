@@ -17,16 +17,16 @@ class KnowledgeStateTest {
     @Test
     fun `transform updates only an existing continuity handle and preserves legacy object-state bytes`() {
         val legacy = """{"type":"object_state","schemaVersion":1,"objectRef":"view-ref","objectName":"Mountain","change":"TRANSFORMED","value":null,"relatedObjectRefs":[]}"""
-        val oldDetail = PolicyJson.format.decodeFromString<PerspectiveEventDetail>(legacy)
-        assertEquals(legacy, PolicyJson.format.encodeToString(PerspectiveEventDetail.serializer(), oldDetail))
-        val remembered = event(1, PerspectiveEventDetail.ZoneChange(
+        val oldDetail = CanonicalJson.format.decodeFromString<ObservedEventDetail>(legacy)
+        assertEquals(legacy, CanonicalJson.format.encodeToString(ObservedEventDetail.serializer(), oldDetail))
+        val remembered = event(1, ObservedEventDetail.ZoneChange(
             ownerId = "p1", fromZone = "HAND", toZone = "GRAVEYARD",
             cardName = "Shock", knowledgeObjectKey = "remembered",
         ))
-        fun reduce(detail: PerspectiveEventDetail) = PolicyKnowledgeReducer.reduce(
+        fun reduce(detail: ObservedEventDetail) = KnowledgeReplay.reduce(
             "p0", decks, observation(), listOf(remembered, event(2, detail)),
         ).knownObjects.single()
-        val transform = (oldDetail as PerspectiveEventDetail.ObjectState).copy(
+        val transform = (oldDetail as ObservedEventDetail.ObjectState).copy(
             schemaVersion = PERSPECTIVE_EVENT_SCHEMA_V2, knowledgeObjectKey = "remembered",
         )
         assertEquals("Mountain", reduce(transform).cardName)
@@ -40,9 +40,9 @@ class KnowledgeStateTest {
 
     @Test
     fun `current visible cards are exact and hidden remainder preserves deck conservation`() {
-        val knowledge = PolicyKnowledgeReducer.reduce("p0", decks, observation(), emptyList())
+        val knowledge = KnowledgeReplay.reduce("p0", decks, observation(), emptyList())
 
-        assertTrue(knowledge.epistemicallyComplete)
+        assertTrue(knowledge.isComplete)
         assertEquals(mapOf("Mountain" to 1, "Shock" to 1), knowledge.zone("p0", "HAND").knownCardCounts)
         assertEquals(18, knowledge.unlocatedCardCounts.getValue("p0").getValue("Mountain"))
         assertEquals(1, knowledge.unlocatedCardCounts.getValue("p0").getValue("Shock"))
@@ -54,7 +54,7 @@ class KnowledgeStateTest {
     fun `shuffle invalidates order knowledge but retains count knowledge`() {
         val looked = event(
             1,
-            PerspectiveEventDetail.Look(
+            ObservedEventDetail.Look(
                 ownerId = "p0",
                 zone = "LIBRARY",
                 cardNames = listOf("Shock", "Mountain"),
@@ -62,8 +62,8 @@ class KnowledgeStateTest {
                 fromTop = true,
             ),
         )
-        val before = PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(looked))
-        val after = PolicyKnowledgeReducer.reduce(
+        val before = KnowledgeReplay.reduce("p0", decks, observation(), listOf(looked))
+        val after = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
@@ -71,7 +71,7 @@ class KnowledgeStateTest {
                 looked,
                 event(
                     2,
-                    PerspectiveEventDetail.Shuffle(playerId = "p0", cause = "SPELL_OR_ABILITY"),
+                    ObservedEventDetail.Shuffle(playerId = "p0", cause = "SPELL_OR_ABILITY"),
                 ),
             ),
         )
@@ -85,14 +85,14 @@ class KnowledgeStateTest {
 
     @Test
     fun `unsupported visible transition fails the completeness claim closed`() {
-        val knowledge = PolicyKnowledgeReducer.reduce(
+        val knowledge = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.UnsupportedVisibleTransition(
+                    ObservedEventDetail.UnsupportedVisibleTransition(
                         engineEventType = "MysteryEvent",
                         reason = "no safe projector",
                     ),
@@ -100,7 +100,7 @@ class KnowledgeStateTest {
             ),
         )
 
-        assertFalse(knowledge.epistemicallyComplete)
+        assertFalse(knowledge.isComplete)
         assertEquals(listOf("MysteryEvent: no safe projector"), knowledge.unsupportedReasons)
     }
 
@@ -108,7 +108,7 @@ class KnowledgeStateTest {
     fun `a legitimately revealed opponent card remains exact across later unrelated events`() {
         val reveal = event(
             1,
-            PerspectiveEventDetail.Reveal(
+            ObservedEventDetail.Reveal(
                 ownerId = "p1",
                 zone = "HAND",
                 cardNames = listOf("Shock"),
@@ -117,7 +117,7 @@ class KnowledgeStateTest {
         )
         val later = event(
             2,
-            PerspectiveEventDetail.Causal(
+            ObservedEventDetail.Causal(
                 eventType = "SPELL_RESOLVED",
                 actorId = "p0",
                 sourceName = "Mountain",
@@ -125,7 +125,7 @@ class KnowledgeStateTest {
             ),
         )
 
-        val knowledge = PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(reveal, later))
+        val knowledge = KnowledgeReplay.reduce("p0", decks, observation(), listOf(reveal, later))
 
         assertEquals(mapOf("Shock" to 1), knowledge.zone("p1", "HAND").knownCardCounts)
         assertEquals(1, knowledge.unlocatedCardCounts.getValue("p1").getValue("Shock"))
@@ -134,15 +134,15 @@ class KnowledgeStateTest {
 
     @Test
     fun `same visible snapshot may retain strategically different legitimate knowledge`() {
-        val withoutReveal = PolicyKnowledgeReducer.reduce("p0", decks, observation(), emptyList())
-        val withReveal = PolicyKnowledgeReducer.reduce(
+        val withoutReveal = KnowledgeReplay.reduce("p0", decks, observation(), emptyList())
+        val withReveal = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.Reveal(
+                    ObservedEventDetail.Reveal(
                         ownerId = "p1",
                         zone = "HAND",
                         cardNames = listOf("Shock"),
@@ -159,14 +159,14 @@ class KnowledgeStateTest {
 
     @Test
     fun `history differences with no epistemic effect reduce to the same knowledge state`() {
-        val first = PolicyKnowledgeReducer.reduce(
+        val first = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.Causal(
+                    ObservedEventDetail.Causal(
                         eventType = "ABILITY_RESOLVED",
                         actorId = "p0",
                         sourceName = "Hired Claw",
@@ -175,14 +175,14 @@ class KnowledgeStateTest {
                 ),
             ),
         )
-        val second = PolicyKnowledgeReducer.reduce(
+        val second = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.TurnStructure(
+                    ObservedEventDetail.TurnStructure(
                         turnNumber = 1,
                         phase = "BEGINNING",
                         step = "UPKEEP",
@@ -198,14 +198,14 @@ class KnowledgeStateTest {
 
     @Test
     fun `drawing a legitimately known top card moves that knowledge into hand`() {
-        val knowledge = PolicyKnowledgeReducer.reduce(
+        val knowledge = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.Look(
+                    ObservedEventDetail.Look(
                         ownerId = "p1",
                         zone = "LIBRARY",
                         cardNames = listOf("Shock", "Mountain"),
@@ -216,7 +216,7 @@ class KnowledgeStateTest {
                 ),
                 event(
                     2,
-                    PerspectiveEventDetail.Draw(
+                    ObservedEventDetail.Draw(
                         playerId = "p1",
                         count = 1,
                         knownCardNames = listOf("Shock"),
@@ -236,7 +236,7 @@ class KnowledgeStateTest {
         val history = listOf(
             event(
                 1,
-                PerspectiveEventDetail.Look(
+                ObservedEventDetail.Look(
                     ownerId = "p1",
                     zone = "LIBRARY",
                     cardNames = listOf("Shock", "Mountain"),
@@ -247,7 +247,7 @@ class KnowledgeStateTest {
             ),
             event(
                 2,
-                PerspectiveEventDetail.Draw(
+                ObservedEventDetail.Draw(
                     playerId = "p1",
                     count = 1,
                     knownCardNames = listOf("Shock"),
@@ -256,33 +256,33 @@ class KnowledgeStateTest {
             ),
             event(
                 3,
-                PerspectiveEventDetail.Shuffle(playerId = "p1", cause = "SPELL_OR_ABILITY"),
+                ObservedEventDetail.Shuffle(playerId = "p1", cause = "SPELL_OR_ABILITY"),
             ),
         )
-        val accumulator = PolicyKnowledgeAccumulator()
+        val accumulator = KnowledgeTracker()
 
         history.forEachIndexed { index, next ->
             accumulator.append(next)
             val incremental = accumulator.snapshot("p0", decks, observation())
-            val replayed = PolicyKnowledgeReducer.reduce("p0", decks, observation(), history.take(index + 1))
+            val replayed = KnowledgeReplay.reduce("p0", decks, observation(), history.take(index + 1))
             assertEquals(replayed, incremental)
         }
         assertEquals(
-            PolicyKnowledgeReducer.reduce("p0", decks, observation(), history),
+            KnowledgeReplay.reduce("p0", decks, observation(), history),
             accumulator.fork().snapshot("p0", decks, observation()),
         )
     }
 
     @Test
     fun `ambiguous hidden movement fails exact reduction closed instead of tracking a raw object`() {
-        val knowledge = PolicyKnowledgeReducer.reduce(
+        val knowledge = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.Reveal(
+                    ObservedEventDetail.Reveal(
                         ownerId = "p1",
                         zone = "HAND",
                         cardNames = listOf("Shock"),
@@ -291,7 +291,7 @@ class KnowledgeStateTest {
                 ),
                 event(
                     2,
-                    PerspectiveEventDetail.ZoneChange(
+                    ObservedEventDetail.ZoneChange(
                         ownerId = "p1",
                         fromZone = "HAND",
                         toZone = "LIBRARY",
@@ -301,21 +301,21 @@ class KnowledgeStateTest {
             ),
         )
 
-        assertFalse(knowledge.epistemicallyComplete)
+        assertFalse(knowledge.isComplete)
         assertTrue(knowledge.knownObjects.isEmpty())
         assertTrue(knowledge.unsupportedReasons.single().contains("requires a location constraint"))
     }
 
     @Test
     fun `shuffle invalidates object-specific library knowledge but retains deck conservation`() {
-        val knowledge = PolicyKnowledgeReducer.reduce(
+        val knowledge = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 event(
                     1,
-                    PerspectiveEventDetail.Look(
+                    ObservedEventDetail.Look(
                         ownerId = "p1",
                         zone = "LIBRARY",
                         cardNames = listOf("Shock"),
@@ -324,11 +324,11 @@ class KnowledgeStateTest {
                         fromTop = true,
                     ),
                 ),
-                event(2, PerspectiveEventDetail.Shuffle(playerId = "p1", cause = "EFFECT")),
+                event(2, ObservedEventDetail.Shuffle(playerId = "p1", cause = "EFFECT")),
             ),
         )
 
-        assertTrue(knowledge.epistemicallyComplete)
+        assertTrue(knowledge.isComplete)
         assertTrue(knowledge.knownObjects.none { it.ownerId == "p1" && it.zone == "LIBRARY" })
         assertTrue(knowledge.order("p1").top.isEmpty())
         assertEquals(decks.getValue("p1").getValue("Shock"), knowledge.unlocatedCardCounts.getValue("p1")["Shock"])
@@ -336,12 +336,12 @@ class KnowledgeStateTest {
 
     @Test
     fun `older zone and shuffle records default to their original current-object behavior`() {
-        val zoneChange = PolicyJson.format.decodeFromString<PerspectiveEventDetail>(
+        val zoneChange = CanonicalJson.format.decodeFromString<ObservedEventDetail>(
             """{"type":"zone_change","schemaVersion":1,"ownerId":"p1","fromZone":"HAND","toZone":"GRAVEYARD","cardName":"Shock","knowledgeObjectKey":"known-shock"}""",
-        ) as PerspectiveEventDetail.ZoneChange
-        val shuffle = PolicyJson.format.decodeFromString<PerspectiveEventDetail>(
+        ) as ObservedEventDetail.ZoneChange
+        val shuffle = CanonicalJson.format.decodeFromString<ObservedEventDetail>(
             """{"type":"shuffle","schemaVersion":1,"playerId":"p1","cause":"EFFECT"}""",
-        ) as PerspectiveEventDetail.Shuffle
+        ) as ObservedEventDetail.Shuffle
 
         assertTrue(zoneChange.continuesAsCurrentObject)
         assertEquals(emptyList(), shuffle.invalidatedKnowledgeObjectKeys)
@@ -349,7 +349,7 @@ class KnowledgeStateTest {
         assertEquals(PERSPECTIVE_EVENT_SCHEMA_V1, shuffle.schemaVersion)
         assertEquals(
             PERSPECTIVE_EVENT_SCHEMA_V2,
-            PerspectiveEventDetail.ZoneChange(
+            ObservedEventDetail.ZoneChange(
                 ownerId = "p1",
                 fromZone = "HAND",
                 toZone = "GRAVEYARD",
@@ -358,10 +358,10 @@ class KnowledgeStateTest {
         )
         assertEquals(
             PERSPECTIVE_EVENT_SCHEMA_V2,
-            PerspectiveEventDetail.Shuffle(playerId = "p1", cause = "EFFECT").schemaVersion,
+            ObservedEventDetail.Shuffle(playerId = "p1", cause = "EFFECT").schemaVersion,
         )
 
-        val knowledge = PolicyKnowledgeReducer.reduce(
+        val knowledge = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
@@ -376,7 +376,7 @@ class KnowledgeStateTest {
         val history = listOf(
             event(
                 1,
-                PerspectiveEventDetail.ZoneChange(
+                ObservedEventDetail.ZoneChange(
                     ownerId = "p1",
                     fromZone = "LIBRARY",
                     toZone = "HAND",
@@ -386,7 +386,7 @@ class KnowledgeStateTest {
             ),
             event(
                 2,
-                PerspectiveEventDetail.Reveal(
+                ObservedEventDetail.Reveal(
                     ownerId = "p1",
                     zone = "HAND",
                     cardNames = listOf("Mountain"),
@@ -395,24 +395,24 @@ class KnowledgeStateTest {
             ),
             event(
                 3,
-                PerspectiveEventDetail.Shuffle(
+                ObservedEventDetail.Shuffle(
                     playerId = "p1",
                     cause = "MULLIGAN",
                     invalidatedKnowledgeObjectKeys = listOf("mulligan-hand-key"),
                 ),
             ),
         )
-        val accumulator = PolicyKnowledgeAccumulator()
+        val accumulator = KnowledgeTracker()
 
         history.forEachIndexed { index, next ->
             accumulator.append(next)
             assertEquals(
-                PolicyKnowledgeReducer.reduce("p0", decks, observation(), history.take(index + 1)),
+                KnowledgeReplay.reduce("p0", decks, observation(), history.take(index + 1)),
                 accumulator.snapshot("p0", decks, observation()),
             )
         }
 
-        val knowledge = PolicyKnowledgeReducer.reduce("p0", decks, observation(), history)
+        val knowledge = KnowledgeReplay.reduce("p0", decks, observation(), history)
         assertEquals(listOf("unrelated-hand-key"), knowledge.knownObjects.map { it.knowledgeObjectKey })
     }
 
@@ -421,7 +421,7 @@ class KnowledgeStateTest {
         val history = listOf(
             event(
                 1,
-                PerspectiveEventDetail.ZoneChange(
+                ObservedEventDetail.ZoneChange(
                     ownerId = "p1",
                     fromZone = "HAND",
                     toZone = "BATTLEFIELD",
@@ -431,7 +431,7 @@ class KnowledgeStateTest {
             ),
             event(
                 2,
-                PerspectiveEventDetail.ZoneChange(
+                ObservedEventDetail.ZoneChange(
                     ownerId = "p1",
                     fromZone = "HAND",
                     toZone = "BATTLEFIELD",
@@ -441,7 +441,7 @@ class KnowledgeStateTest {
             ),
             event(
                 3,
-                PerspectiveEventDetail.ZoneChange(
+                ObservedEventDetail.ZoneChange(
                     ownerId = "p1",
                     fromZone = "BATTLEFIELD",
                     toZone = "GRAVEYARD",
@@ -451,13 +451,13 @@ class KnowledgeStateTest {
                 ),
             ),
         )
-        val knowledge = PolicyKnowledgeReducer.reduce(
+        val knowledge = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             history,
         )
-        val accumulator = PolicyKnowledgeAccumulator().also { it.append(history) }
+        val accumulator = KnowledgeTracker().also { it.append(history) }
 
         assertEquals(knowledge, accumulator.snapshot("p0", decks, observation()))
         assertEquals(listOf("surviving-object-key"), knowledge.knownObjects.map { it.knowledgeObjectKey })
@@ -468,7 +468,7 @@ class KnowledgeStateTest {
     fun `private London mulligan choice records and shuffle invalidates known bottom order`() {
         val bottomChoice = event(
             1,
-            PerspectiveEventDetail.Choice(
+            ObservedEventDetail.Choice(
                 semanticSignature = "bottom-order",
                 choiceKind = SemanticChoiceKind.ACTION.name,
                 operationFamily = SemanticOperationFamily.MULLIGAN,
@@ -479,14 +479,14 @@ class KnowledgeStateTest {
             ),
             actor = "p0",
         )
-        val before = PolicyKnowledgeReducer.reduce("p0", decks, observation(), listOf(bottomChoice))
-        val after = PolicyKnowledgeReducer.reduce(
+        val before = KnowledgeReplay.reduce("p0", decks, observation(), listOf(bottomChoice))
+        val after = KnowledgeReplay.reduce(
             "p0",
             decks,
             observation(),
             listOf(
                 bottomChoice,
-                event(2, PerspectiveEventDetail.Shuffle(playerId = "p0", cause = "SPELL_OR_ABILITY")),
+                event(2, ObservedEventDetail.Shuffle(playerId = "p0", cause = "SPELL_OR_ABILITY")),
             ),
         )
 
@@ -499,47 +499,47 @@ class KnowledgeStateTest {
         assertTrue(after.knownObjects.none { it.ownerId == "p0" && it.zone == "LIBRARY" })
     }
 
-    private fun event(id: Long, detail: PerspectiveEventDetail, actor: String? = null) = PolicyHistoryEvent(
+    private fun event(id: Long, detail: ObservedEventDetail, actor: String? = null) = ObservedEvent(
         eventId = id,
-        audience = PolicyAudience(PolicyAudienceScope.PUBLIC),
+        audience = EventAudience(EventAudienceScope.PUBLIC),
         actor = actor,
-        kind = PolicyHistoryEventKind.FORCED_TRANSITION,
+        kind = ObservedEventKind.FORCED_TRANSITION,
         payload = buildJsonObject { },
         detail = detail,
     )
 
-    private fun PolicyKnowledgeState.zone(player: String, zone: String) =
+    private fun PlayerKnowledge.zone(player: String, zone: String) =
         zones.single { it.ownerId == player && it.zone == zone }
 
-    private fun PolicyKnowledgeState.order(player: String) =
+    private fun PlayerKnowledge.order(player: String) =
         knownLibraryOrders.single { it.playerId == player }
 
     private fun observation() = PlayerObservationSnapshot(
-        perspectivePlayerId = "p0",
+        viewerId = "p0",
         turnNumber = 1,
         phase = "BEGINNING",
         step = "UPKEEP",
         activePlayerId = "p0",
         priorityPlayerId = "p0",
         players = listOf(
-            PolicyPlayerView("p0", "Root", 20, 2, 19, 0, 0, PolicyManaPool(), true, true, false),
-            PolicyPlayerView("p1", "Opponent", 20, 2, 19, 0, 0, PolicyManaPool(), false, false, false),
+            PlayerView("p0", "Root", 20, 2, 19, 0, 0, ManaPoolView(), true, true, false),
+            PlayerView("p1", "Opponent", 20, 2, 19, 0, 0, ManaPoolView(), false, false, false),
         ),
         zones = listOf(
-            PolicyZoneView(
+            ZoneView(
                 "p0", "HAND", false, 2,
                 listOf(card("safe:mountain", "Mountain"), card("safe:shock", "Shock")),
             ),
-            PolicyZoneView("p0", "LIBRARY", true, 19, emptyList()),
-            PolicyZoneView("p1", "HAND", true, 2, emptyList()),
-            PolicyZoneView("p1", "LIBRARY", true, 19, emptyList()),
+            ZoneView("p0", "LIBRARY", true, 19, emptyList()),
+            ZoneView("p1", "HAND", true, 2, emptyList()),
+            ZoneView("p1", "LIBRARY", true, 19, emptyList()),
         ),
         stack = emptyList(),
         pendingDecision = null,
-        observationDigest = PolicyJson.sha256("observation"),
+        observationDigest = CanonicalJson.sha256("observation"),
     )
 
-    private fun card(ref: String, name: String) = PolicyCardView(
+    private fun card(ref: String, name: String) = ObjectView(
         objectRef = ref,
         definitionId = name,
         name = name,

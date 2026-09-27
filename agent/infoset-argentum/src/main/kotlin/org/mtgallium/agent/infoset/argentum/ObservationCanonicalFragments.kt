@@ -5,10 +5,10 @@ import java.security.MessageDigest
 import java.util.HexFormat
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import org.mtgallium.agent.infoset.core.PolicyCardView
-import org.mtgallium.agent.infoset.core.PolicyJson
+import org.mtgallium.agent.infoset.core.ObjectView
+import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.core.PlayerObservationSnapshot
-import org.mtgallium.agent.infoset.core.PolicyZoneView
+import org.mtgallium.agent.infoset.core.ZoneView
 
 /**
  * Private immutable canonical-byte fragments, after complete perspective-safe projection.
@@ -33,8 +33,8 @@ internal class ObservationCanonicalFragments private constructor(
 
     companion object {
         /** Full serializer oracle for the bounded diagnostic, not used by the optimized path. */
-        fun canonicalOracle(observation: PlayerObservationSnapshot): String = PolicyJson.canonical(
-            PolicyJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(), observation.copy(observationDigest = "")))
+        fun canonicalOracle(observation: PlayerObservationSnapshot): String = CanonicalJson.canonical(
+            CanonicalJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(), observation.copy(observationDigest = "")))
 
         fun build(observation: PlayerObservationSnapshot, previous: ObservationCanonicalFragments? = null): ObservationCanonicalFragments {
             var reusedCards = 0
@@ -51,16 +51,16 @@ internal class ObservationCanonicalFragments private constructor(
                     val oldCards = old?.cards.orEmpty().associateBy { it.view.objectRef }
                     val cards = zone.cards.map { card ->
                         oldCards[card.objectRef]?.takeIf { sameCard(it.view, card) }?.also { reusedCards++ }
-                            ?: CardFragment(card, bytes(PolicyJson.canonical(PolicyJson.format.encodeToJsonElement(
-                                PolicyCardView.serializer(), card)))).also { encodedCards++ }
+                            ?: CardFragment(card, bytes(CanonicalJson.canonical(CanonicalJson.format.encodeToJsonElement(
+                                ObjectView.serializer(), card)))).also { encodedCards++ }
                     }
-                    val frame = PolicyJson.format.encodeToJsonElement(PolicyZoneView.serializer(), zone.copy(cards = emptyList())) as JsonObject
+                    val frame = CanonicalJson.format.encodeToJsonElement(ZoneView.serializer(), zone.copy(cards = emptyList())) as JsonObject
                     ZoneFragment(zone, cards, objectFragment(frame, mapOf("cards" to arrayFragment(cards.map { it.fragment }))))
                 }
             }
             // The source serializer owns every field and default. Only the already encoded zones
             // are substituted; newly added non-zone fields automatically enter the digest.
-            val frame = PolicyJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(),
+            val frame = CanonicalJson.format.encodeToJsonElement(PlayerObservationSnapshot.serializer(),
                 observation.copy(zones = emptyList(), observationDigest = "")) as JsonObject
             return ObservationCanonicalFragments(objectFragment(frame,
                 mapOf("zones" to arrayFragment(zones.map { it.fragment }))), zones, reusedCards, encodedCards, reusedZones)
@@ -69,18 +69,18 @@ internal class ObservationCanonicalFragments private constructor(
         private val SHA256 = ThreadLocal.withInitial { MessageDigest.getInstance("SHA-256") }
         // Kotlin Set equality ignores iteration order; the existing serializer emits these as
         // arrays, whose order IS canonical evidence. Maps are canonicalized by sorted key.
-        private fun sameCard(a: PolicyCardView, b: PolicyCardView): Boolean = a === b || a == b &&
+        private fun sameCard(a: ObjectView, b: ObjectView): Boolean = a === b || a == b &&
             a.types.toList() == b.types.toList() && a.subtypes.toList() == b.subtypes.toList() &&
             a.colors.toList() == b.colors.toList() && a.keywords.toList() == b.keywords.toList()
-        private fun sameZone(a: PolicyZoneView, b: PolicyZoneView): Boolean = a === b || a == b &&
+        private fun sameZone(a: ZoneView, b: ZoneView): Boolean = a === b || a == b &&
             a.cards.zip(b.cards).all { (left, right) -> sameCard(left, right) }
         private fun bytes(text: String) = Fragment.Bytes(text.toByteArray(Charsets.UTF_8))
         private val COMMA = bytes(",")
         private fun arrayFragment(children: List<Fragment>): Fragment = sequence("[", "]", children)
         private fun objectFragment(frame: JsonObject, replacements: Map<String, Fragment>): Fragment = sequence("{", "}",
             frame.entries.sortedBy { it.key }.map { (key, value) -> Fragment.Sequence(listOf(
-                bytes(PolicyJson.canonical(JsonPrimitive(key)) + ":"),
-                replacements[key] ?: bytes(PolicyJson.canonical(value)),
+                bytes(CanonicalJson.canonical(JsonPrimitive(key)) + ":"),
+                replacements[key] ?: bytes(CanonicalJson.canonical(value)),
             )) })
         private fun sequence(open: String, close: String, children: List<Fragment>): Fragment = Fragment.Sequence(buildList {
             add(bytes(open))
@@ -89,8 +89,8 @@ internal class ObservationCanonicalFragments private constructor(
         })
     }
 
-    private data class CardFragment(val view: PolicyCardView, val fragment: Fragment)
-    private data class ZoneFragment(val view: PolicyZoneView, val cards: List<CardFragment>, val fragment: Fragment)
+    private data class CardFragment(val view: ObjectView, val fragment: Fragment)
+    private data class ZoneFragment(val view: ZoneView, val cards: List<CardFragment>, val fragment: Fragment)
     private sealed interface Fragment {
         fun visit(consume: (ByteArray) -> Unit)
         class Bytes(private val value: ByteArray) : Fragment {

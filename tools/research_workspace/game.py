@@ -58,7 +58,7 @@ class Decision:
 class Session:
     """A synchronous child JVM shared by this context's games and numerical calls."""
     def __init__(self, *, build: bool = True, java_options: Sequence[str] = ()):
-        command = jvm_command([], main_class='org.mtgallium.research.workbench.PythonResearch',
+        command = jvm_command([], main_class='org.mtgallium.research.workbench.GameServer',
                               build=build, java_options=java_options)
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          text=True, encoding='utf-8', bufsize=1)

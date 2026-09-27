@@ -1,6 +1,6 @@
 # Value models
 
-The [Mono-Red module](../agent/mono-red-models/README.md) scores a nonterminal
+The [value-model module](../agent/value-models/README.md) scores a nonterminal
 position from a specified player's perspective. Positive values favor that player.
 
 ## Sparse linear values
@@ -31,13 +31,13 @@ key are summed before applying `sign(x) * log(1 + abs(x))`; zero entries are
 omitted. The emission code in `ValueFeatures.kt` defines the feature vocabulary.
 
 `LinearValueEvaluator` accumulates `bias + sum(weight * feature)` in JVM string
-key order, then clips to `[-1, 1]` by default. Pass `LinearValueLink.TANH` to use
+key order, then clips to `[-1, 1]` by default. Pass `InverseLink.TANH` to use
 `tanh(score)` for logistic-outcome deployments. `evaluateDetailed` returns both
-the raw score and deployed value.
+the linear predictor (`linearPredictor`) and deployed value (`value`).
 
 ## Search use
 
-`FactualPolicyEncoder.view(information)` exposes the same factual view bytes as
+`InformationStateByteEncoder.view(information)` exposes the same factual view bytes as
 the decision encoder without requiring an acting-player menu. This supports
 evaluators at nonterminal leaves where another player acts; the supplied
 information must still belong to the evaluator's requested perspective.
@@ -75,13 +75,13 @@ with a bounded rollout and `EVALUATE` cutoff. It evaluates at the first player
 decision with `turnNumber >= rootTurnNumber + completedTurns`.
 `maxPolicyDecisions` is a safety limit for reaching that boundary.
 
-Search diagnostics count `unsettledLeafEvaluations`: evaluator calls where
-`isVolatile` finds a volatile position, meaning a nonempty stack, active combat,
+Search diagnostics count `nonQuietLeafEvaluations` (serialized as
+`unsettledLeafEvaluations`): evaluator calls where `isQuiet` is false, meaning a nonempty stack, active combat,
 a pending combat, damage or ordering decision, or lethal creature damage.
 Terminal payoffs and neutral settlements are not counted. "Unsettled" here means
 the position, not the backed-up value.
 
-A [games plan](research-cli.md#games-plan) uses `MonoRedInformationEvaluator`
+A [games plan](research-cli.md#games-plan) uses `MaterialEvaluator()`
 when `valueWeights` is absent; supplying `LinearWeights` selects
 `LinearValueEvaluator` instead. See the
 [value-search example](../examples/python-value-search.py) for a small live

@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
-MAIN = 'org.mtgallium.research.workbench.ResearchKt'
+MAIN = 'org.mtgallium.research.workbench.ResearchCliKt'
 RUNTIME = REPO / 'research/workbench/build/research/runtime.json'
 
 

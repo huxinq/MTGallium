@@ -6,25 +6,26 @@ import org.mtgallium.agent.argentum.policy.*
 import org.mtgallium.agent.infoset.core.*
 
 /** Deliberately unsafe controls, never registered on the production classpath. */
-class LeakingConformancePolicies : NativePolicyProvider {
+class LeakingConformancePolicies : JvmPolicyProvider {
     override val policies = setOf("test-hidden-hand", "test-privileged-search")
-    override fun create(name: String, game: NativePolicyContext, actor: String): NativePolicy {
-        if (name == "test-hidden-hand") return NativePolicy.Direct(Player { request, _ ->
-            val state = game.world.authoritativeStateForHost()
+
+    override fun create(name: String, game: NativePolicyContext, actor: String): JvmPolicy {
+        if (name == "test-hidden-hand") return JvmPolicy.Memoryless(GameAgent { request, _ ->
+            val state = game.world.trueState()
             val opponent = state.turnOrder[1 - actor.removePrefix("p").toInt()]
             val truth = state.getHand(opponent).map { state.getEntity(it)!!.get<CardComponent>()!!.name }
-            request.expansion.candidates[Math.floorMod(truth.hashCode(), request.expansion.candidates.size)]
+            request.menu.candidates[Math.floorMod(truth.hashCode(), request.menu.candidates.size)]
         })
-        return NativePolicy.Search(SearchPolicySession(game.world, actor, game.knownDecks,
+        return JvmPolicy.SearchSession(SearchPolicySession(game.world, actor, game.knownDecks,
             SearchPolicyConfig(2, 8, 16, 1.4, game.plan.leaf, game.plan.actionProfile,
-                baseSeed = game.plan.seed, beliefArchitecture = BeliefArchitecture.PRIVILEGED_O_V1),
+                baseSeed = game.plan.seed, beliefArchitecture = BeliefApproximation.PRIVILEGED_O_V1),
             game.opponentModel(), game.gameId))
     }
 }
 
 class HiddenInformationConformanceTest {
     private val plan = HiddenInformationCheckPlan(
-        GamesPlan(decks = List(2) { mapOf("Mountain" to 12, "Shock" to 12, "Raging Goblin" to 12) },
+        ResearchGameConfig(decks = List(2) { mapOf("Mountain" to 12, "Shock" to 12, "Raging Goblin" to 12) },
             policies = listOf("heuristic", "production"), particles = 2, simulations = 4, searchDepth = 2),
         seeds = listOf(101, 102), positionsPerCategory = 1, maximumCorpusDecisions = 80, permutations = 3)
     private val corpus by lazy { hiddenInformationCorpus(plan) }
@@ -52,8 +53,6 @@ class HiddenInformationConformanceTest {
         }
         assertTrue(reports.first().findings.any { it.level == "DECISION_DIFFERS" })
     }
-
-
 
     @Test fun `complex printed abilities remain coherent after permutation`() {
         val complex = plan.copy(game = plan.game.copy(decks = List(2) {

@@ -19,10 +19,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
-import org.mtgallium.agent.infoset.core.SearchActionSpaceProfile
+import org.mtgallium.agent.infoset.core.ActionSpaceProfile
 import org.mtgallium.agent.infoset.core.exactSingletonPassOrNull
 import org.mtgallium.agent.infoset.core.policySingletonPassOrNull
-import org.mtgallium.agent.infoset.core.PolicyExpansionOmissionReason
+import org.mtgallium.agent.infoset.core.ActionOmissionReason
 
 class UnifiedSemanticExpanderTest {
     private val registry = CardRegistry().apply {
@@ -50,8 +50,8 @@ class UnifiedSemanticExpanderTest {
     fun `expansion is deterministic duplicate-free and leaves parent and rng unchanged`() {
         val env = environment()
         val before = env.state
-        val first = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 99L)
-        val second = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 99L)
+        val first = ArgentumActionGenerator().expand(env, registry, proposalSeed = 99L)
+        val second = ArgentumActionGenerator().expand(env, registry, proposalSeed = 99L)
 
         assertEquals(first.policy, second.policy)
         assertEquals(before, env.state)
@@ -69,7 +69,7 @@ class UnifiedSemanticExpanderTest {
         var checked = 0
         repeat(160) {
             if (env.isTerminal) return@repeat
-            val expansion = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 100L + it)
+            val expansion = ArgentumActionGenerator().expand(env, registry, proposalSeed = 100L + it)
             expansion.engineChoices.values.filterIsInstance<ArgentumEngineChoice.Action>()
                 .filter { it.copiedFromLegalAction }
                 .forEach { candidate ->
@@ -90,7 +90,7 @@ class UnifiedSemanticExpanderTest {
     @Test
     fun `mulligan keep and take are separate semantic choices`() {
         val env = environment(skipMulligans = false)
-        val expansion = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 3L)
+        val expansion = ArgentumActionGenerator().expand(env, registry, proposalSeed = 3L)
         val names = expansion.engineChoices.values.mapNotNull { choice ->
             (choice as? ArgentumEngineChoice.Action)?.value?.let { it::class.simpleName }
         }.toSet()
@@ -114,7 +114,7 @@ class UnifiedSemanticExpanderTest {
     @Test
     fun `operation families come from engine types and legal mana metadata`() {
         val env = environment()
-        val initial = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 31L)
+        val initial = ArgentumActionGenerator().expand(env, registry, proposalSeed = 31L)
         val bySignature = initial.policy.candidates.associateBy { it.signature }
         initial.engineChoices.forEach { (signature, engineChoice) ->
             val action = engineChoice as ArgentumEngineChoice.Action
@@ -141,7 +141,7 @@ class UnifiedSemanticExpanderTest {
         }
         val legalLand = checkNotNull(land) { "Did not reach a legal land play" }
         env.step(legalLand.action)
-        val afterLand = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 32L)
+        val afterLand = ArgentumActionGenerator().expand(env, registry, proposalSeed = 32L)
         val manaSignatures = afterLand.engineChoices.filterValues {
             (it as? ArgentumEngineChoice.Action)?.isManaAbility == true
         }.keys
@@ -162,7 +162,7 @@ class UnifiedSemanticExpanderTest {
             }
             if (declaration != null) {
                 val before = env.state
-                val expansion = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 7L)
+                val expansion = ArgentumActionGenerator().expand(env, registry, proposalSeed = 7L)
                 val attacks = expansion.engineChoices.mapNotNull { (signature, choice) ->
                     val attackers = ((choice as? ArgentumEngineChoice.Action)?.value as? DeclareAttackers)
                         ?.attackers ?: return@mapNotNull null
@@ -200,7 +200,7 @@ class UnifiedSemanticExpanderTest {
 
     @Test
     fun `choice payloads contain no per-step action ids`() {
-        val expansion = UnifiedSemanticExpander().expand(environment(), registry, proposalSeed = 13L)
+        val expansion = ArgentumActionGenerator().expand(environment(), registry, proposalSeed = 13L)
         assertFalse(expansion.policy.candidates.any { "actionId" in it.canonicalPayload })
     }
 
@@ -216,7 +216,7 @@ class UnifiedSemanticExpanderTest {
         repeat(100) {
             val rawLandActions = env.legalActions().count { it.action is PlayLand }
             if (rawLandActions > 1) {
-                val expansion = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 13L)
+                val expansion = ArgentumActionGenerator().expand(env, registry, proposalSeed = 13L)
                 val landEdges = expansion.engineChoices.values.filter {
                     (it as? ArgentumEngineChoice.Action)?.value is PlayLand
                 }
@@ -246,8 +246,8 @@ class UnifiedSemanticExpanderTest {
             )
         }
 
-        val left = UnifiedSemanticExpander().expand(original, registry, proposalSeed = 21L).policy
-        val right = UnifiedSemanticExpander().expand(reordered, registry, proposalSeed = 21L).policy
+        val left = ArgentumActionGenerator().expand(original, registry, proposalSeed = 21L).policy
+        val right = ArgentumActionGenerator().expand(reordered, registry, proposalSeed = 21L).policy
 
         assertEquals(left, right)
     }
@@ -283,9 +283,9 @@ class UnifiedSemanticExpanderTest {
         }
         assertTrue(landPlayed)
 
-        val exact = UnifiedSemanticExpander().expand(env, registry, proposalSeed = 41L)
-        val fast = UnifiedSemanticExpander(
-            actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+        val exact = ArgentumActionGenerator().expand(env, registry, proposalSeed = 41L)
+        val fast = ArgentumActionGenerator(
+            actionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
         ).expand(env, registry, proposalSeed = 41L)
 
 
@@ -298,7 +298,7 @@ class UnifiedSemanticExpanderTest {
         assertFalse(fast.policy.isExhaustive)
         assertTrue(fast.policy.isProfileExhaustive)
         assertEquals(
-            setOf(PolicyExpansionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA),
+            setOf(ActionOmissionReason.PROFILE_SUPPRESSED_STANDALONE_MANA),
             fast.policy.omissionReasons,
         )
         assertEquals(null, fast.policy.exactSingletonPassOrNull())
@@ -310,8 +310,8 @@ class UnifiedSemanticExpanderTest {
             environment = env,
             gameId = "fast-profile-observed-mana",
             seedBase = 41L,
-            expander = UnifiedSemanticExpander(
-                actionSpaceProfile = SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
+            expander = ArgentumActionGenerator(
+                actionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
            ),
            effectiveSetupSeed = 117L,
         )

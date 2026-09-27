@@ -5,22 +5,23 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.mtgallium.agent.argentum.policy.*
 import org.mtgallium.agent.infoset.core.*
+import org.mtgallium.agent.infoset.planning.*
 
 @Serializable
 private data class TestPolicySettings(val testChoiceIndex: Int = 0)
 
 /** Registered in test resources, as a private module would register its policies. */
-class TestNativePolicies : NativePolicyProvider {
+class TestNativePolicies : JvmPolicyProvider {
     override val policies = setOf("test-index", "test-search")
     override val settings = settingNames(TestPolicySettings.serializer())
 
-    override fun create(name: String, game: NativePolicyContext, actor: String): NativePolicy = when (name) {
+    override fun create(name: String, game: NativePolicyContext, actor: String): JvmPolicy = when (name) {
         "test-index" -> {
             val index = game.settings(TestPolicySettings.serializer()).testChoiceIndex
-            NativePolicy.Direct(Player { context, _ -> context.expansion.candidates[index] })
+            JvmPolicy.Memoryless(GameAgent { context, _ -> context.menu.candidates[index] })
         }
-        else -> NativePolicy.Search(SearchPolicySession(game.world, actor, game.knownDecks,
-            SearchPolicyConfig(1, 2, 1, 1.0, LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
+        else -> JvmPolicy.SearchSession(SearchPolicySession(game.world, actor, game.knownDecks,
+            SearchPolicyConfig(1, 2, 1, 1.0, LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT),
                 game.plan.actionProfile, baseSeed = game.plan.seed), game.opponentModel(), game.gameId))
     }
 }
@@ -35,9 +36,9 @@ class NativePoliciesTest {
 
     private fun advanceToChoice(game: PythonGame) {
         repeat(64) {
-            val expansion = game.world.decisionContext().expansion
-            if (expansion.candidates.size > 1) return
-            check(game.world.step(expansion.candidates.single()).accepted)
+            val menu = game.world.decisionContext().menu
+            if (menu.candidates.size > 1) return
+            check(game.world.step(menu.candidates.single()).accepted)
         }
         error("No multi-action decision reached")
     }
@@ -49,7 +50,7 @@ class NativePoliciesTest {
         assertEquals(mapOf("testChoiceIndex" to JsonPrimitive(1)), plan.extensions)
         val game = PythonGame.create(plan, registry, "added")
         advanceToChoice(game)
-        val expected = game.world.decisionContext(DecisionView()).expansion.candidates[1]
+        val expected = game.world.decisionContext(MenuRequest()).menu.candidates[1]
         val selected = game.select("test-index", 5)
         assertEquals(expected.signature,
             selected.getValue("choice").jsonObject.getValue("signature").jsonPrimitive.content)
@@ -74,9 +75,9 @@ class NativePoliciesTest {
             "shadowPolicies" to JsonArray(listOf(JsonPrimitive("test-search"))))), registry, "shadow")
         // Accepted moves reach the shadow sessions; a fork requires them to be current.
         repeat(64) {
-            val menu = game.world.decisionContext(DecisionView()).expansion.candidates
+            val menu = game.world.decisionContext(MenuRequest()).menu.candidates
             if (menu.size > 1) return@repeat
-            game.step(game.world.acceptedDecisionCountForHost, DecisionView(), menu.single(), record = false)
+            game.step(game.world.acceptedDecisionCount, MenuRequest(), menu.single(), record = false)
         }
         val child = game.fork()
         val parent = game.select("test-search", 11)
@@ -93,7 +94,7 @@ class NativePoliciesTest {
     }
 
     @Test fun `providers may not share a policy name or name a plan field`() {
-        fun provider(names: Set<String>, claimed: Set<String> = emptySet()) = object : NativePolicyProvider {
+        fun provider(names: Set<String>, claimed: Set<String> = emptySet()) = object : JvmPolicyProvider {
             override val policies = names
             override val settings = claimed
             override fun create(name: String, game: NativePolicyContext, actor: String) = error("unused")

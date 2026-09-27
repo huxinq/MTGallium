@@ -5,15 +5,15 @@ Kotlin side of the research tools: game setup and play, the `games`/`fit`/
 connection, and root-action kernel features. It depends on the agent modules
 and Argentum; nothing in this build depends on it.
 
-- `Games.kt`: `createWorld`, `playGame`, `Player`, `selectorPlayer` and
+- `Games.kt`: `createWorld`, `playGame`, `GameAgent`, `selectorPlayer` and
   `searchPlayer` for Kotlin experiments.
-- `Research.kt`: `GamesPlan`, `runGames` and the CLI entry point (`ResearchKt`).
-- `PythonResearch.kt`: the synchronous connection behind `research_workspace`;
+- `ResearchCli.kt`: `ResearchGameConfig`, `runGames` and the CLI entry point (`ResearchCliKt`).
+- `GameServer.kt`: the synchronous connection behind `research_workspace`;
   standard output carries only responses, diagnostics go to standard error.
-- `NativePolicies.kt`: the built-in native policies and the `NativePolicyProvider`
+- `NativePolicies.kt`: the built-in native policies and the `JvmPolicyProvider`
   extension point through which [another build](../../docs/research-cli.md#added-policies)
   adds policies.
-- `Kernel.kt` and `SemanticFeatures.kt`: hashed decision features and the
+- `Kernel.kt` and `HashedKernelFeatures.kt`: hashed decision features and the
   root-action kernel fit and scores.
 - `ResearchFiles.kt`: JSON Lines reading and writing, and execution context.
 
