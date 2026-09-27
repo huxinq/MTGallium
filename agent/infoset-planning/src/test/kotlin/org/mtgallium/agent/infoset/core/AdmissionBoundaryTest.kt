@@ -5,36 +5,17 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 class AdmissionBoundaryTest {
-    @Test fun `terminal rejects executable omitted selection before transition without payoff`() {
-        for (actor in listOf("p0", "p1")) {
-            val world = executableOmission(actor)
-            val policy = MenuSelector(omitted)
-            val trace = TerminalContinuationTraceCollector(TerminalContinuationTracePolicy(4), "p0")
-            val failure = assertFailsWith<IllegalArgumentException> {
-                TerminalPolicyContinuationRunner(policy, policy, 2)
-                    .continueToTerminal(world, "p0", 71L, 0, trace = trace)
-            }
-            assertTrue(failure.message.orEmpty().contains("non-admitted choice"))
-            assertEquals(1, policy.calls)
-            assertEquals(0, world.probe.transitions)
-            assertEquals(0, world.probe.informationReads)
-            assertEquals(TerminalContinuationStop.NON_GAME_FAILURE, trace.result().stop)
-            assertNull(trace.result().terminalPayoff)
-        }
-    }
-
     @Test fun `bounded rollout rejects executable omitted selection before transition`() {
         for (actor in listOf("p0", "p1")) {
             val world = executableOmission(actor)
             val policy = MenuSelector(omitted)
             val failure = assertFailsWith<IllegalArgumentException> {
-                search(policy).settleFirstUnvisitedEdge(world, "p0", 71L, 0)
+                search(policy).search("p0", belief(world.precededByRoot()), 71L)
             }
             assertTrue(failure.message.orEmpty().contains("non-admitted choice"))
             assertEquals(1, policy.calls)
             assertEquals(0, world.probe.transitions)
             assertEquals(0, world.probe.informationReads)
-            assertEquals(0, world.probe.leafReads)
         }
     }
 
@@ -52,31 +33,22 @@ class AdmissionBoundaryTest {
         assertEquals(1, model.calls)
         assertEquals(0, world.probe.transitions)
         assertEquals(0, world.probe.informationReads)
-        assertEquals(0, world.probe.leafReads)
     }
 
-    @Test fun `valid menu only terminal and bounded choices stay lazy with unchanged decision seeds`() {
+    @Test fun `valid menu only bounded choices stay lazy with unchanged decision seeds`() {
         for (actor in listOf("p0", "p1")) {
-            val terminalWorld = World(actor)
-            val terminalPolicy = MenuSelector(admitted)
-            val terminal = TerminalPolicyContinuationRunner(terminalPolicy, terminalPolicy, 2)
-                .continueToTerminal(terminalWorld, "p0", 71L, 0)
-            assertEquals(0.75, terminal.payoff)
-            assertEquals(1, terminal.policyDecisions)
             val boundedWorld = World(actor)
             val boundedPolicy = MenuSelector(admitted)
-            val bounded = search(boundedPolicy).settleFirstUnvisitedEdge(boundedWorld, "p0", 71L, 0)
-            assertEquals(SearchSettlementOrigin.TERMINAL_PAYOFF, bounded.origin)
-            assertEquals(0.75, bounded.backedValue)
-            val expectedSeeds = listOf(ComponentSeeds.derive(71L, 0, 1, terminalPolicy.id, "rollout") to
+            val bounded = search(boundedPolicy).search("p0", belief(boundedWorld.precededByRoot()), 71L)
+            assertEquals(1, bounded.candidateSettlementCounts.values.sumOf { it.terminalPayoffBackups })
+            assertEquals(0.75, bounded.rootValue)
+            val expectedSeeds = listOf(ComponentSeeds.derive(71L, 0, 1, boundedPolicy.id, "rollout") to
                 ComponentSeeds.derive(71L, 0, 1, "rollout-sample"))
-            assertEquals(expectedSeeds, terminalPolicy.seeds)
             assertEquals(expectedSeeds, boundedPolicy.seeds)
-            for (world in listOf(terminalWorld, boundedWorld)) {
+            for (world in listOf(boundedWorld)) {
                 assertEquals(1, world.probe.transitions)
                 assertEquals(0, world.probe.informationReads)
-                assertEquals(0, world.probe.leafReads)
-                assertNull(world.terminalPayoff("p0")) // Continuations mutate only their fork.
+                assertNull(world.terminalPayoff("p0")) // Search mutates only its fork.
             }
         }
     }
@@ -98,7 +70,6 @@ class AdmissionBoundaryTest {
         assertEquals(1, model.calls)
         assertEquals(1, world.probe.transitions)
         assertEquals(0, world.probe.informationReads)
-        assertEquals(0, world.probe.leafReads)
     }
 
     @Test fun `admission checks exact choice rather than signature alone`() {
@@ -116,8 +87,17 @@ class AdmissionBoundaryTest {
         val leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)
         return InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 4,
             initialExpansionLimit = 2, leaf = leaf), model, selector, selector,
-            LeafValueSource.SampledWorld("argentum-board-v1"))
+            LeafValueSource.Information(object : InformationStateEvaluator {
+                override val id = "admission-boundary-leaf-guard"
+                override fun evaluate(information: InformationStateRepresentation, rootPlayer: String): Double =
+                    error("Admission failure must not become a leaf value")
+            }))
     }
+
+    private fun belief(world: SearchWorld) = BeliefBatch(listOf(Weighted(world, 1.0)),
+        BeliefDiagnostics(mode = BeliefMode.CONSISTENCY_ONLY_V1, requestedParticles = 1,
+            acceptedParticles = 1, rejectedParticles = 0, effectiveSampleSizeBefore = 1.0,
+            effectiveSampleSizeAfter = 1.0, entropy = 0.0, resamplingCount = 0))
 
     /** The control executes the omitted choice; rejection cannot be attributed to engine legality. */
     private fun executableOmission(actor: String): World {
@@ -158,45 +138,48 @@ class AdmissionBoundaryTest {
         var transitions = 0
         // Acting-player policy projection; the observer-only search preflight is separate.
         var informationReads = 0
-        var leafReads = 0
     }
 
-    private class World(private val actor: String, val probe: Probe = Probe(), private var done: Boolean = false) : SearchWorld {
-        override fun actorToAct(): String? = actor.takeUnless { done }
+    private class World(private val actor: String, val probe: Probe = Probe(), private var done: Boolean = false,
+        private var atRoot: Boolean = false) : SearchWorld {
+        fun precededByRoot(): World = World(actor, probe, done, atRoot = true)
+        override fun actorToAct(): String? = if (atRoot) "p0" else actor.takeUnless { done }
         override fun decisionContext(view: DecisionView): DecisionSiteRequest = DecisionSiteRequest.capture(
             requireNotNull(actorToAct()), PolicyExpansion(menu, false, 2, "admission-boundary-test-v1"),
-            { epistemicState(actor) }, view, "admission-boundary-test-v1")
+            { if (atRoot) EpistemicState.capture(informationState("p0")) else epistemicState(actor) }, view, "admission-boundary-test-v1")
         override fun epistemicState(viewer: String): EpistemicState {
+            if (atRoot) return EpistemicState.capture(informationState(viewer))
             probe.informationReads++
             error("Menu-only boundary must not project information")
         }
         override fun informationState(viewer: String): InformationStateRepresentation {
             // Search may inspect the non-acting root's view before sampling its opponent.
             // Acting-player projection remains forbidden, including from the model context.
-            if (viewer != actor) return InformationStateRepresentation(
+            if (atRoot || viewer != actor) return InformationStateRepresentation(
                 actingPlayerId = actorToAct(),
                 observation = PlayerObservationSnapshot(viewer, 1, "TEST", "PRIORITY", actor, actorToAct(),
                     emptyList(), emptyList(), emptyList(), pendingDecision = null,
-                    observationDigest = "admission-observer-$viewer-$done"),
-                informationStateDigest = "admission-observer-information-$viewer-$done",
+                    observationDigest = "admission-observer-$viewer-$done-$atRoot"),
+                informationStateDigest = "admission-observer-information-$viewer-$done-$atRoot",
                 historyCommitment = PolicyHistoryCommitment.empty(), history = emptyList(),
-                candidates = emptyList(), terminated = done)
+                candidates = if (atRoot) menu else emptyList(), terminated = done)
             probe.informationReads++
             error("Menu-only boundary must not project compatibility information")
         }
         override fun expandChoices(): PolicyExpansion = error("Use the native admitted context")
         override fun step(choice: SemanticChoice): SearchStepResult {
-            probe.transitions++ // Count attempts too, shared across every continuation fork.
+            if (atRoot) {
+                require(choice == admitted)
+                atRoot = false
+                return SearchStepResult(true)
+            }
+            probe.transitions++ // Count attempts after the synthetic root edge, shared across forks.
             require(!done && choice in listOf(admitted, omitted))
             done = true
             return SearchStepResult(true)
         }
-        override fun fork(): SearchWorld = World(actor, probe, done)
+        override fun fork(): SearchWorld = World(actor, probe, done, atRoot)
         override fun terminalPayoff(rootPlayer: String): Double? = 0.75.takeIf { done }
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double {
-            probe.leafReads++
-            error("Admission failure must not become a leaf value")
-        }
     }
 
     companion object {

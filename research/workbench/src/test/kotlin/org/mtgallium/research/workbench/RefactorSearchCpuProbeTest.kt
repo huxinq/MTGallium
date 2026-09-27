@@ -95,7 +95,7 @@ class RefactorSearchCpuProbeTest {
             }
             check(world.expandChoices().candidates.size > 1) { "Probe requires a searched multi-action root" }
             val actor = requireNotNull(world.actorToAct())
-            check(world.informationState(actor).historyCursor > 0)
+            check(world.informationState(actor).historyCommitment.cursor > 0)
             val setupStart = cpu.processCpuTime
             val session = SearchPolicySession(world, actor, known,
                 SearchPolicyConfig(particles = 8, simulations = 64, maxPolicyDecisions = 16,
@@ -122,7 +122,7 @@ class RefactorSearchCpuProbeTest {
                 put("sample", sampleIndex)
                 put("seed", seed)
                 put("prefixAcceptedDecisions", 24 + forced)
-                put("observerHistoryCursor", world.informationState(actor).historyCursor)
+                put("observerHistoryCursor", world.informationState(actor).historyCommitment.cursor)
                 put("particles", 8)
                 put("simulations", 64)
                 put("maxPolicyDecisions", 16)

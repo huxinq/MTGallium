@@ -54,16 +54,13 @@ class SearchPolicyTest {
             maxPolicyDecisions = 47,
             explorationConstant = 0.75,
             beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
-            beliefArchitecture = BeliefArchitecture.HYBRID_C_V1,
+            beliefArchitecture = BeliefArchitecture.SNAPSHOT_A_V1,
             baseSeed = 91L,
             initialExpansionLimit = 32,
             wideningThresholds = listOf(40, 80),
             wideningLimits = listOf(64, 128),
             maxQuiescenceDecisions = 11,
             maxQuiescenceForcedPasses = 79,
-            cacheSimulationTransitions = false,
-            wallClockBudgetMillis = 500,
-            minimumSimulations = 7,
             singletonSelection = SingletonSelectionConfig(enabled = true),
         )
 
@@ -84,9 +81,6 @@ class SearchPolicyTest {
         assertEquals(config.wideningLimits, parameters.wideningLimits)
         assertEquals(config.maxQuiescenceDecisions, parameters.maxQuiescenceDecisions)
         assertEquals(config.maxQuiescenceForcedPasses, parameters.maxQuiescenceForcedPasses)
-        assertEquals(config.cacheSimulationTransitions, parameters.cacheSimulationTransitions)
-        assertEquals(config.wallClockBudgetMillis, parameters.wallClockBudgetMillis)
-        assertEquals(config.minimumSimulations, parameters.minimumSimulations)
         assertEquals(config.singletonSelection, parameters.singletonSelection)
         assertEquals(config.initialExpansionLimit, parameters.searchConfig().initialExpansionLimit)
         assertEquals(config.wideningThresholds, parameters.searchConfig().wideningThresholds)

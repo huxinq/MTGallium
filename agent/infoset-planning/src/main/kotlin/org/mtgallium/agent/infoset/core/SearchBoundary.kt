@@ -16,7 +16,6 @@ interface SearchWorld {
     fun step(choice: SemanticChoice): SearchStepResult
     fun fork(): SearchWorld
     fun terminalPayoff(rootPlayer: String): Double?
-    fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double
 }
 
 /**
@@ -111,15 +110,4 @@ sealed interface LeafValueSource {
             (evaluator as? ConfiguredInformationStateEvaluator)?.configurationId ?: evaluator.id
     }
 
-    data class SampledWorld(
-        override val invokedEvaluatorId: String,
-    ) : LeafValueSource {
-        override val invokedEvaluatorConfigurationId: String = invokedEvaluatorId
-
-        init {
-            require(invokedEvaluatorId.isNotBlank())
-        }
-    }
 }
-
-enum class UnresolvedLeafHandling { EVALUATE, BACK_UP_NEUTRAL }

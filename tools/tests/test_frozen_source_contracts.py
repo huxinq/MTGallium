@@ -15,15 +15,14 @@ ROOT = Path(__file__).resolve().parents[2]
 class FrozenSourceContractsTest(unittest.TestCase):
     def test_policy_identity_wire_discriminators(self):
         source = (ROOT / "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/PolicyIdentity.kt").read_text(encoding="utf-8")
-        self.assertIn('SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX: String =\n    "search-teacher-behavior-v1-sha256"', source)
-        self.assertIn("SEARCH_POLICY_BEHAVIOR_SCHEMA_V1: Int = 1", source)
+        self.assertIn('SEARCH_POLICY_BEHAVIOR_IDENTITY_PREFIX: String =\n    "search-teacher-behavior-v2-sha256"', source)
+        self.assertIn("SEARCH_POLICY_BEHAVIOR_SCHEMA_V2: Int = 2", source)
         aliases = {
             "KnownDeckCardSpecification": "KnownDeckCardSpecification",
             "KnownDeckSpecification": "KnownDeckSpecification",
             "InputSchemaSpecification": "SearchTeacherInputSchemaSpecification",
             "ActionSpaceSpecification": "SearchTeacherActionSpaceSpecification",
             "EvaluatorSpecification": "SearchTeacherEvaluatorSpecification",
-            "IntegrationSpecification": "SearchTeacherIntegrationSpecification",
             "PolicyBehaviorSpecification": "SearchTeacherBehaviorSpecification",
         }
         for symbol, wire_name in aliases.items():

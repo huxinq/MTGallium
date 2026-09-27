@@ -86,7 +86,7 @@ state, so history commitments describe the projected event sequence for that mod
 
 ### Simultaneous untaps
 
-`QUALIFIED_TURN_UNTAP_V1` recognizes the automatic END/CLEANUP-to-UPKEEP
+`QUALIFIED_TURN_UNTAP_V2` recognizes the automatic END/CLEANUP-to-UPKEEP
 transition with one turn marker, at least two distinct untaps of the next active
 player's tapped objects, and the final upkeep marker. The adapter projects each
 recognized untap into player-visible vocabulary, sorts those projected entries,
@@ -94,20 +94,20 @@ then assigns event numbers and updates the history commitment. Raw engine events
 raw entity IDs, hidden identities, unrelated events, and ordered choices keep
 their order.
 
-`QUALIFIED_TURN_UNTAP_V2` also covers the path that resumes after cleanup. It
+It also covers the path that resumes after cleanup. It
 reorders only the later qualified untap group; completed cleanup events stay in
 order. The earlier events qualify only when none of them changes a grouped
 object's zone, tapped state, or phased presence.
 
 ### Remembered battlefield references
 
-`REMEMBERED_BATTLEFIELD_V1` uses a viewer-local knowledge-object key when the
+`QUALIFIED_OBSERVED_OBJECTS_V2` uses a viewer-local knowledge-object key when the
 same battlefield incarnation is visible before and after a transition. Eligibility
 is fixed before the event batch. Zone changes, continuity broken by a shuffle,
 missing handles, and missing incarnation information fall back to the snapshot
 reference.
 
-`QUALIFIED_OBSERVED_OBJECTS_V2` adds qualified resolution sources and puts
+It also uses qualified resolution sources and puts
 unordered combat assignments in canonical order, while keeping distinct
 remembered objects and ordered damage choices. Handles never rebind to a later
 incarnation; raw entity IDs and incarnations stay inside the trusted adapter.

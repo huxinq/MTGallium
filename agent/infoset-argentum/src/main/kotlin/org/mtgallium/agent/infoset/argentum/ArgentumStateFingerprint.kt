@@ -46,23 +46,6 @@ object ArgentumStateFingerprint {
         return componentDigests(semanticState)
     }
 
-    fun evidence(state: GameState): ArgentumAuthoritativeStateEvidence {
-        val semanticState = routingNormalizedState(state) as JsonObject
-        return ArgentumAuthoritativeStateEvidence(
-            fingerprint = PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), semanticState)),
-            componentDigests = componentDigests(semanticState),
-        )
-    }
-
-    /** Compatibility verifier for privileged replay schemas written before routing-identity v2. */
-    fun legacyReplayEvidence(state: GameState): ArgentumAuthoritativeStateEvidence {
-        val semanticState = normalizeLegacyDecisionRouting(json.encodeToJsonElement(state)) as JsonObject
-        return ArgentumAuthoritativeStateEvidence(
-            fingerprint = PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), semanticState)),
-            componentDigests = componentDigests(semanticState),
-        )
-    }
-
     private fun componentDigests(semanticState: JsonObject): Map<String, String> =
         semanticState.entries.sortedBy { it.key }.associate { (key, value) ->
             key to PolicyJson.sha256(json.encodeToString(JsonElement.serializer(), value))
@@ -181,33 +164,10 @@ object ArgentumStateFingerprint {
     }
 
     private fun jsonPointerSegment(value: String): String = value.replace("~", "~0").replace("/", "~1")
-
-    private fun normalizeLegacyDecisionRouting(
-        element: JsonElement,
-        insidePendingDecision: Boolean = false,
-    ): JsonElement = when (element) {
-        is JsonArray -> JsonArray(element.map { normalizeLegacyDecisionRouting(it, insidePendingDecision) })
-        is JsonObject -> JsonObject(element.mapValues { (key, value) ->
-            when {
-                key == "decisionId" -> JsonPrimitive("<decision-routing-id>")
-                insidePendingDecision && key == "id" -> JsonPrimitive("<decision-routing-id>")
-                else -> normalizeLegacyDecisionRouting(
-                    value,
-                    insidePendingDecision = insidePendingDecision || key == "pendingDecision",
-                )
-            }
-        })
-        is JsonPrimitive -> element
-    }
 }
 
 data class ArgentumStateDifference(
     val path: String,
     val expected: String?,
     val actual: String?,
-)
-
-data class ArgentumAuthoritativeStateEvidence(
-    val fingerprint: String,
-    val componentDigests: Map<String, String>,
 )

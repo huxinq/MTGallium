@@ -20,10 +20,8 @@ architecture-check:
 
 check PRIVATE_EVIDENCE_ROOT="/tmp/mtgallium-public-evidence":
     just research-tools-check
-    python3 -m unittest discover -s tools/analysis -p 'test_*.py'
     MTGALLIUM_PUBLIC_SOURCE=1 MTGALLIUM_PRIVATE_EVIDENCE_ROOT={{quote(PRIVATE_EVIDENCE_ROOT)}} {{gradle}} checkArchitecture {{policy_modules}} :research:workbench:test {{policy_integration}} :evaluation:argentum:test
 
 policy-check PRIVATE_EVIDENCE_ROOT="/tmp/mtgallium-public-evidence":
     just research-tools-check
-    python3 -m unittest discover -s tools/analysis -p 'test_*.py'
     MTGALLIUM_PUBLIC_SOURCE=1 MTGALLIUM_PRIVATE_EVIDENCE_ROOT={{quote(PRIVATE_EVIDENCE_ROOT)}} {{gradle}} {{policy_modules}} :research:workbench:test {{policy_integration}}

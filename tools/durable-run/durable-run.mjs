@@ -14,20 +14,6 @@ export const CODEX_PROXY_HELP = 'Proxy stdio bytes to the running app-server con
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}$/
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
-const PROGRESS_FIELDS = new Set([
-  'schemaVersion', 'updatedAt', 'completed', 'total', 'unit', 'phase', 'detail', 'etaAt', 'remainingSeconds',
-])
-export const DEFAULT_PROGRESS_POLICY = Object.freeze({
-  pollIntervalMs: 2_000,
-  milestonePercent: 20,
-  minimumNotificationIntervalMs: 30_000,
-  substantialEtaChangeMs: 15 * 60_000,
-  etaMinimumObservations: 3,
-  etaMinimumElapsedMs: 15_000,
-  etaMinimumFraction: 0.05,
-  etaMaximumObservations: 12,
-})
-
 function usage() {
   return `Usage:
   durable-run.mjs launch --name <name> [options] -- <command> [arguments...]
@@ -35,7 +21,6 @@ function usage() {
   durable-run.mjs logs [--json] [--lines N] [--state-root <path>] <run-id>
   durable-run.mjs notify [--json] [--state-root <path>] [--ntfy-config <path>] <run-id>
   durable-run.mjs list [--json] [--state-root <path>]
-  durable-run.mjs progress --file <path> [progress fields]
 
 Launch options:
   --workdir <path>       Command working directory (default: current directory)
@@ -48,18 +33,9 @@ Launch options:
   --no-notify            Disable external notifications, including saved configuration
   --json                 Print a structured launch receipt
   --env <name>           Capture one environment variable for the command (repeatable)
-  --estimated-seconds N  Optional workload-supplied launch estimate
   --ntfy-config <path>   Local ntfy environment file
   --state-root <path>    Operational state root
 
-Progress fields:
-  --completed <number>   Completed work
-  --total <number>       Total work
-  --unit <label>         Unit label, such as seeds or decisions
-  --phase <label>        Current phase
-  --detail <text>        Concise human-readable operational detail
-  --eta-at <ISO time>    Workload-supplied estimated completion time
-  --remaining-seconds N  Workload-supplied remaining duration
 `
 }
 
@@ -88,14 +64,13 @@ export function parseLaunchArgs(args) {
       parsed[option.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = true
       continue
     }
-    if (!['--name', '--workdir', '--output', '--log', '--thread', '--wake-codex', '--env', '--estimated-seconds', '--ntfy-config', '--state-root'].includes(option)) {
+    if (!['--name', '--workdir', '--output', '--log', '--thread', '--wake-codex', '--env', '--ntfy-config', '--state-root'].includes(option)) {
       throw new Error(`unknown launch option: ${option}`)
     }
     const value = optionValue(options, index, option)
     index += 1
     if (option === '--output') parsed.outputs.push(value)
     else if (option === '--env') parsed.envNames.push(value)
-    else if (option === '--estimated-seconds') parsed.estimatedSeconds = finiteNumber(value, option)
     else parsed[option.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value
   }
   if (!parsed.name) throw new Error('--name is required')
@@ -109,7 +84,6 @@ export function parseLaunchArgs(args) {
   }
   if (parsed.thread && parsed.noWake) throw new Error('--thread and --no-wake cannot be used together')
   if (parsed.requireWake && parsed.noWake) throw new Error('--require-wake and --no-wake cannot be used together')
-  if (parsed.estimatedSeconds !== undefined && parsed.estimatedSeconds <= 0) throw new Error('--estimated-seconds must be greater than zero')
   return parsed
 }
 
@@ -131,33 +105,6 @@ function parseCommonArgs(args, needsRunId, logs = false) {
   if (needsRunId && !parsed.runId) throw new Error('a run id is required')
   if (parsed.runId && !RUN_ID.test(parsed.runId)) throw new Error('invalid run id')
   return parsed
-}
-
-function finiteNumber(value, option) {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) throw new Error(`${option} must be a finite number`)
-  return parsed
-}
-
-export function parseProgressArgs(args) {
-  const parsed = { schemaVersion: 1, updatedAt: now() }
-  for (let index = 0; index < args.length; index += 1) {
-    const option = args[index]
-    if (!['--file', '--completed', '--total', '--unit', '--phase', '--detail', '--eta-at', '--remaining-seconds'].includes(option)) {
-      throw new Error(`unknown progress option: ${option}`)
-    }
-    const value = optionValue(args, index, option)
-    index += 1
-    if (option === '--file') parsed.file = value
-    else if (option === '--completed') parsed.completed = finiteNumber(value, option)
-    else if (option === '--total') parsed.total = finiteNumber(value, option)
-    else if (option === '--eta-at') parsed.etaAt = value
-    else if (option === '--remaining-seconds') parsed.remainingSeconds = finiteNumber(value, option)
-    else parsed[option.slice(2)] = value
-  }
-  if (!parsed.file) throw new Error('--file is required')
-  const { file, ...progress } = parsed
-  return { file: path.resolve(file), progress: validateProgressUpdate(progress) }
 }
 
 function slugify(name) {
@@ -216,135 +163,6 @@ export function atomicWriteJson(filename, value) {
 
 function readJson(filename) {
   return JSON.parse(fs.readFileSync(filename, 'utf8'))
-}
-
-function progressText(value, field, limit) {
-  if (value === undefined) return undefined
-  if (typeof value !== 'string' || !value.trim() || value.length > limit || /[\x00-\x1f\x7f]/.test(value)) {
-    throw new Error(`${field} must be 1-${limit} readable characters`)
-  }
-  return value.trim()
-}
-
-export function validateProgressUpdate(value, options = {}) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('progress must be a JSON object')
-  for (const field of Object.keys(value)) {
-    if (!PROGRESS_FIELDS.has(field)) throw new Error(`unknown progress field: ${field}`)
-  }
-  if (value.schemaVersion !== 1) throw new Error('progress schemaVersion must be 1')
-  if (typeof value.updatedAt !== 'string') throw new Error('progress updatedAt must be an ISO timestamp')
-  const updatedAtMs = Date.parse(value.updatedAt)
-  if (!Number.isFinite(updatedAtMs)) throw new Error('progress updatedAt must be an ISO timestamp')
-  const observedAtMs = options.observedAtMs ?? Date.now()
-  if (updatedAtMs > observedAtMs + 5 * 60_000) throw new Error('progress updatedAt is implausibly far in the future')
-
-  const progress = { schemaVersion: 1, updatedAt: new Date(updatedAtMs).toISOString() }
-  for (const field of ['completed', 'total', 'remainingSeconds']) {
-    if (value[field] !== undefined) {
-      if (typeof value[field] !== 'number' || !Number.isFinite(value[field]) || value[field] < 0) {
-        throw new Error(`progress ${field} must be a non-negative finite number`)
-      }
-      progress[field] = value[field]
-    }
-  }
-  if (progress.total !== undefined && progress.total <= 0) throw new Error('progress total must be greater than zero')
-  if (progress.completed !== undefined && progress.total !== undefined && progress.completed > progress.total) {
-    throw new Error('progress completed cannot exceed total')
-  }
-  progress.unit = progressText(value.unit, 'unit', 40)
-  progress.phase = progressText(value.phase, 'phase', 80)
-  progress.detail = progressText(value.detail, 'detail', 240)
-  if (value.etaAt !== undefined) {
-    if (typeof value.etaAt !== 'string') throw new Error('progress etaAt must be an ISO timestamp')
-    const etaAtMs = Date.parse(value.etaAt)
-    if (!Number.isFinite(etaAtMs) || etaAtMs < updatedAtMs) throw new Error('progress etaAt must not precede updatedAt')
-    progress.etaAt = new Date(etaAtMs).toISOString()
-  }
-  if (progress.etaAt !== undefined && progress.remainingSeconds !== undefined) {
-    throw new Error('progress may supply etaAt or remainingSeconds, not both')
-  }
-  if (!['completed', 'total', 'unit', 'phase', 'detail', 'etaAt', 'remainingSeconds'].some((field) => progress[field] !== undefined)) {
-    throw new Error('progress must contain at least one progress field')
-  }
-  return Object.fromEntries(Object.entries(progress).filter(([, fieldValue]) => fieldValue !== undefined))
-}
-
-function unavailableEta(reason = 'insufficient-progress') {
-  return { state: 'unavailable', source: null, reason }
-}
-
-export function workloadEta(progress) {
-  if (progress.etaAt) {
-    return {
-      state: 'available', source: 'workload', kind: 'estimated-completion',
-      estimatedCompletionAt: progress.etaAt,
-      remainingSeconds: Math.max(0, Math.round((Date.parse(progress.etaAt) - Date.parse(progress.updatedAt)) / 1000)),
-    }
-  }
-  if (progress.remainingSeconds !== undefined) {
-    return {
-      state: 'available', source: 'workload', kind: 'remaining-duration',
-      estimatedCompletionAt: new Date(Date.parse(progress.updatedAt) + progress.remainingSeconds * 1000).toISOString(),
-      remainingSeconds: Math.round(progress.remainingSeconds),
-    }
-  }
-  return null
-}
-
-export function deriveRunnerEta(samples, progress, policy = DEFAULT_PROGRESS_POLICY) {
-  if (progress.completed === undefined || progress.total === undefined) return unavailableEta()
-  if (samples.length < policy.etaMinimumObservations) return unavailableEta('too-few-observations')
-  const first = samples[0]
-  const last = samples.at(-1)
-  const elapsedMs = last.observedAtMs - first.observedAtMs
-  const completedDelta = last.completed - first.completed
-  if (elapsedMs < policy.etaMinimumElapsedMs) return unavailableEta('observation-window-too-short')
-  if (completedDelta < Math.max(1, progress.total * policy.etaMinimumFraction)) {
-    return unavailableEta('too-little-observed-progress')
-  }
-  const ratePerMs = completedDelta / elapsedMs
-  if (!(ratePerMs > 0)) return unavailableEta('no-positive-observed-rate')
-  const remainingMs = Math.max(0, progress.total - progress.completed) / ratePerMs
-  return {
-    state: 'available', source: 'runner', kind: 'observed-rate',
-    estimatedCompletionAt: new Date(last.observedAtMs + remainingMs).toISOString(),
-    remainingSeconds: Math.round(remainingMs / 1000),
-    basis: {
-      observationCount: samples.length,
-      observedSeconds: Math.round(elapsedMs / 1000),
-      completedDelta,
-    },
-  }
-}
-
-function percentage(progress) {
-  if (progress.completed === undefined || progress.total === undefined) return null
-  return Math.max(0, Math.min(100, progress.completed / progress.total * 100))
-}
-
-export function progressNotificationDecision(progress, atMs, policy = DEFAULT_PROGRESS_POLICY) {
-  if (!progress.current) return null
-  const notificationPolicy = progress.notificationPolicy
-  const lastAtMs = notificationPolicy.lastNotifiedAt ? Date.parse(notificationPolicy.lastNotifiedAt) : null
-  if (lastAtMs !== null && atMs - lastAtMs < policy.minimumNotificationIntervalMs) return null
-
-  const triggers = []
-  const currentPercent = progress.percent
-  const milestone = currentPercent === null ? 0 : Math.floor(currentPercent / policy.milestonePercent) * policy.milestonePercent
-  if (milestone >= policy.milestonePercent && milestone > notificationPolicy.highestNotifiedMilestone) {
-    triggers.push('milestone')
-  }
-  if (progress.current.phase && progress.current.phase !== notificationPolicy.lastNotifiedPhase) {
-    triggers.push('phase')
-  }
-  if (progress.eta.state === 'available') {
-    if (!notificationPolicy.lastNotifiedEtaAt) triggers.push('eta-available')
-    else if (Math.abs(Date.parse(progress.eta.estimatedCompletionAt) - Date.parse(notificationPolicy.lastNotifiedEtaAt)) >= policy.substantialEtaChangeMs) {
-      triggers.push('eta-changed')
-    }
-  }
-  if (!triggers.length) return null
-  return { triggers, milestone }
 }
 
 export function findExecutable(name, environment = process.env) {
@@ -468,25 +286,6 @@ function initialStatus(request, completionConfig) {
     commandFinishedAt: null,
     completedAt: null,
     experiment: { state: 'pending', exitCode: null, signal: null, spawnError: null },
-    progress: {
-      state: 'unreported',
-      file: request.progressFile,
-      current: null,
-      percent: null,
-      eta: unavailableEta('no-progress-reported'),
-      observedAt: null,
-      acceptedUpdates: 0,
-      ignoredUpdates: 0,
-      lastIgnored: null,
-      notificationPolicy: {
-        milestonePercent: request.progressPolicy.milestonePercent,
-        minimumIntervalSeconds: request.progressPolicy.minimumNotificationIntervalMs / 1000,
-        highestNotifiedMilestone: 0,
-        lastNotifiedPhase: null,
-        lastNotifiedEtaAt: null,
-        lastNotifiedAt: null,
-      },
-    },
     notification: {
       configured: notificationConfigured,
       state: notificationState,
@@ -494,14 +293,6 @@ function initialStatus(request, completionConfig) {
       attemptedAt: null,
       exitCode: null,
       start: notificationEvent(),
-      progress: {
-        state: notificationReason ? 'unavailable' : 'idle',
-        reason: notificationReason || null,
-        attemptedCount: 0,
-        succeededCount: 0,
-        failedCount: 0,
-        last: null,
-      },
       terminal: notificationEvent(),
     },
     wake: {
@@ -523,8 +314,6 @@ export function prepareRun(parsed, environment = process.env) {
   const { runId, unit } = newRunIdentity(parsed.name)
   const runDirectory = path.join(stateRoot, runId)
   const logPath = privateOperationalPath(path.resolve(workingDirectory, parsed.log || path.join(runDirectory, 'command.log')))
-  const progressFile = path.join(runDirectory, 'progress.json')
-  const progressPolicy = { ...DEFAULT_PROGRESS_POLICY }
   const outputPaths = parsed.outputs.map((output) => privateOperationalPath(path.resolve(workingDirectory, output)))
   const environmentValues = capturedEnvironment(parsed.envNames, environment)
   const codexThreadId = parsed.noWake ? null : (parsed.thread || environment.CODEX_THREAD_ID || null)
@@ -551,10 +340,7 @@ export function prepareRun(parsed, environment = process.env) {
     command: { argv: parsed.command },
     environment: environmentValues,
     logPath,
-    progressFile,
-    progressPolicy,
     outputPaths,
-    initialEstimatedSeconds: parsed.estimatedSeconds ?? null,
     codexThreadId,
     notificationConfigSource: ntfy.source,
   }
@@ -598,139 +384,6 @@ function exitCodeFor(code, signal) {
   return signalNumber ? 128 + signalNumber : 125
 }
 
-function recordIgnoredProgress(request, reason) {
-  updateStatus(request.runDirectory, (status) => ({
-    ...status,
-    progress: {
-      ...status.progress,
-      ignoredUpdates: status.progress.ignoredUpdates + 1,
-      lastIgnored: { at: now(), reason: redact(reason, []) },
-    },
-  }))
-}
-
-function updateProgressNotification(request, decision, outcome, attemptedAt) {
-  updateStatus(request.runDirectory, (status) => {
-    const succeeded = outcome.state === 'succeeded'
-    const progressNotification = status.notification.progress
-    return {
-      ...status,
-      notification: {
-        ...status.notification,
-        progress: {
-          ...progressNotification,
-          state: outcome.state,
-          reason: outcome.error || null,
-          attemptedCount: progressNotification.attemptedCount + 1,
-          succeededCount: progressNotification.succeededCount + (succeeded ? 1 : 0),
-          failedCount: progressNotification.failedCount + (succeeded ? 0 : 1),
-          last: { ...outcome, attemptedAt, triggers: decision.triggers },
-        },
-      },
-      progress: {
-        ...status.progress,
-        notificationPolicy: {
-          ...status.progress.notificationPolicy,
-          highestNotifiedMilestone: Math.max(
-            status.progress.notificationPolicy.highestNotifiedMilestone,
-            decision.milestone,
-          ),
-          lastNotifiedPhase: status.progress.current?.phase || status.progress.notificationPolicy.lastNotifiedPhase,
-          lastNotifiedEtaAt: status.progress.eta.state === 'available'
-            ? status.progress.eta.estimatedCompletionAt
-            : status.progress.notificationPolicy.lastNotifiedEtaAt,
-          lastNotifiedAt: attemptedAt,
-        },
-      },
-    }
-  })
-}
-
-export function startProgressMonitor(request, completionConfig) {
-  const policy = { ...DEFAULT_PROGRESS_POLICY, ...request.progressPolicy }
-  let lastFileVersion = null
-  let lastAcceptedUpdatedAtMs = null
-  let samples = []
-
-  const poll = (allowNotification = true) => {
-    try {
-      let changed = false
-      try {
-        const stat = fs.statSync(request.progressFile, { bigint: true })
-        const fileVersion = `${stat.ino}:${stat.size}:${stat.mtimeNs}`
-        if (fileVersion !== lastFileVersion) {
-          lastFileVersion = fileVersion
-          changed = true
-        }
-      } catch (error) {
-        if (error?.code !== 'ENOENT') recordIgnoredProgress(request, error)
-      }
-
-      if (changed) {
-        const observedAtMs = Date.now()
-        let progress
-        try {
-          progress = validateProgressUpdate(readJson(request.progressFile), { observedAtMs })
-        } catch (error) {
-          recordIgnoredProgress(request, error)
-          progress = null
-        }
-        if (progress) {
-          const updatedAtMs = Date.parse(progress.updatedAt)
-          if (lastAcceptedUpdatedAtMs !== null && updatedAtMs <= lastAcceptedUpdatedAtMs) {
-            recordIgnoredProgress(request, 'stale progress updatedAt did not advance')
-          } else {
-            lastAcceptedUpdatedAtMs = updatedAtMs
-            if (progress.completed !== undefined && progress.total !== undefined) {
-              const previous = samples.at(-1)
-              if (previous && (previous.total !== progress.total || progress.completed < previous.completed)) samples = []
-              samples.push({ completed: progress.completed, total: progress.total, observedAtMs })
-              samples = samples.slice(-policy.etaMaximumObservations)
-            } else {
-              samples = []
-            }
-            const observedEta = workloadEta(progress) || deriveRunnerEta(samples, progress, policy)
-            updateStatus(request.runDirectory, (status) => ({
-              ...status,
-              progress: {
-                ...status.progress,
-                state: 'reported',
-                current: progress,
-                percent: percentage(progress),
-                eta: observedEta.state === 'available'
-                  ? observedEta
-                  : (status.progress.eta.source === 'workload' ? status.progress.eta : observedEta),
-                observedAt: new Date(observedAtMs).toISOString(),
-                acceptedUpdates: status.progress.acceptedUpdates + 1,
-              },
-            }))
-          }
-        }
-      }
-
-      const status = readJson(path.join(request.runDirectory, 'status.json'))
-      if (!allowNotification || !status.notification.configured || status.phase !== 'running') return
-      const decision = progressNotificationDecision(status.progress, Date.now(), policy)
-      if (!decision) return
-      const attemptedAt = now()
-      const outcome = attemptHumanNotification(request, status, completionConfig.ntfy, 'progress')
-      updateProgressNotification(request, decision, outcome, attemptedAt)
-    } catch (error) {
-      appendLog(request.logPath, `[${now()}] ignored progress monitor error: ${redact(error, [])}`)
-    }
-  }
-
-  poll()
-  const interval = setInterval(poll, policy.pollIntervalMs)
-  interval.unref()
-  return () => {
-    clearInterval(interval)
-    // The final write can race the last timer tick. Retain it before recording
-    // completion, without sending a redundant progress notification.
-    poll(false)
-  }
-}
-
 async function runCommand(request, completionConfig) {
   ensurePrivateDirectory(path.dirname(request.logPath))
   const descriptor = fs.openSync(request.logPath, 'a', 0o600)
@@ -740,7 +393,7 @@ async function runCommand(request, completionConfig) {
   try {
     child = spawn(request.command.argv[0], request.command.argv.slice(1), {
       cwd: request.workingDirectory,
-      env: { ...process.env, ...request.environment, MTGALLIUM_PROGRESS_FILE: request.progressFile },
+      env: { ...process.env, ...request.environment },
       stdio: ['ignore', descriptor, descriptor],
     })
   } catch (error) {
@@ -768,7 +421,6 @@ async function runCommand(request, completionConfig) {
     }))
   })
   const didSpawn = await spawned
-  let stopProgress = () => {}
   if (didSpawn) {
     const startedAt = now()
     let status = updateStatus(request.runDirectory, (current) => ({
@@ -776,16 +428,6 @@ async function runCommand(request, completionConfig) {
       phase: 'running',
       startedAt,
       experiment: { ...current.experiment, state: 'running' },
-      progress: request.initialEstimatedSeconds === null || request.initialEstimatedSeconds === undefined
-        ? current.progress
-        : {
-            ...current.progress,
-            eta: {
-              state: 'available', source: 'workload', kind: 'launch-estimate',
-              estimatedCompletionAt: new Date(Date.parse(startedAt) + request.initialEstimatedSeconds * 1000).toISOString(),
-              remainingSeconds: Math.round(request.initialEstimatedSeconds),
-            },
-          },
     }))
     if (status.notification.configured) {
       const attemptedAt = now()
@@ -796,16 +438,10 @@ async function runCommand(request, completionConfig) {
           ...current.notification,
           start: { ...current.notification.start, ...outcome, attemptedAt },
         },
-        progress: {
-          ...current.progress,
-          notificationPolicy: { ...current.progress.notificationPolicy, lastNotifiedAt: attemptedAt },
-        },
       }))
     }
-    stopProgress = startProgressMonitor(request, completionConfig)
   }
   const result = await closed
-  stopProgress()
   process.off('SIGTERM', forwardTermination)
   process.off('SIGINT', forwardInterrupt)
   fs.writeSync(descriptor, `[${now()}] command exited ${result.code}${result.signal ? ` (${result.signal})` : ''}\n`)
@@ -825,10 +461,6 @@ function curlConfigLine(name, value) {
   return `${name} = "${escaped}"`
 }
 
-function formatClock(isoTime) {
-  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(isoTime))
-}
-
 function formatDuration(milliseconds) {
   const seconds = Math.max(0, Math.round(milliseconds / 1000))
   if (seconds < 90) return `${seconds} sec`
@@ -839,39 +471,15 @@ function formatDuration(milliseconds) {
   return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`
 }
 
-function etaText(eta, unavailableText = null) {
-  if (eta?.state !== 'available') return unavailableText
-  const source = eta.source === 'workload' ? 'workload estimate' : 'observed rate'
-  return `ETA ~${formatClock(eta.estimatedCompletionAt)} (${source}).`
-}
-
 function notificationContent(request, status, kind) {
   const title = `MTGallium · ${request.name}`
   if (kind === 'start') {
     return {
       title,
       tags: 'rocket',
-      message: ['Started.', etaText(status.progress.eta, 'ETA not available yet.'), `Run ${request.runId}`].filter(Boolean).join('\n'),
+      message: ['Started.', `Run ${request.runId}`].join('\n'),
     }
   }
-  if (kind === 'progress') {
-    const current = status.progress.current
-    const lines = []
-    if (status.progress.percent !== null) {
-      let summary = `${Math.round(status.progress.percent)}% complete`
-      if (current.completed !== undefined && current.total !== undefined) {
-        summary += ` · ${current.completed}/${current.total}${current.unit ? ` ${current.unit}` : ''}`
-      }
-      lines.push(summary)
-    } else if (current.phase) lines.push(current.phase)
-    if (current.phase && lines[0] !== current.phase) lines.push(`Phase: ${current.phase}`)
-    if (current.detail) lines.push(current.detail)
-    const eta = etaText(status.progress.eta)
-    if (eta) lines.push(eta)
-    lines.push(`Run ${request.runId}`)
-    return { title, tags: 'chart_with_upwards_trend', message: lines.join('\n') }
-  }
-
   const successful = status.experiment.exitCode === 0
   const startMs = Date.parse(status.startedAt || status.createdAt)
   const finishMs = Date.parse(status.commandFinishedAt || now())
@@ -1028,19 +636,12 @@ function inspection(stateRoot, runId) {
   const runDirectory = resolveRunDirectory(stateRoot, runId)
   const request = readJson(path.join(runDirectory, 'request.json'))
   const storedStatus = readJson(path.join(runDirectory, 'status.json'))
-  const progressFile = request.progressFile || path.join(runDirectory, 'progress.json')
-  const status = storedStatus.progress ? storedStatus : {
+  const status = {
     ...storedStatus,
-    progress: {
-      state: 'unreported', file: progressFile, current: null, percent: null,
-      eta: unavailableEta('not-recorded-by-status-schema'), observedAt: null,
-      acceptedUpdates: 0, ignoredUpdates: 0, lastIgnored: null,
-    },
     notification: {
       ...storedStatus.notification,
-      start: { state: 'not-recorded' },
-      progress: { state: 'not-recorded' },
-      terminal: { state: storedStatus.notification.state },
+      start: storedStatus.notification.start ?? { state: 'not-recorded' },
+      terminal: storedStatus.notification.terminal ?? { state: storedStatus.notification.state },
     },
   }
   return {
@@ -1051,7 +652,6 @@ function inspection(stateRoot, runId) {
     command: request.command,
     capturedEnvironmentNames: Object.keys(request.environment),
     logPath: request.logPath,
-    progressFile,
     outputPaths: request.outputPaths,
     notificationConfigSource: request.notificationConfigSource,
     codexThreadId: request.codexThreadId,
@@ -1064,16 +664,6 @@ function inspection(stateRoot, runId) {
 }
 
 function printInspection(value) {
-  let progress = 'not reported'
-  if (value.progress.current) {
-    const current = value.progress.current
-    progress = value.progress.percent === null
-      ? (current.phase || current.detail || 'reported')
-      : `${Math.round(value.progress.percent)}% (${current.completed}/${current.total}${current.unit ? ` ${current.unit}` : ''})`
-  }
-  const eta = value.progress.eta.state === 'available'
-    ? `${value.progress.eta.source} ~${formatClock(value.progress.eta.estimatedCompletionAt)}`
-    : `unavailable (${value.progress.eta.reason})`
   process.stdout.write([
     `Run: ${value.runId} (${value.name})`,
     `State: ${value.phase}; experiment=${value.experiment.state}; exit=${value.experiment.exitCode ?? 'not available'}`,
@@ -1083,12 +673,9 @@ function printInspection(value) {
     `Command argv: ${JSON.stringify(value.command.argv)}`,
     `Status: ${path.join(value.runDirectory, 'status.json')}`,
     `Log: ${value.logPath}`,
-    `Progress: ${progress}`,
-    `ETA: ${eta}`,
-    `Progress file: ${value.progressFile}`,
     `Outputs: ${value.outputPaths.length ? value.outputPaths.join(', ') : '(none recorded)'}`,
     `Codex thread: ${value.codexThreadId || '(none)'}`,
-    `ntfy: start=${value.notification.start.state}; progress=${value.notification.progress.state}; terminal=${value.notification.terminal.state}`,
+    `ntfy: start=${value.notification.start.state}; terminal=${value.notification.terminal.state}`,
     `Codex wake: ${value.wake.state}${value.wake.reason ? ` (${value.wake.reason})` : ''}`,
     ...(value.attachedNotifications ? [`Attached ntfy: ${value.attachedNotifications.phase}; last delivery=${value.attachedNotifications.lastDelivery?.state || 'pending'}`] : []),
     '',
@@ -1189,12 +776,6 @@ async function main(argv) {
     const values = listRuns(path.resolve(parsed.stateRoot || defaultStateRoot()))
     if (parsed.json) process.stdout.write(`${JSON.stringify(values, null, 2)}\n`)
     else for (const value of values) process.stdout.write(`${value.runId}\t${value.phase}\texit=${value.experiment.exitCode ?? '-'}\t${value.name}\n`)
-    return
-  }
-  if (command === 'progress') {
-    const { file, progress } = parseProgressArgs(args)
-    atomicWriteJson(privateOperationalPath(file), progress)
-    process.stdout.write(`${file}\n`)
     return
   }
   if (command === '_execute') {

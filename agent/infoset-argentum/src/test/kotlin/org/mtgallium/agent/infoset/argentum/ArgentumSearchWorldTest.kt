@@ -80,101 +80,7 @@ class ArgentumSearchWorldTest {
         assertTrue(SemanticOperationFamily.PASS_PRIORITY in seen)
     }
 
-    @Test
-    fun `expiring profile delays a reachable upkeep pump without removing the legal pump`() {
-        val registry = registry().apply { register(AetherdriftSet.cards) }
-        val deck = mapOf("Mountain" to 12, "Burnout Bashtronaut" to 4, "Goblin Bully" to 4)
-        val env = GameEnvironment.create(registry).also {
-            it.reset(GameConfig(
-                players = listOf("Alice", "Bob").map { name ->
-                    PlayerConfig(name, Deck.of(*deck.entries.map { it.key to it.value }.toTypedArray()))
-                }, seed = 917L, skipMulligans = true, startingPlayerIndex = 0,
-            ))
-        }
-        // Select a synthetic opening hand before creating any represented history. All later
-        // states, including the upkeep and combat decisions, are reached through engine actions.
-        val player = env.playerIds.first()
-        var initial = env.state
-        val fixed = mutableSetOf<com.wingedsheep.sdk.model.EntityId>()
-        listOf("Mountain", "Mountain", "Burnout Bashtronaut", "Goblin Bully").forEachIndexed { index, name ->
-            val hand = initial.getHand(player)
-            val library = initial.getLibrary(player)
-            val source = (hand + library).first {
-                it !in fixed && initial.getEntity(it)?.get<CardComponent>()?.name == name
-            }
-            val target = hand[index]
-            initial = initial.copy(zones = initial.zones +
-                (ZoneKey(player, Zone.HAND) to hand.map {
-                    when (it) { source -> target; target -> source; else -> it }
-                }) + (ZoneKey(player, Zone.LIBRARY) to library.map { if (it == source) target else it }))
-            fixed += source
-        }
-        env.restore(initial, env.playerIds, env.stepCount)
-        val world = ArgentumSearchWorld.create(
-            env, "synthetic-expiring-pump", 94L, effectiveSetupSeed = 917L,
-            knownDecks = mapOf("p0" to deck, "p1" to deck),
-        )
-        var steps = 0
-        while (true) {
-            val observation = world.informationState("p0").observation
-            if (observation.turnNumber == 5 && observation.step == "UPKEEP") break
-            check(steps++ < 160) { "Did not reach the third upkeep" }
-            val candidates = world.expandChoices().candidates
-            val own = world.actorToAct() == "p0"
-            val battlefield = observation.zones.filter { it.zone == "BATTLEFIELD" && it.ownerId == "p0" }
-                .flatMap { it.cards }
-            val action = candidates.firstOrNull {
-                own && battlefield.count { card -> "LAND" in card.types } < 2 &&
-                    it.operationFamily == SemanticOperationFamily.PLAY_LAND
-            } ?: candidates.firstOrNull {
-                own && battlefield.none { card -> card.name == "Burnout Bashtronaut" } &&
-                    it.operationFamily == SemanticOperationFamily.CAST_SPELL &&
-                    it.actionIntent.sourceCardName == "Burnout Bashtronaut"
-            } ?: candidates.firstOrNull { it.operationFamily == SemanticOperationFamily.PASS_PRIORITY }
-                ?: candidates.firstOrNull { it.actionIntent.kind == org.mtgallium.agent.infoset.core.SemanticActionIntentKind.DECLINE_ATTACK }
-                ?: candidates.firstOrNull { it.operationFamily == SemanticOperationFamily.DECISION_RESPONSE }
-                ?: error("Unexpected setup choice at ${observation.turnNumber}/${observation.step}: ${candidates.map { it.actionIntent }}")
-            assertTrue(world.step(action).accepted)
-        }
-        val original = world.determinizedHeuristicChoiceDiagnosis().choice
-        assertEquals(SemanticOperationFamily.ACTIVATE_ABILITY, original?.operationFamily)
-        val held = world.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION_EXPIRING)
-        assertEquals(world.informationState("p0"), held.informationState("p0"))
-        assertEquals(SemanticOperationFamily.PASS_PRIORITY, held.determinizedHeuristicChoiceDiagnosis().choice?.operationFamily)
-        assertEquals(SemanticOperationFamily.PASS_PRIORITY,
-            (held.fork() as ArgentumSearchWorld).determinizedHeuristicChoiceDiagnosis().choice?.operationFamily)
-        assertEquals(original, world.determinizedHeuristicChoiceDiagnosis().choice)
-        // The timing policy does not remove the pump from the legal/admitted action set.
-        assertTrue(held.expandChoices().candidates.any { it.operationFamily == SemanticOperationFamily.ACTIVATE_ABILITY })
 
-        val pumped = world.fork() as ArgentumSearchWorld
-        assertTrue(pumped.step(requireNotNull(original)).accepted)
-        val evaluated = mutableListOf<org.mtgallium.agent.infoset.core.InformationStateRepresentation>()
-        val evaluator = object : org.mtgallium.agent.infoset.core.InformationStateEvaluator {
-            override val id = "mono-red-visible-board-v2"
-            override fun evaluate(information: org.mtgallium.agent.infoset.core.InformationStateRepresentation, rootPlayer: String): Double {
-                evaluated += information
-                return 0.0
-            }
-        }
-        val settlement = InformationSetSearch(
-            config = InformationSetSearchConfig(
-                simulations = 1, maxPolicyDecisions = 1,
-                leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT),
-                rolloutTurnHorizon = org.mtgallium.agent.infoset.core.RolloutTurnHorizon(1, 256),
-            ),
-            opponentPolicy = UniformOpponentPolicy, rolloutPolicy = UniformOpponentPolicy,
-            rolloutOpponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.Information(evaluator),
-        ).settleFirstUnvisitedEdge(pumped, "p0", 621L, 0, rootTurnNumber = 5)
-        assertEquals(org.mtgallium.agent.infoset.core.SearchSettlementOrigin.HEURISTIC_SETTLEMENT, settlement.origin)
-        val afterCleanup = evaluated.single().observation
-        assertEquals(6, afterCleanup.turnNumber)
-        assertEquals("UPKEEP", afterCleanup.step)
-        assertTrue(afterCleanup.zones.flatMap { it.cards }
-            .filter { it.zone == "BATTLEFIELD" && it.name == "Burnout Bashtronaut" }
-            .all { it.power == 1 })
-    }
 
 
 
@@ -465,25 +371,25 @@ class ArgentumSearchWorldTest {
             (particle.value as ArgentumSearchWorld).knowledgeConsistencyFailure("p0", rootInfo) == null
         })
 
-        val leftHybrid = ArgentumHybridBeliefWorldSource(leftRoot)
+        val leftSnapshot = ArgentumKnownDeckBeliefWorldSource(leftRoot)
             .sample(rootInfo, knownDecks, 41L, 8)
-        val rightHybrid = ArgentumHybridBeliefWorldSource(rightRoot)
+        val rightSnapshot = ArgentumKnownDeckBeliefWorldSource(rightRoot)
             .sample(rootInfo, knownDecks, 41L, 8)
         val search = InformationSetSearch(
             InformationSetSearchConfig(
                 simulations = 32,
                 maxPolicyDecisions = 6,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
             rolloutPolicy = UniformOpponentPolicy,
             rolloutOpponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
+            valueSource = projectedTestValue(),
         )
-        val leftResult = search.search("p0", leftHybrid, searchSeed = 57L)
-        val rightResult = search.search("p0", rightHybrid, searchSeed = 57L)
+        val leftResult = search.search("p0", leftSnapshot, searchSeed = 57L)
+        val rightResult = search.search("p0", rightSnapshot, searchSeed = 57L)
         assertEquals(
             leftResult.copy(diagnostics = leftResult.diagnostics.copy(evaluatorNanos = 0)),
             rightResult.copy(diagnostics = rightResult.diagnostics.copy(evaluatorNanos = 0)),
@@ -566,17 +472,7 @@ class ArgentumSearchWorldTest {
         assertEquals(GameRng.seeded(919_191L), alternateEnv.state.rng)
     }
 
-    @Test
-    fun `sampled world evaluator is an allowlist`() {
-        val world = ArgentumSearchWorld.create(
-            environment(), "game-eval", 2L,
-            effectiveSetupSeed = 811L,
-        )
-        world.sampledWorldLeafValue("p0", ArgentumSearchWorld.ARGENTUM_BOARD_EVALUATOR_V1)
-        assertFailsWith<IllegalArgumentException> {
-            world.sampledWorldLeafValue("p0", "peek-at-referee")
-        }
-    }
+
 
     @Test
     fun `unsupported visibility states fail before policy projection`() {
@@ -620,13 +516,13 @@ class ArgentumSearchWorldTest {
                 simulations = 64,
                 maxPolicyDecisions = 8,
                 leaf = LeafEvaluationConfig(
-                    LeafStateSource.CURRENT_SAMPLED_WORLD,
+                    LeafStateSource.CURRENT_INFORMATION_STATE,
                     ),
             ),
             opponentPolicy = UniformOpponentPolicy,
             rolloutPolicy = UniformOpponentPolicy,
             rolloutOpponentPolicy = UniformOpponentPolicy,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"),
+            valueSource = projectedTestValue(),
         )
         val before = env.state
 
@@ -688,31 +584,15 @@ class ArgentumSearchWorldTest {
         assertEquals(information, hypothetical.informationState("p0"))
         hypothetical.expandChoicesWithPolicyAnnotations(64)
         assertEquals(2, resolutions.size)
-        world.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION)
-            .expandChoicesWithPolicyAnnotations(64)
-        assertEquals(3, resolutions.size)
         val reprofiled = world.withActionSpaceProfile(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1)
         assertEquals(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
             reprofiled.semanticExpansionSpecification().actionSpaceProfile)
         reprofiled.expandChoicesWithPolicyAnnotations(64)
-        assertEquals(4, resolutions.size)
+        assertEquals(3, resolutions.size)
         assertEquals(information, world.informationState("p0"))
     }
 
-    @Test
-    fun `heuristic-profile fork preserves information while rebuilding annotations`() {
-        val cardRegistry = registry()
-        val env = environment(cardRegistry)
-        val knownDecks = mapOf("p0" to deck, "p1" to deck)
-        val production = ArgentumSearchWorld.create(env, "profile-fork", 44L, 811L, knownDecks = knownDecks)
-        production.expandChoicesWithPolicyAnnotations()
-        val expiring = production.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION_EXPIRING)
 
-        assertEquals(production.informationState("p0"), expiring.informationState("p0"))
-        assertEquals(production.expandChoices().candidates.map { it.signature }, expiring.expandChoices().candidates.map { it.signature })
-        // A fresh annotation call must succeed on the new profile rather than reusing production's cache.
-        assertTrue(expiring.expandChoicesWithPolicyAnnotations().candidates.isNotEmpty())
-    }
 
     @Test
     fun `determinized heuristic tag is information-safe and unique`() {
@@ -837,58 +717,6 @@ class ArgentumSearchWorldTest {
         )
     }
 
-    @Test
-    fun `hybrid source gives rare tactical strata their exact mass`() {
-        val cardRegistry = CardRegistry().apply {
-            register(PortalSet.basicLands)
-            register(StrongholdSet.cards)
-        }
-        val shockDeck = mapOf("Mountain" to 18, "Shock" to 2)
-        val env = GameEnvironment.create(cardRegistry).also { environment ->
-            environment.reset(
-                GameConfig(
-                    players = listOf(
-                        PlayerConfig("Alice", Deck.of(*shockDeck.entries.map { it.key to it.value }.toTypedArray())),
-                        PlayerConfig("Bob", Deck.of(*shockDeck.entries.map { it.key to it.value }.toTypedArray())),
-                    ),
-                    seed = 901L,
-                    skipMulligans = true,
-                    startingPlayerIndex = 0,
-                )
-            )
-        }
-        val knownDecks = mapOf("p0" to shockDeck, "p1" to shockDeck)
-        val root = ArgentumSearchWorld.create(
-            env,
-            "hybrid-strata",
-            8L,
-            effectiveSetupSeed = 901L,
-            knownDecks = knownDecks,
-        )
-        val information = root.informationState("p0")
-
-        val batch = ArgentumHybridBeliefWorldSource(root)
-            .sample(information, knownDecks, beliefSeed = 77L, count = 8)
-
-        assertEquals(BeliefArchitecture.HYBRID_C_V1, batch.diagnostics.architecture)
-        assertEquals(information.knowledge.knowledgeDigest, batch.diagnostics.knowledgeDigest)
-        assertEquals(2, batch.diagnostics.strata.size)
-        val present = batch.diagnostics.strata.single { ":hand-contains:Shock" in it.id }
-        val actualPresent = batch.particles.filter { weighted ->
-            val sampled = weighted.value as ArgentumSearchWorld
-            val opponent = sampled.rawPlayerIds().getValue("p1")
-            sampled.authoritativeState().getHand(opponent).any { id ->
-                sampled.authoritativeState().getEntity(id)?.get<CardComponent>()?.name == "Shock"
-            }
-        }
-        assertEquals(present.particles, actualPresent.size)
-        assertEquals(present.exactMass, actualPresent.sumOf { it.weight }, absoluteTolerance = 1e-12)
-        assertEquals(1.0, batch.particles.sumOf { it.weight }, absoluteTolerance = 1e-12)
-        assertTrue(batch.particles.all { particle ->
-            (particle.value as ArgentumSearchWorld).knowledgeConsistencyFailure("p0", information) == null
-        })
-    }
-
     private fun takeMulliganShufflePermutation(world: ArgentumSearchWorld): List<Int> {
         val actorAlias = requireNotNull(world.actorToAct())
         val actor = world.rawPlayerIds().getValue(actorAlias)
@@ -906,4 +734,16 @@ class ArgentumSearchWorldTest {
         assertEquals(inputOrder.size, outputOrder.size)
         return outputOrder.map(inputIndices::getValue)
     }
+    private fun projectedTestValue() = LeafValueSource.Information(
+        object : org.mtgallium.agent.infoset.core.InformationStateEvaluator {
+            override val id = "projected-life-test"
+            override fun evaluate(information: org.mtgallium.agent.infoset.core.InformationStateRepresentation,
+                rootPlayer: String): Double {
+                val players = information.observation.players
+                return (players.single { it.playerId == rootPlayer }.life -
+                    players.single { it.playerId != rootPlayer }.life) / 20.0
+            }
+        },
+    )
+
 }

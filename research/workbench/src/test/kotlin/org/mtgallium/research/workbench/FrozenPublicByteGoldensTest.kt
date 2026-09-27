@@ -51,18 +51,37 @@ class FrozenPublicByteGoldensTest {
             "status" to JsonPrimitive(status), "engine_head" to JsonPrimitive(engineHead),
             "engine_pin" to JsonPrimitive(enginePin),
         ))
-        validateProvenance(provenance(), stack, parent)
-        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), "short", parent) }
-        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), stack, stack) }
-        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), stack, "b".repeat(40)) }
+        validateProvenance(provenance(), stack, parent, "behavior")
+        validateProvenance(provenance(), stack, parent, "identity")
+        validateProvenance(provenance(), stack, POST_IDENTITY_PARENT_SHA, "identity")
+        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), "short", parent, "behavior") }
+        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), stack, stack, "behavior") }
+        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), stack, "b".repeat(40), "identity") }
         assertFailsWith<IllegalArgumentException> {
-            validateProvenance(provenance(commit = "d".repeat(40)), stack, parent)
+            validateProvenance(provenance(), stack, POST_IDENTITY_PARENT_SHA, "behavior")
         }
-        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(diff = "patch"), stack, parent) }
-        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(status = " M file"), stack, parent) }
+        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(), stack, parent, "unknown") }
         assertFailsWith<IllegalArgumentException> {
-            validateProvenance(provenance(enginePin = "d".repeat(40)), stack, parent)
+            validateProvenance(provenance(commit = "d".repeat(40)), stack, parent, "identity")
         }
+        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(diff = "patch"), stack, parent, "identity") }
+        assertFailsWith<IllegalArgumentException> { validateProvenance(provenance(status = " M file"), stack, parent, "identity") }
+        assertFailsWith<IllegalArgumentException> {
+            validateProvenance(provenance(enginePin = "d".repeat(40)), stack, parent, "identity")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            validateProvenance(provenance(engineHead = "short"), stack, parent, "identity")
+        }
+        val preSources = identitySourcesFor(parent, listOf(
+            "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/BeliefTracker.kt",
+            RETIRED_BELIEF_PREPARATION,
+        ))
+        val postSources = identitySourcesFor(POST_IDENTITY_PARENT_SHA, preSources)
+        assertTrue(RETIRED_BELIEF_PREPARATION in preSources)
+        assertTrue(postSources == listOf(preSources.first()))
+        validateSourceDigest("a".repeat(64), "a".repeat(64))
+        assertFailsWith<IllegalArgumentException> { validateSourceDigest("a".repeat(64), "b".repeat(64)) }
+        assertFailsWith<IllegalArgumentException> { validateSourceDigest("short", "a".repeat(64)) }
     }
 
     @Test
@@ -179,15 +198,16 @@ class FrozenPublicByteGoldensTest {
                 "Capture requires the reviewed full PR1 test-stack SHA"
             }
             val productionParentSha = requireNotNull(System.getenv("MTG_GOLDEN_PRODUCTION_PARENT_SHA")) {
-                "Capture requires the reviewed original unretired production-parent SHA"
+                "Capture requires the reviewed production-parent SHA for this group"
             }
             val provenancePath = requireNotNull(System.getenv("MTG_SOURCE_JSON")) {
                 "Capture requires tools/remote snapshot provenance in MTG_SOURCE_JSON"
             }
             val provenance = Json.parseToJsonElement(Files.readString(Path.of(provenancePath))).jsonObject
-            validateProvenance(provenance, expectedStackSha, productionParentSha)
+            validateProvenance(provenance, expectedStackSha, productionParentSha, group)
             val sourceDigest = MessageDigest.getInstance("SHA-256")
-            sources.sorted().forEach { relative ->
+            val selectedSources = if (group == "identity") identitySourcesFor(productionParentSha, sources) else sources
+            selectedSources.sorted().forEach { relative ->
                 sourceDigest.update(relative.toByteArray(UTF_8))
                 sourceDigest.update(0.toByte())
                 sourceDigest.update(Files.readAllBytes(root.resolve(relative)))
@@ -196,9 +216,8 @@ class FrozenPublicByteGoldensTest {
             val reviewedSourceDigest = requireNotNull(System.getenv("MTG_GOLDEN_${group.uppercase(Locale.ROOT)}_SOURCE_DIGEST")) {
                 "Capture requires the $group source digest calculated from the reviewed production parent"
             }
-            require(Regex("[0-9a-f]{64}").matches(reviewedSourceDigest) && sourceDigestHex == reviewedSourceDigest) {
-                "Capture source differs from the reviewed production parent $group sources"
-            }
+            validateSourceDigest(expectedSourceDigest(productionParentSha, group), reviewedSourceDigest)
+            validateSourceDigest(reviewedSourceDigest, sourceDigestHex)
             val metadata = JsonObject(mapOf(
                 "fixtureVersion" to JsonPrimitive("frozen-public-v1"),
                 "sourceSha" to JsonPrimitive(expectedStackSha),
@@ -224,8 +243,12 @@ class FrozenPublicByteGoldensTest {
         require(metadata.getValue("rootMainSha").jsonPrimitive.content == ROOT_MAIN_SHA)
         validateProvenance(metadata.getValue("snapshotProvenance").jsonObject,
             metadata.getValue("sourceSha").jsonPrimitive.content,
-            metadata.getValue("productionParentSha").jsonPrimitive.content)
-        require(Regex("[0-9a-f]{64}").matches(metadata.getValue("sourceDigestSha256").jsonPrimitive.content))
+            metadata.getValue("productionParentSha").jsonPrimitive.content, group)
+        val recordedSourceDigest = metadata.getValue("sourceDigestSha256").jsonPrimitive.content
+        require(recordedSourceDigest == expectedSourceDigest(
+            metadata.getValue("productionParentSha").jsonPrimitive.content, group)) {
+            "Reviewed $group source digest differs from the accepted parent source bytes"
+        }
         require(metadata.getValue("payloadSha256").jsonPrimitive.content == sha256(baseline)) {
             "Reviewed $group golden bytes do not match their digest metadata"
         }
@@ -242,11 +265,32 @@ class FrozenPublicByteGoldensTest {
     private fun ByteArray.decodeJsonEntry(key: String): String? =
         Json.parseToJsonElement(toString(UTF_8)).jsonObject[key]?.jsonPrimitive?.content
 
+    private fun identitySourcesFor(productionParentSha: String, sources: List<String>): List<String> =
+        if (productionParentSha == POST_IDENTITY_PARENT_SHA) {
+            sources.filterNot { it == RETIRED_BELIEF_PREPARATION }
+        } else sources
+
+    private fun validateSourceDigest(reviewed: String, actual: String) {
+        require(Regex("[0-9a-f]{64}").matches(reviewed) && reviewed == actual) {
+            "Capture source differs from the reviewed production-parent sources"
+        }
+    }
+
+    private fun expectedSourceDigest(productionParentSha: String, group: String): String =
+        when (productionParentSha to group) {
+            ROOT_MAIN_SHA to "identity" -> PRE_IDENTITY_SOURCE_DIGEST
+            ROOT_MAIN_SHA to "behavior" -> PRE_BEHAVIOR_SOURCE_DIGEST
+            POST_IDENTITY_PARENT_SHA to "identity" -> POST_IDENTITY_SOURCE_DIGEST
+            else -> error("No accepted source digest for $group at $productionParentSha")
+        }
+
     private fun validateProvenance(provenance: JsonObject, expectedStackSha: String,
-        productionParentSha: String) {
+        productionParentSha: String, group: String) {
         require(Regex("[0-9a-f]{40}").matches(expectedStackSha) &&
-            productionParentSha == ROOT_MAIN_SHA && expectedStackSha != productionParentSha) {
-            "Expected SHA must name the reviewed full test stack above the original unretired production parent"
+            (productionParentSha == ROOT_MAIN_SHA ||
+                (group == "identity" && productionParentSha == POST_IDENTITY_PARENT_SHA)) &&
+            group in setOf("identity", "behavior") && expectedStackSha != productionParentSha) {
+            "Expected SHA and group must name a reviewed capture stack and its allowed production parent"
         }
         require(provenance.getValue("commit").jsonPrimitive.content == expectedStackSha) {
             "tools/remote snapshot commit differs from the reviewed full test-stack SHA"
@@ -257,8 +301,9 @@ class FrozenPublicByteGoldensTest {
         require(provenance.getValue("status").jsonPrimitive.content.isEmpty()) {
             "Capture refuses a snapshot with staged or untracked changes"
         }
-        require(provenance.getValue("engine_head").jsonPrimitive.content ==
-            provenance.getValue("engine_pin").jsonPrimitive.content) {
+        val engineHead = provenance.getValue("engine_head").jsonPrimitive.content
+        val enginePin = provenance.getValue("engine_pin").jsonPrimitive.content
+        require(Regex("[0-9a-f]{40}").matches(engineHead) && engineHead == enginePin) {
             "Snapshot engine does not match its Argentum pin"
         }
     }
@@ -268,5 +313,11 @@ class FrozenPublicByteGoldensTest {
 
     companion object {
         private const val ROOT_MAIN_SHA = "2a5cfce11fa59815d849d2a1f8fabab2e7eba79f"
+        private const val POST_IDENTITY_PARENT_SHA = "26f3af44bd6030f931ddefaff1f29d1d30c3fe90"
+        private const val RETIRED_BELIEF_PREPARATION =
+            "agent/argentum-policy/src/main/kotlin/org/mtgallium/agent/argentum/policy/BeliefPreparation.kt"
+        private const val PRE_IDENTITY_SOURCE_DIGEST = "d177ab0b6880ab0a26a346bf4ebd85655152a11ec843864abb875282557d0088"
+        private const val PRE_BEHAVIOR_SOURCE_DIGEST = "9de941b63ff7627ae90c2e0612cdfc9a18bcd16d3392743509ecfbb878d01741"
+        private const val POST_IDENTITY_SOURCE_DIGEST = "a0e32d45d139b2d42d9a76354ca023a8b5a69c9a3bb046b97752370bc1999439"
     }
 }

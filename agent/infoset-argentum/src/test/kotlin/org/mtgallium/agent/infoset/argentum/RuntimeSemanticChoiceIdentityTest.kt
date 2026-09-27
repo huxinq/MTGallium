@@ -27,7 +27,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import org.mtgallium.agent.infoset.core.BoundedPolicyInputCompiler
 import org.mtgallium.agent.infoset.core.CANDIDATE_SCHEMA_V4
 import org.mtgallium.agent.infoset.core.SemanticActionIntentKind
 import org.mtgallium.agent.infoset.core.SemanticChoice
@@ -118,11 +117,10 @@ class RuntimeSemanticChoiceIdentityTest {
         assertNotEquals(ordinaryOnly.signature, warpedOnly.signature)
         assertNotEquals(ordinaryOnly.canonicalPayload, warpedOnly.canonicalPayload)
 
-        val bounded = BoundedPolicyInputCompiler.compile(information)
-        assertEquals(CANDIDATE_SCHEMA_V4, bounded.candidateSchemaVersion)
-        assertEquals(4, bounded.candidates.size)
-        assertTrue(bounded.candidates.any { it.signature == ordinaryOnly.signature })
-        assertTrue(bounded.candidates.any { it.signature == warpedOnly.signature })
+        assertEquals(CANDIDATE_SCHEMA_V4, information.candidateSchemaVersion)
+        assertEquals(4, information.candidates.size)
+        assertTrue(information.candidates.any { it.signature == ordinaryOnly.signature })
+        assertTrue(information.candidates.any { it.signature == warpedOnly.signature })
 
         val ordinaryBranch = reboundAndExecute(
             base,

@@ -13,16 +13,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 
-const val POLICY_SCHEMA_V1: Int = 1
-const val POLICY_SCHEMA_V2: Int = 2
-const val POLICY_SCHEMA_V3: Int = 3
-const val POLICY_SCHEMA_V4: Int = 4
-const val POLICY_SCHEMA_V5: Int = 5
 const val POLICY_SCHEMA_V6: Int = 6
 const val POLICY_SCHEMA_CURRENT: Int = POLICY_SCHEMA_V6
-const val CANDIDATE_SCHEMA_V1: Int = 1
-const val CANDIDATE_SCHEMA_V2: Int = 2
-const val CANDIDATE_SCHEMA_V3: Int = 3
 const val CANDIDATE_SCHEMA_V4: Int = 4
 const val CANDIDATE_SCHEMA_CURRENT: Int = CANDIDATE_SCHEMA_V4
 
@@ -60,7 +52,6 @@ data class InformationStateRepresentation(
     }
 
     val historyDigest: String get() = historyCommitment.digest
-    val historyCursor: Int get() = historyCommitment.cursor
 }
 
 object InformationStateRepresentationDigest {

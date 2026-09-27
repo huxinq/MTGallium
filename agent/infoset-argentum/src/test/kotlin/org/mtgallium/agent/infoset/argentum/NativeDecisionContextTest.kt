@@ -81,7 +81,6 @@ class NativeDecisionContextTest {
         val original = source.decisionContext(view)
         val reprofiled = listOf(
             source.withActionSpaceProfile(SearchActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1),
-            source.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION_EXPIRING),
         )
         for (world in reprofiled) {
             assertSame(source.authoritativeStateForHost(), world.authoritativeStateForHost())
@@ -105,8 +104,7 @@ class NativeDecisionContextTest {
         val context = source.decisionContext(view)
         assertFalse(context.informationDemanded)
         val equalProfiles = listOf(target,
-            source.withActionSpaceProfile(SearchActionSpaceProfile.RULES_EXACT_V1),
-            source.forkWithHeuristicProfile(ArgentumHeuristicProfile.PRODUCTION))
+            source.withActionSpaceProfile(SearchActionSpaceProfile.RULES_EXACT_V1))
         for (world in equalProfiles) {
             assertSame(source.authoritativeStateForHost(), world.authoritativeStateForHost())
             assertTrue(world.copyDerivedCachesFrom(source))

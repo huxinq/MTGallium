@@ -52,7 +52,7 @@ class ConditionedFreshChanceTest {
 
     @Test fun `conditioned maintenance is a new behavior identity`() {
         assertEquals(CONDITIONED_BELIEF_MAINTENANCE_V3, conditionedBeliefMaintenanceIdentity(BeliefMode.POLICY_CONDITIONED_V1))
-        assertNotEquals(CONDITIONED_BELIEF_MAINTENANCE_V2, CONDITIONED_BELIEF_MAINTENANCE_V3)
+        assertNotEquals("condition-before-resample-copy-only-refuse-rebuild-v2", CONDITIONED_BELIEF_MAINTENANCE_V3)
         assertNull(conditionedBeliefMaintenanceIdentity(BeliefMode.CONSISTENCY_ONLY_V1))
     }
 }

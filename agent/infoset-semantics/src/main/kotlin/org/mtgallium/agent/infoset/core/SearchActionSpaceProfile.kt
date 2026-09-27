@@ -19,15 +19,4 @@ enum class SearchActionSpaceProfile(
         rulesEquivalent = false,
         suppressesStandaloneManaAbilities = true,
     ),
-    /**
-     * Experiment-only treatment for the issue-0019 standalone-mana timing study.
-     *
-     * This deliberately changes only the production profile's mana-ability admission switch. It
-     * is not a production profile and makes no broader claim of rules equivalence.
-     */
-    EXPERIMENTAL_STANDALONE_MANA_TIMING_V1(
-        profileId = "experimental-standalone-mana-timing-v1",
-        rulesEquivalent = false,
-        suppressesStandaloneManaAbilities = false,
-    ),
 }

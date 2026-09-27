@@ -341,7 +341,6 @@ later game. The summary reports `warmup_games` and `warmup_jvm_cpu_seconds`
 separately from `steady_jvm_cpu_per_game` and `steady_jvm_cpu_per_row`. Project
 large runs from the steady figures, not from a short run's totals.
 
-Progress also goes to `MTGALLIUM_PROGRESS_FILE` when set.
 `hash_split(key, train=.8, val=.1, salt='')` deterministically assigns train,
 validation or test; use the same game key for all of a game's rows to avoid
 leakage.

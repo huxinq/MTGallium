@@ -1,7 +1,6 @@
 # Policy and belief contracts
 
-How search is composed, how beliefs over hidden information are maintained, and
-how continuations run. Read [the architecture](../architecture.md) for module
+How search is composed and how beliefs over hidden information are maintained. Read [the architecture](../architecture.md) for module
 ownership and [information and decisions](information-and-decisions.md) for
 policy inputs.
 
@@ -18,7 +17,7 @@ Native policy sessions observe accepted actions and own their particle beliefs.
 For ordinary search, the host requests the maximum expansion limit reachable
 through progressive widening at the configured simulation budget. This admits
 widened choices for menus whose smaller expansions are prefixes of larger ones.
-Direct root selection and root guidance retain their existing menu contracts.
+Direct root selection retains its existing menu contract.
 
 An optional `SearchPrior` replaces UCT with PUCT at searching-player nodes. It
 receives only the acting player's captured `DecisionSiteRequest`, scores up to
@@ -28,11 +27,11 @@ budget (ties use semantic signatures). Selection uses mean value plus
 This fixed prior-ranked expansion replaces progressive widening when enabled.
 The host admits the same wider candidate menu. Configuration and model identity
 belong in `configurationId`; absent priors retain the existing behavior and
-serialized identity. Root UCT guidance and PUCT are mutually exclusive.
+serialized identity.
 
 `RolloutPolicySchedule` can choose an action selector by zero-based step within
 each bounded rollout. The step resets for each continuation and spans both
-players. It does not apply to terminal diagnostic continuations or quiescence.
+players. It does not apply to quiescence.
 
 ## Belief maintenance
 
@@ -68,8 +67,3 @@ worlds to one captured particle population. Aggregate hand queries evaluate a
 joint requirement within each hypothesis rather than multiplying marginal
 estimates, so correlations between cards are kept. Queries contain no mutable
 worlds and consume no randomness.
-
-## Continuations
-
-`continueFirstUnvisitedEdgeToTerminal` continues an already-applied first edge
-using the configured root and opponent policies for subsequent decisions.

@@ -184,10 +184,6 @@ class Game:
         """Value features, V2 and turn for both player perspectives at this position."""
         return self._call('value-snapshot', **({} if factual_schema is None else {'factualSchema': dict(factual_schema)}))
 
-    def value_score(self, player: str, weights: Mapping, *, link: str = 'clip') -> dict[str, float]:
-        """Score the named player's current information with the JVM linear evaluator."""
-        return self._call('value-score', player=player, weights=dict(weights), link=link)
-
     def state(self) -> dict:
         """Privileged referee snapshot for research inspection, not a policy input."""
         return self._call('state')

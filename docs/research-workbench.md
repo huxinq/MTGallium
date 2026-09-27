@@ -111,10 +111,7 @@ initializes its belief from the current world.
 `fork()` copies game and native search state; copy Python policy state yourself.
 
 `value_features(player=None)` returns the sparse value-feature map for the named
-player, or for the acting player when omitted. `value_score(player, weights,
-link='clip')` scores that player's current information with the JVM linear
-evaluator and returns `rawScore` and `deployedValue`; use `link='tanh'` for
-weights fitted with a logistic link. See [value models](value-models.md).
+player, or for the acting player when omitted. See [value models](value-models.md).
 
 ### Learning inputs
 

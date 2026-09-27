@@ -37,9 +37,6 @@ data class LivePolicyConfig(
     val wideningLimits: List<Int> = listOf(128, 256, 512),
     val maxQuiescenceDecisions: Int = 32,
     val maxQuiescenceForcedPasses: Int = 256,
-    val cacheSimulationTransitions: Boolean = true,
-    val wallClockBudgetMillis: Long? = null,
-    val minimumSimulations: Int = 1,
     val singletonSelection: SingletonSelectionConfig = SingletonSelectionConfig(),
 ) {
     init {
@@ -67,9 +64,6 @@ data class LivePolicyConfig(
         wideningLimits = wideningLimits,
         maxQuiescenceDecisions = maxQuiescenceDecisions,
         maxQuiescenceForcedPasses = maxQuiescenceForcedPasses,
-        cacheSimulationTransitions = cacheSimulationTransitions,
-        wallClockBudgetMillis = wallClockBudgetMillis,
-        minimumSimulations = minimumSimulations,
         singletonSelection = singletonSelection,
     )
 }

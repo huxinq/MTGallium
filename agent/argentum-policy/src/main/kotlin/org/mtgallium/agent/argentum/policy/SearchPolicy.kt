@@ -8,15 +8,11 @@ import org.mtgallium.agent.monored.ValueEvaluationException
 import org.mtgallium.agent.monored.ValueInputError
 import org.mtgallium.agent.infoset.core.DecisionPolicy
 import org.mtgallium.agent.infoset.core.ActionSelector
-import org.mtgallium.agent.infoset.core.ROOT_SELECTION_GUIDANCE_RULE
-import org.mtgallium.agent.infoset.core.RootSelectionGuidance
-import org.mtgallium.agent.infoset.core.RootSelectionPolicy
 import org.mtgallium.agent.infoset.core.RootActionSelection
 import org.mtgallium.agent.infoset.core.RootActionSelector
 import org.mtgallium.agent.infoset.core.SingletonSelectionConfig
 
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
-import org.mtgallium.agent.infoset.argentum.ArgentumHeuristicProfile
 import org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink
 import org.mtgallium.agent.infoset.core.BeliefArchitecture
 import org.mtgallium.agent.infoset.core.BeliefBatch
@@ -55,12 +51,7 @@ data class SearchPolicyConfig(
     val wideningLimits: List<Int> = listOf(128, 256, 512),
     val maxQuiescenceDecisions: Int = 32,
     val maxQuiescenceForcedPasses: Int = 256,
-    val cacheSimulationTransitions: Boolean = true,
-    val wallClockBudgetMillis: Long? = null,
-    val minimumSimulations: Int = 1,
     val singletonSelection: SingletonSelectionConfig = SingletonSelectionConfig(),
-    /** Opt-in simulated-tree/root-and-opponent heuristic annotation only; belief updates are unchanged. */
-    val searchHeuristicProfile: ArgentumHeuristicProfile = ArgentumHeuristicProfile.PRODUCTION,
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
 ) {
     init {
@@ -81,9 +72,6 @@ data class SearchPolicyConfig(
         wideningLimits = wideningLimits,
         maxQuiescenceDecisions = maxQuiescenceDecisions,
         maxQuiescenceForcedPasses = maxQuiescenceForcedPasses,
-        cacheSimulationTransitions = cacheSimulationTransitions,
-        wallClockBudgetMillis = wallClockBudgetMillis,
-        minimumSimulations = minimumSimulations,
         rolloutTurnHorizon = rolloutTurnHorizon,
     )
 
@@ -108,7 +96,6 @@ data class SearchPolicyConfig(
         rootRolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         opponentRolloutPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
         valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-        integration: IntegrationSpecification = IntegrationSpecification(),
     ): PolicyBehaviorSpecification = PolicyIdentity.specification(
         parameters = this,
         knownDecks = knownDecks,
@@ -116,7 +103,6 @@ data class SearchPolicyConfig(
         rootRolloutPolicy = rootRolloutPolicy,
         opponentRolloutPolicy = opponentRolloutPolicy,
         valueSource = valueSource,
-        integration = integration,
     )
 
     fun policyIdentity(
@@ -125,7 +111,6 @@ data class SearchPolicyConfig(
         rootRolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         opponentRolloutPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
         valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-        integration: IntegrationSpecification = IntegrationSpecification(),
     ): String = PolicyIdentity.identity(
         behaviorSpecification(
             knownDecks = knownDecks,
@@ -133,7 +118,6 @@ data class SearchPolicyConfig(
             rootRolloutPolicy = rootRolloutPolicy,
             opponentRolloutPolicy = opponentRolloutPolicy,
             valueSource = valueSource,
-            integration = integration,
         )
     )
 }
@@ -149,10 +133,8 @@ class SearchPolicySession private constructor(
     private val rolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
     private val rolloutOpponentPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
     private val valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-    private val integration: IntegrationSpecification = IntegrationSpecification(),
     private val beliefProposalAuditSink: ArgentumBeliefProposalAuditSink =
         ArgentumBeliefProposalAuditSink.NONE,
-    private val rootSelectionPolicy: RootSelectionPolicy? = null,
     private val directRootSelectionPolicy: DecisionPolicy? = null,
     private val searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null,
     forkedFrom: SearchPolicySession?,
@@ -162,12 +144,11 @@ class SearchPolicySession private constructor(
         rolloutPolicy: ActionSelector = PolicyDefaults.rootRolloutPolicy(),
         rolloutOpponentPolicy: ActionSelector = PolicyDefaults.opponentRolloutPolicy(),
         valueSource: LeafValueSource = LeafValueSource.Information(MonoRedInformationEvaluator),
-        integration: IntegrationSpecification = IntegrationSpecification(),
         beliefProposalAuditSink: ArgentumBeliefProposalAuditSink = ArgentumBeliefProposalAuditSink.NONE,
-        rootSelectionPolicy: RootSelectionPolicy? = null, directRootSelectionPolicy: DecisionPolicy? = null,
+        directRootSelectionPolicy: DecisionPolicy? = null,
         searchPrior: org.mtgallium.agent.infoset.core.SearchPrior? = null) :
         this(root, viewer, knownDecks, parameters, opponentPolicy, gameId, rolloutPolicy, rolloutOpponentPolicy,
-            valueSource, integration, beliefProposalAuditSink, rootSelectionPolicy, directRootSelectionPolicy, searchPrior, null)
+            valueSource, beliefProposalAuditSink, directRootSelectionPolicy, searchPrior, null)
 
     val behaviorSpecification: PolicyBehaviorSpecification =
         PolicyIdentity.specification(
@@ -178,18 +159,13 @@ class SearchPolicySession private constructor(
             opponentRolloutPolicy = rolloutOpponentPolicy,
             valueSource = valueSource,
             actionExpansion = root.semanticExpansionSpecification(),
-            integration = integration,
         ).copy(historyEventOrder = root.historyEventOrder.takeUnless {
             it == org.mtgallium.agent.infoset.argentum.PerspectiveHistoryEventOrder.LEGACY_ENGINE_ORDER_V1
         }?.name, historyObjectReference = root.historyObjectReference.takeUnless {
             it == org.mtgallium.agent.infoset.argentum.PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1
-        }?.name, rootSelectionGuidanceId = rootSelectionPolicy?.let {
-            require(it.configurationId.isNotBlank())
-            "$ROOT_SELECTION_GUIDANCE_RULE:${it.configurationId}"
-        }, directRootSelectionId = directRootSelectionPolicy?.configurationId?.also { require(it.isNotBlank()) },
+        }?.name, directRootSelectionId = directRootSelectionPolicy?.configurationId?.also { require(it.isNotBlank()) },
             searchPriorId = searchPrior?.let { "puct-v1:${it.configurationId}:limit=${it.candidateLimit}:admission=${it.admission}:c=${it.explorationConstant}" })
     init {
-        require(directRootSelectionPolicy == null || rootSelectionPolicy == null)
         require(forkedFrom == null || behaviorSpecification == forkedFrom.behaviorSpecification)
     }
     private val belief: ArgentumParticleBeliefBackend = forkedFrom?.belief?.fork(root) ?: ArgentumParticleBeliefBackend(
@@ -218,15 +194,15 @@ class SearchPolicySession private constructor(
      */
     fun forkForFactualContinuation(root: ArgentumSearchWorld): SearchPolicySession {
         return SearchPolicySession(root, viewer, knownDecks, parameters, opponentPolicy, gameId,
-            rolloutPolicy, rolloutOpponentPolicy, valueSource, integration, beliefProposalAuditSink,
-            rootSelectionPolicy, directRootSelectionPolicy, searchPrior, this)
+            rolloutPolicy, rolloutOpponentPolicy, valueSource, beliefProposalAuditSink,
+            directRootSelectionPolicy, searchPrior, this)
     }
 
     val latestBeliefDiagnostics: BeliefDiagnostics get() = belief.latestDiagnostics
     /** Host admission includes progressive widening and an optional wider search prior. */
     val decisionView: org.mtgallium.agent.infoset.core.DecisionView
         get() = parameters.decisionView(searchPrior,
-            widen = rootSelectionPolicy == null && directRootSelectionPolicy == null)
+            widen = directRootSelectionPolicy == null)
     val beliefDiagnosticsHistory: List<BeliefDiagnostics> get() = belief.diagnosticsHistory
     val beliefReconditionings: Int get() = belief.reconditionings
     val beliefParticleDepletions: Int get() = belief.particleDepletions
@@ -248,7 +224,7 @@ class SearchPolicySession private constructor(
     }
 
     private fun profiledBeliefBatch(): BeliefBatch<Weighted<SearchWorld>> =
-        belief.snapshot().hypotheses.materialize().batch.withHeuristicProfile(parameters.searchHeuristicProfile)
+        belief.snapshot().hypotheses.materialize().batch
 
     fun select(
         world: ArgentumSearchWorld,
@@ -257,25 +233,17 @@ class SearchPolicySession private constructor(
     ): RootActionSelection {
         require(actor == viewer) { "Policy session for $viewer cannot choose for $actor" }
         val context = world.decisionContext(decisionView)
-        val expansion = context.expansion
         return RootActionSelector(parameters.singletonSelection.enabled, directRootSelectionPolicy).select(
             context, searchSeed,
         ) {
             // Sequential particles are still advanced after every accepted action, but the expensive
             // all-particle digest audit is needed only when its result can affect an actual search.
             belief.synchronize(world, acceptedDecisionCount)
-            val guidance = rootSelectionPolicy?.let { policy ->
-                require(expansion.isProfileExhaustive) { "Root guidance requires a profile-exhaustive admitted menu" }
-                val information = context.information()
-                RootSelectionGuidance(policy.configurationId,
-                    information.informationStateDigest, policy.scores(context.site()))
-            }
             val result = try {
                 search.search(
                     rootPlayer = actor,
                     belief = profiledBeliefBatch(),
                     searchSeed = searchSeed,
-                    rootSelectionGuidance = guidance,
                 )
             } catch (failure: ValueEvaluationException) {
                 throw ValueEvaluationStop(failure)

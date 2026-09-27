@@ -686,11 +686,11 @@ World & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/
 Chance stream & \code{futureChanceStreamIdentity} in \code{ArgentumSearchWorld}; \code{SimulationWorldSchedule}\\
 Policy; opponent model & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/PolicyCapabilities.kt}{ActionSelector}, \code{ActionDistributionModel}, \code{OpponentPolicy}\\
 Belief, particles & \src{agent/infoset-semantics/src/main/kotlin/org/mtgallium/agent/infoset/core/BeliefContracts.kt}{BeliefMode} (\code{CONSISTENCY\_ONLY\_V1}, \code{POLICY\_CONDITIONED\_V1}); \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/ParticleBelief.kt}{ParticleBelief}\\
-Evaluators & \code{InformationStateEvaluator}; \code{LeafValueSource.Information} and \code{LeafValueSource.SampledWorld} (world evaluator)\\
+Evaluators & \code{InformationStateEvaluator}; \code{LeafValueSource.Information}\\
 Search, nodes, UCT & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearch.kt}{InformationSetSearch}; node key \code{PlanningContextKey}\\
 Settlement, origin & \src{agent/infoset-planning/src/main/kotlin/org/mtgallium/agent/infoset/core/InformationSetSearchContract.kt}{SearchSettlement}, \code{SearchSettlementOrigin}, \code{SearchSettlementCounts}\\
 Leaf and rollout settings & \code{LeafEvaluationConfig}, \code{RolloutTurnHorizon}\\
-Search result & \code{InformationSetSearchResult}; forced first action: \code{RootActionSearchEstimate}\\
+Search result & \code{InformationSetSearchResult}\\
 Semantic choice, rebinding & \code{SemanticChoice}; see the \href{https://github.com/huxinq/MTGallium/blob/main/docs/architecture/information-and-decisions.md}{information and decision contracts}\\
 \end{longtable}
 \endgroup

@@ -31,7 +31,7 @@ experiment terms.
 | Value, action value | Expected terminal payoff under a belief and continuation policies; an action value first forces one action. | — |
 | Target | The question a value answers: whose payoff, which belief, which continuation policies. | — |
 | Information-state evaluator | Scores one player's information state; it cannot use information unavailable to that player. | `InformationStateEvaluator` |
-| World evaluator | Scores a complete world, hidden cards included. Legitimate when it predicts play that respects each player's information; inflated when its score assumes clairvoyant choices. | `LeafValueSource.SampledWorld` |
+| World evaluator | Scores a complete world, hidden cards included. Legitimate when it predicts play that respects each player's information; inflated when its score assumes clairvoyant choices. | — |
 
 ## Search
 

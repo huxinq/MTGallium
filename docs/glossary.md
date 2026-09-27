@@ -17,8 +17,9 @@ snapshot. See [fields][policy-contract].
 
 `InformationStateRepresentation` combines a snapshot, player-visible event history,
 represented exact knowledge, and candidate choices. Its digest includes the
-candidate expansion. `BoundedPolicyInput` further limits the representation for
-neural policies. See [fields][policy-contract].
+candidate expansion. `BoundedPolicyInputCompiler.recentEventWindow` selects a
+recent-event suffix bounded by event count and serialized bytes, returning a
+`PolicyRecentEventWindow`. See [fields][policy-contract].
 
 ### Epistemic state and decision site
 

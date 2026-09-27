@@ -10,7 +10,7 @@ class NativePlanningBoundaryTest {
             simulations = 1, maxPolicyDecisions = 1,
             leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)),
             NativePolicy, NativePolicy, NativePolicy,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"))
+            valueSource = LeafValueSource.Information(testInformationEvaluator()))
 
         val result = search.search("p0", batch(world), 84L)
         assertEquals(1, result.diagnostics.evaluatorCalls)
@@ -23,20 +23,12 @@ class NativePlanningBoundaryTest {
         val search = InformationSetSearch(InformationSetSearchConfig(simulations = 64, maxPolicyDecisions = 8,
             initialExpansionLimit = 2, wideningThresholds = listOf(4), wideningLimits = listOf(4), leaf = leaf),
             NativePolicy, NativePolicy, NativePolicy,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"))
+            valueSource = LeafValueSource.Information(testInformationEvaluator()))
         val result = search.search("p0", batch(world), 83L)
         assertEquals(64, result.candidates.sumOf { it.visits })
         assertEquals(4, result.candidates.size)
         assertTrue(result.diagnostics.wideningEvents > 0)
         assertEquals(choices.last(), result.chosen)
-        assertNull(world.terminalPayoff("p0"))
-    }
-
-    @Test fun `terminal continuation and model selection never assemble the old information expansion pair`() {
-        val world = NativeWorld(stage = 1, value = 1.0)
-        val result = TerminalPolicyContinuationRunner(NativePolicy, NativePolicy, 4).continueToTerminal(world, "p0", 42L, 0)
-        assertEquals(1.0, result.payoff)
-        assertEquals(1, result.policyDecisions)
         assertNull(world.terminalPayoff("p0"))
     }
 
@@ -96,7 +88,7 @@ class NativePlanningBoundaryTest {
         val leaf = LeafEvaluationConfig(LeafStateSource.BOUNDED_ROLLOUT)
         val search = InformationSetSearch(InformationSetSearchConfig(simulations = 1, maxPolicyDecisions = 8,
             initialExpansionLimit = 2, leaf = leaf), NativePolicy, NativePolicy, NativePolicy,
-            valueSource = LeafValueSource.SampledWorld("argentum-board-v1"))
+            valueSource = LeafValueSource.Information(testInformationEvaluator()))
         val population = batch(ordinary).copy(particles = listOf(Weighted<SearchWorld>(ordinary, .5), Weighted<SearchWorld>(contradictory, .5)))
         assertFailsWith<InformationSetConformanceException> { search.search("p0", population, 83L) }
     }
@@ -116,12 +108,20 @@ class NativePlanningBoundaryTest {
 
     private class NativeWorld(private var stage: Int = 0, private var value: Double = 0.0) : ProgressiveSearchWorld {
         override fun actorToAct(): String? = when(stage) { 0 -> "p0"; 1 -> "p1"; else -> null }
-        override fun informationState(viewer: String): InformationStateRepresentation = error("Split compatibility information used")
+        override fun informationState(viewer: String): InformationStateRepresentation {
+            if (actorToAct() == viewer) return decisionContext(DecisionView()).information()
+            val state = epistemicState(viewer)
+            return InformationStateRepresentation(actingPlayerId = actorToAct(), observation = state.observation,
+                informationStateDigest = "native-information-$viewer-$stage-$value",
+                historyCommitment = state.historyCommitment, history = emptyList(), knowledge = state.knowledge,
+                candidates = emptyList(), terminated = state.terminated)
+        }
         override fun expandChoices(): PolicyExpansion = error("Split compatibility menu used")
         override fun expandChoices(limit: Int): PolicyExpansion = error("Split compatibility widening used")
         override fun epistemicState(viewer: String): EpistemicState = EpistemicState.capture(
             PlayerObservationSnapshot(viewer, 1, "MAIN", "PRECOMBAT_MAIN", "p0", actorToAct(), emptyList(), emptyList(), emptyList(),
-                currentTurnStateComplete = true, pendingDecision = null, observationDigest = "native-$stage-$value"),
+                currentTurnStateComplete = true, pendingDecision = null,
+                observationDigest = "native-$stage-$value:test-value:$value"),
             emptyList(), PolicyHistoryCommitment.empty(), PolicyKnowledgeState.empty(viewer), stage == 2, null)
         override fun decisionContext(view: DecisionView): DecisionSiteRequest {
             val actor = requireNotNull(actorToAct())
@@ -139,7 +139,6 @@ class NativePlanningBoundaryTest {
         }
         override fun fork(): SearchWorld = NativeWorld(stage, value)
         override fun terminalPayoff(rootPlayer: String): Double? = value.takeIf { stage == 2 }
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String) = value
     }
     companion object {
         private val choices = (0..3).map { index -> SemanticChoice.create(SemanticChoiceKind.ACTION, SemanticOperationFamily.CAST_SPELL,

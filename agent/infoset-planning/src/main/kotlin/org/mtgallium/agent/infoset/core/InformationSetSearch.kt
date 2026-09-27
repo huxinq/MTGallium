@@ -34,129 +34,26 @@ class InformationSetSearch(
         }
     }
 
-    /**
-     * Settles the child just selected through an unvisited production edge.
-     *
-     * This is the authoritative narrow seam for fixed-root diagnostics: it uses precisely the
-     * configured leaf route, terminal bypass, clipping, quiescence, forced-pass handling, and
-     * rollout seed derivation that [search] uses at `edge.visits == 0`. It does not create a tree,
-     * allocate visits, or expose a complete world outside its caller's existing trusted boundary.
-     */
-    @JvmOverloads
-    fun settleFirstUnvisitedEdge(
-        childWorld: SearchWorld,
-        rootPlayer: String,
-        searchSeed: Long,
-        simulationIndex: Int,
-        childDepth: Int = 1,
-        rootTurnNumber: Int? = null,
-    ): SearchSettlement {
-        require(childDepth > 0)
-        return leafValue(
-            world = childWorld,
-            rootPlayer = rootPlayer,
-            tree = linkedMapOf(),
-            searchSeed = searchSeed,
-            simulationIndex = simulationIndex,
-            depth = childDepth,
-            onDepth = {},
-            onWiden = {},
-            rolloutAudit = RolloutPolicyAudit(),
-            quiescenceAudit = QuiescenceAudit(),
-            workAudit = SearchWorkAudit(),
-            rolloutTargetTurn = rolloutTargetTurn(rootTurnNumber),
-        )
-    }
-
-    /**
-     * Continues an already-applied first edge to an actual engine terminal state with the exact
-     * configured root/opponent rollout-policy pair and seed derivation. This diagnostic seam never
-     * invokes a leaf evaluator or converts exhaustion, missing choices, rejection, or policy
-     * replacement into a payoff.
-     */
-    fun continueFirstUnvisitedEdgeToTerminal(
-        childWorld: SearchWorld,
-        rootPlayer: String,
-        searchSeed: Long,
-        simulationIndex: Int,
-        childDepth: Int = 1,
-        maximumContinuationPolicyDecisions: Int = 4096,
-        trace: TerminalContinuationTraceCollector? = null,
-    ): TerminalPolicyContinuation = terminalContinuation().continueToTerminal(
-        childWorld, rootPlayer, searchSeed, simulationIndex, childDepth, maximumContinuationPolicyDecisions, trace,
-    )
-
-    /** Compatibility access to the same terminal runner; constructing it creates no search state. */
-    fun terminalContinuation(): TerminalPolicyContinuationRunner = TerminalPolicyContinuationRunner(
-        rolloutPolicy, rolloutOpponentPolicy, config.initialExpansionLimit,
-    )
-
     fun search(
         rootPlayer: String,
         belief: BeliefBatch<Weighted<SearchWorld>>,
         searchSeed: Long,
         simulationWorldSchedule: SimulationWorldSchedule? = null,
-        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): InformationSetSearchResult = searchInternal(
-        rootPlayer, belief, searchSeed, simulationWorldSchedule, null, rootSelectionGuidance,
+        rootPlayer, belief, searchSeed, simulationWorldSchedule,
     )
-
-    /**
-     * Diagnostic search conditioned on an initially admitted root action. Every simulation takes
-     * that first edge, then uses normal information-set tree/rollout policies and settlement.
-     * The mean is an adaptive search estimate, not an observed game payoff or an uncertainty bound.
-     */
-    fun estimateRootAction(
-        rootPlayer: String,
-        belief: BeliefBatch<Weighted<SearchWorld>>,
-        rootActionSignature: String,
-        searchSeed: Long,
-        simulationWorldSchedule: SimulationWorldSchedule? = null,
-    ): RootActionSearchEstimate {
-        require(rootActionSignature.isNotBlank())
-        require(config.wallClockBudgetMillis == null) { "Action-conditional estimates require a fixed simulation budget" }
-        val result = searchInternal(rootPlayer, belief, searchSeed, simulationWorldSchedule, rootActionSignature)
-        val action = result.candidates.single { it.choice.signature == rootActionSignature }
-        check(action.visits == config.simulations && result.candidates.filterNot { it == action }.all { it.visits == 0 })
-        return RootActionSearchEstimate(action.choice, action.meanValue, action.visits,
-            result.settlementCountsFor(action.choice), result.diagnostics)
-    }
 
     private fun searchInternal(
         rootPlayer: String,
         belief: BeliefBatch<Weighted<SearchWorld>>,
         searchSeed: Long,
         simulationWorldSchedule: SimulationWorldSchedule?,
-        rootActionSignature: String?,
-        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): InformationSetSearchResult {
         require(belief.particles.isNotEmpty())
         require(simulationWorldSchedule == null || simulationWorldSchedule.worlds.size == config.simulations) {
             "A fixed simulation-world schedule must contain exactly ${config.simulations} worlds"
         }
         requireConformantRoot(rootPlayer, belief)
-        // Snapshot the caller's map so one immutable preference set owns the entire search.
-        val guidance = rootSelectionGuidance?.copy(scores = rootSelectionGuidance.scores.toMap())
-        require(searchPrior == null || guidance == null) { "PUCT and root UCT guidance are mutually exclusive" }
-        require(searchPrior == null || rootActionSignature == null) { "Conditioned root search does not support prior-ranked pruning" }
-        guidance?.let {
-            require(rootActionSignature == null)
-            val representative = belief.particles.first().value
-            require(representative.actorToAct() == rootPlayer)
-            require(initialDecision(representative).information().informationStateDigest == it.informationStateDigest) {
-                "Root guidance belongs to another information state"
-            }
-            val expansion = initialExpansion(representative)
-            require(expansion.isProfileExhaustive && expansion.candidates.map { choice -> choice.signature }.toSet() == it.scores.keys) {
-                "Root guidance requires the exact profile-exhaustive initial admitted menu"
-            }
-        }
-        val selectionGuidance = guidance?.takeIf { it.scores.values.any { score -> score != 0.0 } }
-        if (rootActionSignature != null) {
-            require(initialExpansion(belief.particles.first().value).candidates.any { it.signature == rootActionSignature }) {
-                "Conditioned root action is absent from the initial admitted menu"
-            }
-        }
         val rolloutTargetTurn = rolloutTargetTurn(config.rolloutTurnHorizon?.let {
             belief.particles.first().value.epistemicState(rootPlayer).observation.turnNumber
         })
@@ -170,21 +67,11 @@ class InformationSetSearch(
         val rolloutAudit = RolloutPolicyAudit()
         val quiescenceAudit = QuiescenceAudit()
         val workAudit = SearchWorkAudit()
-        val transitionCache = if (config.cacheSimulationTransitions) {
-            SimulationTransitionCache(workAudit)
-        } else {
-            null
-        }
+        val transitionCache = SimulationTransitionCache(workAudit)
         var maximumDepth = 0
         var wideningEvents = 0
-        val startedAt = System.nanoTime()
         var completedSimulations = 0
         while (completedSimulations < config.simulations) {
-            if (
-                completedSimulations >= config.minimumSimulations &&
-                config.wallClockBudgetMillis != null &&
-                System.nanoTime() - startedAt >= config.wallClockBudgetMillis * 1_000_000L
-            ) break
             val simulationIndex = completedSimulations
             val particleIndex = rootParticleIndices[simulationIndex]
             val world = (
@@ -210,8 +97,6 @@ class InformationSetSearch(
                 quiescenceMode = false,
                 quiescenceDepth = 0,
                 rolloutTargetTurn = rolloutTargetTurn,
-                rootActionSignature = rootActionSignature,
-                rootSelectionGuidance = selectionGuidance,
             )
             require(outcome.backedValue.isFinite()) { "Search produced a non-finite value" }
             completedSimulations++
@@ -249,7 +134,7 @@ class InformationSetSearch(
                 nonExhaustiveNodes = tree.values.count { !it.exhaustive },
                 wideningEvents = wideningEvents,
                 opponentModelId = opponentPolicy.id,
-                leaf = config.leaf,
+                leaf = config.leaf.diagnostic(),
                 rootRolloutPolicyId = rolloutPolicy.id.takeIf {
                     config.leaf.stateSource == LeafStateSource.BOUNDED_ROLLOUT
                 },
@@ -288,9 +173,7 @@ class InformationSetSearch(
                 unsettledLeafEvaluations = workAudit.unsettledLeafEvaluations,
                 evaluatorNanos = workAudit.evaluatorNanos,
                 evaluatorOutputChecksum = workAudit.evaluatorOutputChecksum(),
-                quiescenceUnresolvedBackups = quiescenceAudit.unresolvedBackups,
-                wallClockBudgetMillis = config.wallClockBudgetMillis,
-                rootSelectionGuidance = guidance,
+                quiescenceUnresolvedBackups = 0,
             ),
         )
     }
@@ -312,8 +195,6 @@ class InformationSetSearch(
         quiescenceMode: Boolean,
         quiescenceDepth: Int,
         rolloutTargetTurn: Int?,
-        rootActionSignature: String? = null,
-        rootSelectionGuidance: RootSelectionGuidance? = null,
     ): SearchSettlement {
         onDepth(depth)
         world.terminalPayoff(rootPlayer)?.let {
@@ -330,7 +211,7 @@ class InformationSetSearch(
                 StaticLeafSettlement.VolatileBranch -> if (quiescenceDepth >= config.maxQuiescenceDecisions) {
                     quiescenceAudit.overflows++
                     quiescenceAudit.fallbacks++
-                    return unresolvedLeafValue(world, rootPlayer, quiescenceAudit, workAudit)
+                    return staticLeafValue(world, rootPlayer, workAudit)
                 }
             }
         } else if (depth >= config.maxPolicyDecisions) {
@@ -362,7 +243,7 @@ class InformationSetSearch(
             transitionCache?.retainDerived(transitionNode, world, DERIVED_BASE)
             if (quiescenceMode) quiescenceAudit.fallbacks++
             return if (quiescenceMode) {
-                unresolvedLeafValue(world, rootPlayer, quiescenceAudit, workAudit)
+                staticLeafValue(world, rootPlayer, workAudit)
             } else {
                 leafValue(
                     world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
@@ -376,7 +257,7 @@ class InformationSetSearch(
                 transitionCache?.retainDerived(transitionNode, world, DERIVED_BASE)
                 if (quiescenceMode) quiescenceAudit.fallbacks++
                 return if (quiescenceMode) {
-                    unresolvedLeafValue(world, rootPlayer, quiescenceAudit, workAudit)
+                    staticLeafValue(world, rootPlayer, workAudit)
                 } else {
                     leafValue(
                         world, rootPlayer, tree, searchSeed, simulationIndex, depth, onDepth, onWiden,
@@ -504,11 +385,7 @@ class InformationSetSearch(
             }
         }
 
-        val edge = if (rootActionSignature == null) selectUct(node, searchSeed, simulationIndex, depth, rootSelectionGuidance)
-            else {
-                check(depth == 0 && actor == rootPlayer)
-                requireNotNull(node.edges[rootActionSignature]) { "Conditioned root action is absent from this world" }
-            }
+        val edge = selectUct(node, searchSeed, simulationIndex, depth)
         val advanced = advanceCached(world, edge.choice, transitionCache, transitionNode, workAudit)
         val value = if (quiescenceMode) {
             simulate(
@@ -587,8 +464,7 @@ class InformationSetSearch(
         transitionCache: SimulationTransitionCache? = null,
         transitionNode: SimulationTransitionNode? = null,
     ): SearchSettlement = when (config.leaf.stateSource) {
-        LeafStateSource.CURRENT_INFORMATION_STATE,
-        LeafStateSource.CURRENT_SAMPLED_WORLD -> simulate(
+        LeafStateSource.CURRENT_INFORMATION_STATE -> simulate(
             world,
             rootPlayer,
             tree,
@@ -660,7 +536,7 @@ class InformationSetSearch(
                     audit.overflows++
                     audit.fallbacks++
                     return StaticLeafSettlement.Value(
-                        unresolvedLeafValue(world, rootPlayer, audit, workAudit)
+                        staticLeafValue(world, rootPlayer, workAudit)
                     )
                 }
                 workAudit.steps++
@@ -681,22 +557,9 @@ class InformationSetSearch(
                 StaticLeafSettlement.VolatileBranch
             } else {
                 audit.fallbacks++
-                StaticLeafSettlement.Value(unresolvedLeafValue(world, rootPlayer, audit, workAudit))
+                StaticLeafSettlement.Value(staticLeafValue(world, rootPlayer, workAudit))
             }
         }
-    }
-
-    private fun unresolvedLeafValue(
-        world: SearchWorld,
-        rootPlayer: String,
-        audit: QuiescenceAudit,
-        workAudit: SearchWorkAudit,
-    ): SearchSettlement {
-        if (config.leaf.unresolved == UnresolvedLeafHandling.BACK_UP_NEUTRAL) {
-            audit.unresolvedBackups++
-            return SearchSettlement(0.0, SearchSettlementOrigin.NEUTRAL_UNRESOLVED_SETTLEMENT)
-        }
-        return staticLeafValue(world, rootPlayer, workAudit)
     }
 
     private fun staticLeafValue(
@@ -708,22 +571,19 @@ class InformationSetSearch(
             return SearchSettlement(it, SearchSettlementOrigin.TERMINAL_PAYOFF)
         }
         val started = System.nanoTime()
-        val information = if (valueSource is LeafValueSource.Information) world.informationState(rootPlayer) else null
+        val information = world.informationState(rootPlayer)
         val (rawValue, origin) = when (val source = valueSource) {
             is LeafValueSource.Information -> source.evaluator.evaluate(
                 requireNotNull(information),
                 rootPlayer,
             ) to source.evaluator.settlementOrigin
-            is LeafValueSource.SampledWorld -> world.sampledWorldLeafValue(
-                rootPlayer,
-                source.invokedEvaluatorId,
-            ) to SearchSettlementOrigin.HEURISTIC_SETTLEMENT
+
         }
         require(rawValue.isFinite()) { "Leaf evaluator returned a non-finite score: $rawValue" }
         val value = rawValue.coerceIn(-1.0, 1.0)
         val elapsed = System.nanoTime() - started
         workAudit.recordEvaluator(value, elapsed,
-            isVolatile(information?.observation ?: world.epistemicState(rootPlayer).observation))
+            isVolatile(information.observation))
         return SearchSettlement(value, origin)
     }
 
@@ -836,7 +696,7 @@ class InformationSetSearch(
             is StaticLeafSettlement.Value -> settled.settlement
             StaticLeafSettlement.VolatileBranch -> {
                 quiescenceAudit.fallbacks++
-                unresolvedLeafValue(world, rootPlayer, quiescenceAudit, workAudit)
+                staticLeafValue(world, rootPlayer, workAudit)
             }
         }
     }
@@ -870,7 +730,7 @@ class InformationSetSearch(
             if (decisions >= config.maxQuiescenceDecisions) {
                 audit.overflows++
                 audit.fallbacks++
-                return unresolvedLeafValue(world, rootPlayer, audit, workAudit)
+                return staticLeafValue(world, rootPlayer, workAudit)
             }
             val actor = checkNotNull(world.actorToAct())
             val policy = if (actor == rootPlayer) rolloutPolicy else rolloutOpponentPolicy
@@ -908,7 +768,6 @@ class InformationSetSearch(
         var strategicDecisions = 0
         var overflows = 0
         var fallbacks = 0
-        var unresolvedBackups = 0
     }
 
     private class RolloutPolicyAudit {
@@ -1114,9 +973,7 @@ class InformationSetSearch(
         searchSeed: Long,
         simulationIndex: Int,
         depth: Int,
-        guidance: RootSelectionGuidance?,
     ): SearchEdge {
-        check(guidance == null || depth == 0)
         searchPrior?.let { prior ->
             return node.edges.values.maxWith(compareBy<SearchEdge> {
                 it.meanValue() + prior.explorationConstant * it.prior * sqrt(node.visits + 1.0) / (1.0 + it.visits)
@@ -1124,21 +981,14 @@ class InformationSetSearch(
         }
         val unvisited = node.edges.values.filter { it.visits == 0 }
         if (unvisited.isNotEmpty()) {
-            if (guidance == null) return unvisited.minBy { edge ->
+            return unvisited.minBy { edge ->
                 PolicyJson.sha256("$searchSeed:$simulationIndex:$depth:${edge.choice.signature}")
             }
-            return unvisited.minWith(compareByDescending<SearchEdge> { edge ->
-                guidance.scores.getValue(edge.choice.signature)
-            }.thenBy { edge ->
-                PolicyJson.sha256("$searchSeed:$simulationIndex:$depth:${edge.choice.signature}")
-            })
         }
         val logParent = ln((node.visits + 1).toDouble())
         return node.edges.values.maxWith(
             compareBy<SearchEdge> { edge ->
-                val uct = edge.meanValue() + config.explorationConstant * sqrt(logParent / edge.visits)
-                val score = guidance?.scores?.getValue(edge.choice.signature) ?: 0.0
-                if (score == 0.0) uct else uct + score / (1.0 + edge.visits)
+                edge.meanValue() + config.explorationConstant * sqrt(logParent / edge.visits)
             }.thenByDescending { it.choice.signature }
         )
     }

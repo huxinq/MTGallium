@@ -19,7 +19,7 @@ import kotlin.test.*
 /** Authored component fixtures. Legal gameplay is separately qualified by a native retained witness. */
 class RememberedHistoryReferenceTest {
     private val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
-    private val mode = PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_V1
+    private val mode = PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
     private data class Fixture(val history: PerspectiveHistory, val state: GameState,
         val source: EntityId, val other: EntityId, val owner: EntityId, val players: List<EntityId>,
         val template: ArgentumSearchWorld)
@@ -54,17 +54,6 @@ class RememberedHistoryReferenceTest {
         h.recordEngineEvents(events,f.owner,before,after,projections(before,f.players),projections(after,f.players))
     }
     private fun lastRef(h:PerspectiveHistory,v:EntityId) = (h.forViewer(v).last().detail as PerspectiveEventDetail.ObjectState).objectRef
-
-    @Test fun `resolution source mode retains continuous battlefield eligibility and unrelated events`() {
-        val old = fixture()
-        val current = fixture(identity = PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1)
-        record(old); record(current)
-        for (v in old.players) {
-            assertEquals(old.history.forViewer(v), current.history.forViewer(v))
-            assertTrue(lastRef(current.history, v)!!.startsWith("history-object:v1:"))
-        }
-        assertEquals(old.history.trustedReferenceStateDigest(), current.history.trustedReferenceStateDigest())
-    }
 
     @Test fun `coalescing descriptors preserve existing historical identity across raw ordering`() {
         val left=fixture();val right=fixture(reverse=true)

@@ -28,8 +28,6 @@ enum class BeliefArchitecture {
     SNAPSHOT_A_V1,
     /** Sequential complete-world particles with consistency or policy-conditioned updates. */
     SEQUENTIAL_B_V1,
-    /** Exact deterministic constraints plus weighted residual complete-world particles. */
-    HYBRID_C_V1,
     /** True authoritative world; offline diagnostics only. */
     PRIVILEGED_O_V1,
 }

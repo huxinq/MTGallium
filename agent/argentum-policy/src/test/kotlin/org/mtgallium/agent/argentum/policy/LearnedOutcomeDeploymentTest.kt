@@ -25,7 +25,6 @@ import org.mtgallium.agent.infoset.core.LeafEvaluationConfig
 import org.mtgallium.agent.infoset.core.LeafStateSource
 import org.mtgallium.agent.infoset.core.LeafValueSource
 import org.mtgallium.agent.infoset.core.RolloutCutoff
-import org.mtgallium.agent.infoset.core.UnresolvedLeafHandling
 import org.mtgallium.agent.infoset.core.PerspectiveEventDetail
 import org.mtgallium.agent.infoset.core.PolicyAudience
 import org.mtgallium.agent.infoset.core.PolicyAudienceScope
@@ -64,7 +63,6 @@ class LearnedOutcomeDeploymentTest {
     private val learnedLeaf = LeafEvaluationConfig(
         LeafStateSource.CURRENT_INFORMATION_STATE,
         RolloutCutoff.EVALUATE,
-        UnresolvedLeafHandling.EVALUATE,
     )
 
     @Test
@@ -439,7 +437,6 @@ class LearnedOutcomeDeploymentTest {
         override fun terminalPayoff(rootPlayer: String): Double? =
             1.0.takeIf { terminalAfterStep && depth > 0 }
 
-        override fun sampledWorldLeafValue(rootPlayer: String, evaluatorId: String): Double =
-            error("Learned outcome value must not inspect a sampled world")
+
     }
 }

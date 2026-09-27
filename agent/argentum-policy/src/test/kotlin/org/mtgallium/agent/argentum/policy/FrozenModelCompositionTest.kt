@@ -11,7 +11,6 @@ class FrozenModelCompositionTest {
         val parameters = LivePolicyConfig(leaf = LeafEvaluationConfig(
             LeafStateSource.CURRENT_INFORMATION_STATE,
             RolloutCutoff.EVALUATE,
-            UnresolvedLeafHandling.EVALUATE,
         )).policyParameters()
         val decks = mapOf("p0" to mapOf("Mountain" to 20, "Shock" to 4), "p1" to mapOf("Mountain" to 20, "Shock" to 4))
         val base = model(.25)

@@ -24,8 +24,8 @@ import kotlin.test.*
  * scores are acquired; matching bounded Production decisions does not prove U0 invariance.
  */
 class SequentialBeliefHiddenInputTest {
-    @Test fun `p0 preparation preserves sampled state but inherits factual opponent history`() = compareSeat(0)
-    @Test fun `p1 preparation preserves sampled state but inherits factual opponent history`() = compareSeat(1)
+    @Test fun `p0 belief preserves sampled state but inherits factual opponent history`() = compareSeat(0)
+    @Test fun `p1 belief preserves sampled state but inherits factual opponent history`() = compareSeat(1)
 
     private fun compareSeat(seat: Int) {
         val viewer = "p$seat"
@@ -57,10 +57,11 @@ class SequentialBeliefHiddenInputTest {
             "independent-selection-coordinate", 71L, 42613L, knownDecks = decks)
         val left = wrap(original)
         val right = wrap(altered)
-        fun prepare(world: ArgentumSearchWorld) = BeliefPreparation(world, viewer, decks,
+        fun prepare(world: ArgentumSearchWorld) = ArgentumParticleBeliefBackend(world, viewer, decks,
             BeliefConfig(8, BeliefMode.CONSISTENCY_ONLY_V1, BeliefArchitecture.SEQUENTIAL_B_V1,
                 ObservedBeliefConditioning.HISTORICAL_GROUP_SIGNATURE_V1),
-            defaultMonoRedOpponentPolicy(), "declared-u0-coordinate-not-source-rng")
+            defaultMonoRedOpponentPolicy(), "declared-u0-coordinate-not-source-rng",
+            org.mtgallium.agent.infoset.argentum.ArgentumBeliefProposalAuditSink.NONE)
         assertEquals(left.informationState(viewer), right.informationState(viewer))
         val leftBelief = prepare(left)
         val rightBelief = prepare(right)
@@ -68,8 +69,8 @@ class SequentialBeliefHiddenInputTest {
         val production = PolicyDefaults.rootRolloutPolicy()
         fun compareAt(cursor: Int) {
             assertEquals(left.informationState(viewer), right.informationState(viewer), "Legitimate prefix $viewer/$cursor")
-            val a = leftBelief.beliefBatch(left)
-            val b = rightBelief.beliefBatch(right)
+            val a = leftBelief.apply { synchronize(left, cursor) }.batch()
+            val b = rightBelief.apply { synchronize(right, cursor) }.batch()
             assertEquals(a.particles.map { it.weight }, b.particles.map { it.weight }, "Weights $viewer/$cursor")
             for (index in a.particles.indices) {
                 val x = a.particles[index].value as ArgentumSearchWorld
@@ -150,8 +151,8 @@ class SequentialBeliefHiddenInputTest {
             val b = right.step(counterpart)
             assertTrue(a.accepted && b.accepted)
             assertEquals(a.privateToActor, b.privateToActor)
-            leftBelief.observeAccepted(left, actor, choice, index, a.privateToActor)
-            rightBelief.observeAccepted(right, actor, counterpart, index, b.privateToActor)
+            leftBelief.advance(left, actor, choice, index, a.privateToActor)
+            rightBelief.advance(right, actor, counterpart, index, b.privateToActor)
             compareAt(index + 1)
         }
         assertTrue(left.informationState(viewer).history.isNotEmpty())

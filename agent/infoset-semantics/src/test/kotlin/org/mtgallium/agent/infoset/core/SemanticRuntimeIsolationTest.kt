@@ -7,7 +7,7 @@ class SemanticRuntimeIsolationTest {
     @Test fun `a direct policy executes with neither search worlds UCT particles nor engine classes`() {
         for (name in listOf("org.mtgallium.agent.infoset.core.SearchWorld",
             "org.mtgallium.agent.infoset.core.InformationSetSearch", "org.mtgallium.agent.infoset.core.ParticleBelief",
-            "org.mtgallium.agent.infoset.core.TerminalPolicyContinuationRunner", "org.mtgallium.agent.infoset.core.RootActionSelector",
+            "org.mtgallium.agent.infoset.core.RootActionSelector",
             "org.mtgallium.agent.infoset.core.RootActionSelection",
             "org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld")) {
             assertFailsWith<ClassNotFoundException> { Class.forName(name) }

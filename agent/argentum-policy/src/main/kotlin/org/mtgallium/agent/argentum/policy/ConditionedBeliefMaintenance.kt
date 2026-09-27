@@ -4,12 +4,6 @@ import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.ParticleRejuvenator
 
-/** Retained identity for the original copying-only maintenance boundary. */
-const val CONDITIONED_BELIEF_MAINTENANCE_V1 = "copy-only-refuse-knowledge-reconstruction-v1"
-
-/** Joint action/observation conditioning precedes the copying-only resampling step. */
-const val CONDITIONED_BELIEF_MAINTENANCE_V2 = "condition-before-resample-copy-only-refuse-rebuild-v2"
-
 /**
  * The observed-action likelihood uses the conditioning policy's declared decision view, and each
  * resampled duplicate keeps its hidden state but draws a fresh future-chance stream.

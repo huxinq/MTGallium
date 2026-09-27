@@ -22,7 +22,7 @@ import kotlin.test.*
 /** Authored component states using native transitions/resolution, not a reachable gameplay proof. */
 class ResolutionSourceReferenceTest {
     private val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
-    private val mode = PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_AND_RESOLUTION_SOURCE_V1
+    private val mode = PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2
     private data class Fixture(val state: GameState, val source: EntityId, val other: EntityId,
         val owner: EntityId, val players: List<EntityId>)
 
@@ -77,7 +77,7 @@ class ResolutionSourceReferenceTest {
                     projections(right.state, right).getValue(v).observation)
                 assertEquals(projections(a.state, left).getValue(v).observation,
                     projections(b.state, right).getValue(v).observation)
-                if (identity == mode || identity == PerspectiveHistoryObjectReference.QUALIFIED_OBSERVED_OBJECTS_V2) {
+                if (identity == mode) {
                     assertEquals(h1.forViewer(v), h2.forViewer(v))
                     assertEquals(h1.commitmentForViewer(v), h2.commitmentForViewer(v))
                     assertEquals("resolution-source-before:v1:0:stack:0", source(h1, v))
@@ -121,7 +121,7 @@ class ResolutionSourceReferenceTest {
         for (events in variants) {
             val current = record(f, moved.state, events)
             val old = record(f, moved.state, events, PerspectiveHistory(f.players,
-                objectReference = PerspectiveHistoryObjectReference.REMEMBERED_BATTLEFIELD_V1))
+                objectReference = PerspectiveHistoryObjectReference.LEGACY_SNAPSHOT_V1))
             for (v in f.players) assertEquals(old.forViewer(v), current.forViewer(v))
         }
         val refs = projections(f.state, f).getValue(f.players[0]).references

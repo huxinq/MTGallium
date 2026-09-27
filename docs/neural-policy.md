@@ -115,12 +115,6 @@ and graph names. `training.json` separately records training information.
 `export_models(..., maximum_batch=1)` emits single-lane graphs; larger maxima emit
 batch graphs. `maximum_batch` is configurable and defaults to eight.
 
-The JVM loader is `OnnxSequenceModel.load(descriptorBytes, graphBytes)`, where
-`graphBytes` resolves a graph name to bytes. Names are caller-defined, and one
-graph can serve several roles. The loader checks tensor names, types and ranks;
-ONNX Runtime checks concrete shapes when executing. Close the model to release
-its sessions. Player memory belongs to the caller.
-
 ## Verification
 
 Ordinary CPU training and model tests require PyTorch, not ONNX:
