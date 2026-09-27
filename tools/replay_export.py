@@ -112,25 +112,86 @@ def decision_logs(row, flags):
 
 
 def checked(actual, expected, game_id, position):
-    # Argentum allocates stack resolution keys with UUID.randomUUID. Their bytes
-    # differ across runs, while repeated references to the same key must agree.
-    def normalized(value, uuids):
-        if isinstance(value, dict):
-            return {key: normalized(item, uuids) for key, item in value.items()}
-        if isinstance(value, list):
-            return [normalized(item, uuids) for item in value]
-        if isinstance(value, str) and re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', value):
-            return uuids.setdefault(value, f'<uuid-{len(uuids)}>')
-        return value
-    left, right = normalized(actual, {}), normalized(expected, {})
-    if left != right:
-        keys = [key for key in expected if left.get(key) != right[key]]
-        raise ValueError(f'{game_id} diverged at decision {position}: state fields {keys[:12]}')
+    return check_state(actual, expected, game_id, position, {})
+
+
+GENERATED_IDS = {
+    'uuid': re.compile(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}'),
+    'ability': re.compile(r'ability_\d+'),
+}
+
+
+def check_state(actual, expected, game_id, position, identities):
+    """Compare state with a persistent bijection for engine-generated IDs."""
+    def mismatch(left, right, path):
+        if isinstance(left, str) and isinstance(right, str):
+            for kind, pattern in GENERATED_IDS.items():
+                if pattern.fullmatch(left) and pattern.fullmatch(right):
+                    forward, reverse = identities.setdefault(kind, ({}, {}))
+                    if (left in forward and forward[left] != right or
+                            right in reverse and reverse[right] != left):
+                        return path
+                    forward[left] = right
+                    reverse[right] = left
+                    return None
+        if type(left) is not type(right):
+            return path
+        if isinstance(left, dict):
+            if left.keys() != right.keys():
+                return path + '.keys'
+            for key in left:
+                found = mismatch(left[key], right[key], f'{path}.{key}')
+                if found:
+                    return found
+        elif isinstance(left, list):
+            if len(left) != len(right):
+                return path + '.length'
+            for index, (item, other) in enumerate(zip(left, right)):
+                found = mismatch(item, other, f'{path}[{index}]')
+                if found:
+                    return found
+        elif left != right:
+            return path
+        return None
+    path = mismatch(actual, expected, 'state')
+    if path:
+        raise ValueError(f'{game_id} diverged at decision {position}: {path}')
 
 
 def write_gzip(path, data):
     with gzip.open(path, 'wt', compresslevel=1) as stream:
         json.dump(data, stream, separators=(',', ':'), ensure_ascii=False)
+
+
+def verify_game(session, path, deck, header):
+    game_id = header['gameId']
+    identities = {}
+    game = session.game([deck, deck], seed=header['seed'], policies=['random', 'random'])
+    try:
+        try:
+            check_state(game.state(), header['startingState'], game_id, 'start', identities)
+            lines = read_lines(path)
+            next(lines)
+            next(lines)
+            for row in lines:
+                if row['type'] == 'end':
+                    check_state(game.state(), row['privilegedFinalState'], game_id, 'final', identities)
+                    status = game.status()
+                    if not status['terminal'] or status['payoffs'] != header['result']['payoffs']:
+                        raise ValueError(f'{game_id} diverged at terminal result: {status}')
+                    return None
+                index = row['decisionIndex']
+                if game.status()['index'] != index:
+                    raise ValueError(f'{game_id} diverged at decision {index}: index')
+                check_state(game.state(), row['privilegedPreState'], game_id, index, identities)
+                action = row['selectedAction']
+                game._call('step', index=action['index'], view=action['view'],
+                           choice=action['choice'], record=False)
+            raise ValueError(f'{game_id} missing terminal record')
+        except Exception as error:
+            return str(error)
+    finally:
+        game.close()
 
 
 def export_game(session, path, deck, flags, output):
@@ -140,75 +201,45 @@ def export_game(session, path, deck, flags, output):
         raise ValueError(f'{path.name}: recorded game failed: {execution["error"]}')
     header = next(lines)
     game_id = header['gameId']
-    game = session.game([deck, deck], seed=header['seed'], policies=['random', 'random'])
+    divergence = verify_game(session, path, deck, header)
     streams = {name: [] for name in ('hindsight', 'p0', 'p1')}
     states = []
     logs = []
-    divergence = None
-    try:
-        try:
-            checked(game.state(), header['startingState'], game_id, 'start')
-        except ValueError as error:
-            divergence = str(error)
-        for row in lines:
-            if row['type'] == 'end':
-                break
-            index = row['decisionIndex']
-            state = row['privilegedPreState']
-            if divergence is None:
-                try:
-                    if game.status()['index'] != index:
-                        raise ValueError(f'{game_id} diverged at decision {index}: index')
-                    checked(game.state(), state, game_id, index)
-                except Exception as error:
-                    divergence = str(error)
-            if len(row['menu']) > 1:
-                logs.extend(decision_logs(row, flags.get((game_id, index), [])))
-                views = session._call('render-replay-state', state=state)
-                views['hindsight'] = hindsight(views)
-                for name in streams:
-                    streams[name].append(snapshot(game_id, name, views[name], logs))
-                states.append(state)
-            if divergence is None:
-                action = row['selectedAction']
-                try:
-                    game._call('step', index=action['index'], view=action['view'],
-                               choice=action['choice'], record=False)
-                except Exception as error:
-                    divergence = f'{game_id} diverged applying decision {index}: {error}'
-        final_state = row['privilegedFinalState']
-        if divergence is None:
-            try:
-                checked(game.state(), final_state, game_id, 'final')
-                status = game.status()
-                if not status['terminal'] or status['payoffs'] != header['result']['payoffs']:
-                    raise ValueError(f'{game_id} diverged at terminal result: {status}')
-            except Exception as error:
-                divergence = str(error)
-        views = session._call('render-replay-state', state=final_state)
-        views['hindsight'] = hindsight(views)
-        for name in streams:
-            streams[name].append(snapshot(game_id, name, views[name], logs))
-        states.append(final_state)
-        payoffs = header['result']['payoffs']
-        winner = 'p0' if payoffs['p0'] > 0 else 'p1' if payoffs['p1'] > 0 else None
-        for name, frames in streams.items():
-            metadata = {'gameId': f'{game_id}-{name}', 'player1Name': 'Player 0',
-                        'player2Name': 'Player 1', 'winnerName': winner,
-                        'startedAt': '2026-09-26T00:00:00Z', 'endedAt': '2026-09-26T00:00:00Z',
-                        'snapshotCount': len(frames),
-                        'fidelity': 'DIVERGED' if divergence else 'EXACT',
-                        'degradedReason': divergence,
-                        'stateReproducible': divergence is None}
-            write_gzip(output / f'{game_id}-{name}.json.gz', {
-                'metadata': metadata, 'initialSnapshot': frames[0],
-                'deltas': [delta(a, b) for a, b in zip(frames, frames[1:])],
-            })
-        write_gzip(output / f'{game_id}-states.json.gz', states)
-        return {'gameId': game_id, 'seed': header['seed'], 'policies': header['policies'],
-                'winner': winner, 'frames': len(states), 'divergence': divergence}
-    finally:
-        game.close()
+    for row in lines:
+        if row['type'] == 'end':
+            break
+        index = row['decisionIndex']
+        state = row['privilegedPreState']
+        if len(row['menu']) > 1:
+            logs.extend(decision_logs(row, flags.get((game_id, index), [])))
+            views = session._call('render-replay-state', state=state)
+            views['hindsight'] = hindsight(views)
+            for name in streams:
+                streams[name].append(snapshot(game_id, name, views[name], logs))
+            states.append(state)
+    final_state = row['privilegedFinalState']
+    views = session._call('render-replay-state', state=final_state)
+    views['hindsight'] = hindsight(views)
+    for name in streams:
+        streams[name].append(snapshot(game_id, name, views[name], logs))
+    states.append(final_state)
+    payoffs = header['result']['payoffs']
+    winner = 'p0' if payoffs['p0'] > 0 else 'p1' if payoffs['p1'] > 0 else None
+    for name, frames in streams.items():
+        metadata = {'gameId': f'{game_id}-{name}', 'player1Name': 'Player 0',
+                    'player2Name': 'Player 1', 'winnerName': winner,
+                    'startedAt': '2026-09-26T00:00:00Z', 'endedAt': '2026-09-26T00:00:00Z',
+                    'snapshotCount': len(frames),
+                    'fidelity': 'DIVERGED' if divergence else 'EXACT',
+                    'degradedReason': divergence,
+                    'stateReproducible': divergence is None}
+        write_gzip(output / f'{game_id}-{name}.json.gz', {
+            'metadata': metadata, 'initialSnapshot': frames[0],
+            'deltas': [delta(a, b) for a, b in zip(frames, frames[1:])],
+        })
+    write_gzip(output / f'{game_id}-states.json.gz', states)
+    return {'gameId': game_id, 'seed': header['seed'], 'policies': header['policies'],
+            'winner': winner, 'frames': len(states), 'divergence': divergence}
 
 
 def main():

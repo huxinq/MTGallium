@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.replay_export import checked, delta, export_game, hindsight, snapshot
+from tools.replay_export import check_state, checked, delta, export_game, hindsight, snapshot
 
 
 def view(owner):
@@ -80,6 +80,13 @@ class ReplayExportTest(unittest.TestCase):
         checked({'keys': [first, first]}, {'keys': [second, second]}, 'sample', 1)
         with self.assertRaisesRegex(ValueError, 'diverged'):
             checked({'keys': [first, first]}, {'keys': [second, other]}, 'sample', 1)
+
+    def test_generated_ability_ids_keep_identity_across_decisions(self):
+        identities = {}
+        check_state({'id': 'ability_100'}, {'id': 'ability_200'}, 'sample', 1, identities)
+        check_state({'id': 'ability_100'}, {'id': 'ability_200'}, 'sample', 2, identities)
+        with self.assertRaisesRegex(ValueError, 'diverged at decision 3'):
+            check_state({'id': 'ability_100'}, {'id': 'ability_201'}, 'sample', 3, identities)
 
 
 if __name__ == '__main__':
