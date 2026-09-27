@@ -13,13 +13,12 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import org.mtgallium.agent.argentum.policy.LivePolicyConfig
+import org.mtgallium.agent.argentum.policy.SearchPolicyConfig
 import org.mtgallium.agent.argentum.policy.LivePolicySession
 import org.mtgallium.agent.argentum.policy.PolicyDefaults
 import org.mtgallium.agent.argentum.policy.SearchPolicySession
@@ -56,7 +55,7 @@ import kotlin.test.assertTrue
 class SearchCharacterizationMatrixTest {
     private data class Scenario(
         val id: String,
-        val config: LivePolicyConfig,
+        val config: SearchPolicyConfig,
         val order: HistoryEventOrdering = HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1,
         val objects: HistoryObjectReferencing = HistoryObjectReferencing.LEGACY_SNAPSHOT_V1,
         val throughLive: Boolean = false,
@@ -67,9 +66,9 @@ class SearchCharacterizationMatrixTest {
 
     @Test
     fun `S1 through S10 retain complete public-fixture search records`() {
-        val compact = LivePolicyConfig(particles = 2, simulations = 4, maxPolicyDecisions = 4)
+        val compact = SearchPolicyConfig(particles = 2, simulations = 4, maxPolicyDecisions = 4)
         val scenarios = listOf(
-            Scenario("S1-defaults", LivePolicyConfig()),
+            Scenario("S1-defaults", SearchPolicyConfig()),
             Scenario("S2-V2-order-objects", compact,
                 HistoryEventOrdering.QUALIFIED_TURN_UNTAP_V2,
                 HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2, throughLive = true),
@@ -123,7 +122,7 @@ class SearchCharacterizationMatrixTest {
         advanceToChoice(world)
         val actor = requireNotNull(world.actorToAct())
         val beforeCommitments = commitments(world)
-        val parameters = scenario.config.policyParameters().copy(rolloutTurnHorizon = scenario.horizon)
+        val parameters = scenario.config.copy(rolloutTurnHorizon = scenario.horizon)
         val priorCalls = mutableListOf<Int>()
         val rolloutScheduleCalls = mutableListOf<Int>()
         val rolloutSchedule = if (scenario.priorAndSchedule) object : RolloutPolicySchedule {
@@ -346,10 +345,10 @@ class SearchCharacterizationMatrixTest {
         }.single()
         val omitted = blockers.single { it !in representative.blockers }
         val before = commitments(world)
-        val config = LivePolicyConfig(particles = 8, simulations = 4,
+        val config = SearchPolicyConfig(particles = 8, simulations = 4,
             beliefMode = BeliefMode.POLICY_CONDITIONED_V1,
             actionSpaceProfile = world.semanticExpansionSpecification().actionSpaceProfile)
-        val metadataSession = SearchPolicySession(world, "p0", known, config.policyParameters(),
+        val metadataSession = SearchPolicySession(world, "p0", known, config,
             UniformOpponentPolicy, "matrix-S3-rebuild")
         val inferenceIdentity = metadataSession.beliefSnapshot(world).queries.binding.inferenceModelIdentity
         val live = LivePolicySession(world, "p0", known, "matrix-S3-rebuild", config = config,

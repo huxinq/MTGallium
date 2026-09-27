@@ -8,9 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
-import kotlin.test.assertFailsWith
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import org.mtgallium.agent.infoset.argentum.ArgentumActionGenerator
@@ -29,7 +27,6 @@ import org.mtgallium.agent.infoset.core.OpponentPolicy
 import org.mtgallium.agent.infoset.core.OpponentPolicyBehaviorSpecification
 import org.mtgallium.agent.infoset.core.OpponentPolicyMixtureEntry
 import org.mtgallium.agent.infoset.core.OpponentPolicyReplacementEvidenceDisposition
-import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.core.ProbabilityDistribution
 import org.mtgallium.agent.infoset.planning.RolloutTurnHorizon
@@ -108,7 +105,7 @@ class PolicyIdentityTest {
     @Test
     fun `optional singleton selection roundtrips and changes current behavior identity`() {
         val specification = PolicyIdentity.specification(
-            parameters = LivePolicyConfig().policyParameters(),
+            parameters = SearchPolicyConfig(),
             knownDecks = decks(),
             opponentPolicy = UniformOpponentPolicy,
         )
@@ -270,12 +267,12 @@ class PolicyIdentityTest {
         assertEquals(expectedIdentity, identity())
     }
 
-    private fun parameters(): SearchPolicyConfig = LivePolicyConfig(
+    private fun parameters(): SearchPolicyConfig = SearchPolicyConfig(
         leaf = LeafEvaluationConfig(
             LeafEvaluationMethod.BOUNDED_ROLLOUT,
             RolloutCutoff.QUIESCENCE,
         ),
-    ).policyParameters()
+    )
 
     private fun decks(p0MountainCount: Int = 1): Map<String, Map<String, Int>> = mapOf(
         "p0" to mapOf("Mountain" to p0MountainCount, "Shock" to 1),
