@@ -19,6 +19,21 @@ Feature retirement can remove obsolete tests and interfaces. Resolve only
 unsettled changes to the research objective, game model or interpretation with
 the task owner.
 
+## Design norms
+
+- Keep the code small. Report a pull request's line changes by kind (production,
+  tests, tools, data, docs); production should not grow without a new capability.
+- Retire a variant, knob or mode when its experiment closes. Temporary scaffolding
+  such as migration tools or old implementations kept as oracles lands together
+  with the commit that removes it; one-shot scripts stay in the run folder.
+- Share test builders through a module's test fixtures instead of copying them.
+  Delete a test that only re-pins bytes a golden already covers.
+- Name a file after its primary type. A split moves code; it does not wrap it in
+  forwarding members.
+- Use a word in one sense: MTG rules terms only in their Comprehensive Rules
+  meaning, search and statistics terms in their standard meaning. Put versions in
+  identifier strings rather than type or constant names.
+
 ## Verification
 
 Run focused tests while developing, then `just check` for source changes. For
