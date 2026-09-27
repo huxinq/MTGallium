@@ -89,7 +89,7 @@ internal class BlockerDeclarationSpace(
             // Larger selections and high-power attackers appear first. The empty/minimum branch
             // is still exhaustive and is also represented by the restraint anchor below.
             for (additional in additionalCap downTo 0) {
-                for (selected in combinations(optional, additional)) {
+                for (selected in kSubsets(optional, additional)) {
                     val full = (blocker.required + selected).sortedBy(attackerIndex::getValue)
                     if (minimumSymmetricSelection == null || selectionKey(full) >= minimumSymmetricSelection) {
                         yield(BlockExtension(full))
@@ -211,23 +211,4 @@ internal class BlockerDeclarationSpace(
 
     private fun selectionKey(attackers: List<EntityId>): String =
         attackers.map(refs::objectRef).sorted().joinToString(",")
-}
-
-private fun <T> combinations(values: List<T>, size: Int): Sequence<List<T>> = sequence {
-    if (size == 0) {
-        yield(emptyList())
-        return@sequence
-    }
-    suspend fun SequenceScope<List<T>>.visit(start: Int, remaining: Int, prefix: MutableList<T>) {
-        if (remaining == 0) {
-            yield(prefix.toList())
-            return
-        }
-        for (index in start..values.size - remaining) {
-            prefix += values[index]
-            visit(index + 1, remaining - 1, prefix)
-            prefix.removeAt(prefix.lastIndex)
-        }
-    }
-    if (size <= values.size) visit(0, size, mutableListOf())
 }

@@ -212,32 +212,20 @@ class ArgentumKnownDeckBeliefWorldSource(
                     )
                     if (candidateFailures.isEmpty()) {
                         accepted += candidate
-                        proposalAuditSink.record(
-                            ArgentumBeliefProposalAudit(
-                                source = ArgentumBeliefProposalSource.KNOWN_DECK_CONSTRUCTION,
-                                context = proposalContext,
-                                attemptIndex = attempts,
-                                proposalSeed = seed,
-                                disposition = ArgentumBeliefProposalDisposition.ACCEPTED,
-                            )
-                        )
+                        proposalAuditSink.record(ArgentumBeliefProposalAudit(
+                            ArgentumBeliefProposalSource.KNOWN_DECK_CONSTRUCTION, proposalContext, attempts, seed,
+                            ArgentumBeliefProposalDisposition.ACCEPTED,
+                        ))
                     } else {
                         val redactedReasons = candidateFailures.keys.sorted().map { "KnowledgeSupport:$it" }
                         candidateFailures.forEach { (failure, count) ->
                             val code = "KnowledgeSupport:$failure"
                             failures[code] = failures.getOrDefault(code, 0) + count
                         }
-                        proposalAuditSink.record(
-                            ArgentumBeliefProposalAudit(
-                                source = ArgentumBeliefProposalSource.KNOWN_DECK_CONSTRUCTION,
-                                context = proposalContext,
-                                attemptIndex = attempts,
-                                proposalSeed = seed,
-                                disposition =
-                                    ArgentumBeliefProposalDisposition.REJECTED_BY_REPRESENTED_FACT_SUPPORT,
-                                redactedReasons = redactedReasons,
-                            )
-                        )
+                        proposalAuditSink.record(ArgentumBeliefProposalAudit(
+                            ArgentumBeliefProposalSource.KNOWN_DECK_CONSTRUCTION, proposalContext, attempts, seed,
+                            ArgentumBeliefProposalDisposition.REJECTED_BY_REPRESENTED_FACT_SUPPORT, redactedReasons,
+                        ))
                     }
                 }
                 is KnownDeckWorldMaterializationResult.Unsupported -> {
@@ -245,16 +233,10 @@ class ArgentumKnownDeckBeliefWorldSource(
                     redactedReasons.forEach { name ->
                         failures[name] = failures.getOrDefault(name, 0) + 1
                     }
-                    proposalAuditSink.record(
-                        ArgentumBeliefProposalAudit(
-                            source = ArgentumBeliefProposalSource.KNOWN_DECK_CONSTRUCTION,
-                            context = proposalContext,
-                            attemptIndex = attempts,
-                            proposalSeed = seed,
-                            disposition = ArgentumBeliefProposalDisposition.REJECTED_BY_ENGINE_SAMPLER,
-                            redactedReasons = redactedReasons,
-                        )
-                    )
+                    proposalAuditSink.record(ArgentumBeliefProposalAudit(
+                        ArgentumBeliefProposalSource.KNOWN_DECK_CONSTRUCTION, proposalContext, attempts, seed,
+                        ArgentumBeliefProposalDisposition.REJECTED_BY_ENGINE_SAMPLER, redactedReasons,
+                    ))
                 }
             }
             attempts++
@@ -354,48 +336,30 @@ class ArgentumConditionalRejuvenator(
                         expected,
                     )
                     if (candidateFailures.isEmpty()) {
-                        proposalAuditSink.record(
-                            ArgentumBeliefProposalAudit(
-                                source = ArgentumBeliefProposalSource.CONDITIONAL_REJUVENATION,
-                                context = proposalContext,
-                                attemptIndex = attempt,
-                                proposalSeed = attemptSeed,
-                                disposition = ArgentumBeliefProposalDisposition.ACCEPTED,
-                            )
-                        )
+                        proposalAuditSink.record(ArgentumBeliefProposalAudit(
+                            ArgentumBeliefProposalSource.CONDITIONAL_REJUVENATION, proposalContext, attempt, attemptSeed,
+                            ArgentumBeliefProposalDisposition.ACCEPTED,
+                        ))
                         return candidate
                     }
                     candidateFailures.forEach { (failure, count) ->
                         val code = "KnowledgeSupport:$failure"
                         failures[code] = failures.getOrDefault(code, 0) + count
                     }
-                    proposalAuditSink.record(
-                        ArgentumBeliefProposalAudit(
-                            source = ArgentumBeliefProposalSource.CONDITIONAL_REJUVENATION,
-                            context = proposalContext,
-                            attemptIndex = attempt,
-                            proposalSeed = attemptSeed,
-                            disposition =
-                                ArgentumBeliefProposalDisposition.REJECTED_BY_REPRESENTED_FACT_SUPPORT,
-                            redactedReasons = candidateFailures.keys.sorted().map { "KnowledgeSupport:$it" },
-                        )
-                    )
+                    proposalAuditSink.record(ArgentumBeliefProposalAudit(
+                        ArgentumBeliefProposalSource.CONDITIONAL_REJUVENATION, proposalContext, attempt, attemptSeed,
+                        ArgentumBeliefProposalDisposition.REJECTED_BY_REPRESENTED_FACT_SUPPORT, candidateFailures.keys.sorted().map { "KnowledgeSupport:$it" },
+                    ))
                 }
                 is KnownDeckWorldMaterializationResult.Unsupported -> {
                     val redactedReasons = result.reasons.map(KnownDeckWorldFailure::redactedCode).sorted()
                     redactedReasons.forEach { code ->
                         failures[code] = failures.getOrDefault(code, 0) + 1
                     }
-                    proposalAuditSink.record(
-                        ArgentumBeliefProposalAudit(
-                            source = ArgentumBeliefProposalSource.CONDITIONAL_REJUVENATION,
-                            context = proposalContext,
-                            attemptIndex = attempt,
-                            proposalSeed = attemptSeed,
-                            disposition = ArgentumBeliefProposalDisposition.REJECTED_BY_ENGINE_SAMPLER,
-                            redactedReasons = redactedReasons,
-                        )
-                    )
+                    proposalAuditSink.record(ArgentumBeliefProposalAudit(
+                        ArgentumBeliefProposalSource.CONDITIONAL_REJUVENATION, proposalContext, attempt, attemptSeed,
+                        ArgentumBeliefProposalDisposition.REJECTED_BY_ENGINE_SAMPLER, redactedReasons,
+                    ))
                 }
             }
         }

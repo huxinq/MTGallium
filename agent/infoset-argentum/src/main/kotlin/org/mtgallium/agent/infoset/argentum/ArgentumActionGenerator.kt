@@ -410,7 +410,7 @@ class ArgentumActionGenerator(
         val count = mulligan.cardsToBottom
         if (count <= 0) return null
         val hand = environment.state.getHand(actor)
-        val orders = orderedSelections(hand, count)
+        val orders = kPermutations(hand, count)
         return GeneratedChoices(
             choices = orders.map { ArgentumEngineChoice.Action(BottomCards(actor, it)) },
             estimatedCount = permutationCount(hand.size, count),
@@ -445,7 +445,7 @@ class ArgentumActionGenerator(
             }
         }
         val estimate = choices.fold(1L) { count, options -> saturatingMultiply(count, options.size.toLong()) }
-        val actions = cartesian(choices).map { selections ->
+        val actions = cartesianProduct(choices).map { selections ->
             template.copy(attackers = selections.mapNotNull { (attacker, target) ->
                 target?.let { attacker to it }
             }.toMap())
@@ -540,7 +540,7 @@ class ArgentumActionGenerator(
                 selectionLists(requirement.validTargets, requirement.minTargets, requirement.maxTargets).toList()
             }
             val estimate = perRequirement.fold(1L) { count, values -> saturatingMultiply(count, values.size.toLong()) }
-            return SelectionCandidates(cartesian(perRequirement).map { it.flatten() }, estimate, true)
+            return SelectionCandidates(cartesianProduct(perRequirement).map { it.flatten() }, estimate, true)
         }
         val values = legal.validTargets.orEmpty()
         val minimum = if (values.isEmpty()) 0 else legal.minTargets.coerceAtMost(values.size)
@@ -908,15 +908,11 @@ class ArgentumActionGenerator(
         ): ActionGenerationSpecification = ArgentumActionGenerator(
             actionSpaceProfile = actionSpaceProfile,
         ).behaviorSpecification
-
-        private val engineJson = Json {
-            encodeDefaults = true
-            explicitNulls = true
-            ignoreUnknownKeys = false
-            classDiscriminator = "type"
-        }
     }
 }
+
+/** Engine payload encoding shared by action generation and observation projection. */
+internal val engineJson = Json { encodeDefaults = true; explicitNulls = true; classDiscriminator = "type" }
 
 internal fun policyActor(environment: GameEnvironment): EntityId? =
     mulliganActor(environment) ?: environment.agentToAct
@@ -930,69 +926,10 @@ private fun mulliganActor(environment: GameEnvironment): EntityId? {
         ?: mulligans.firstOrNull { (_, component) -> component.hasKept && component.cardsToBottom > 0 }?.first
 }
 
-private fun <T> cartesian(choices: List<List<T>>): Sequence<List<T>> = sequence {
-    if (choices.isEmpty()) {
-        yield(emptyList())
-        return@sequence
-    }
-    suspend fun SequenceScope<List<T>>.visit(index: Int, prefix: MutableList<T>) {
-        if (index == choices.size) {
-            yield(prefix.toList())
-            return
-        }
-        for (value in choices[index]) {
-            prefix += value
-            visit(index + 1, prefix)
-            prefix.removeAt(prefix.lastIndex)
-        }
-    }
-    visit(0, mutableListOf())
-}
-
 private fun <T> selectionLists(values: List<T>, minimum: Int, maximum: Int): Sequence<List<T>> = sequence {
     for (size in minimum.coerceAtLeast(0)..maximum.coerceAtMost(values.size)) {
-        yieldAll(combinations(values, size))
+        yieldAll(kSubsets(values, size))
     }
-}
-
-private fun <T> combinations(values: List<T>, size: Int): Sequence<List<T>> = sequence {
-    if (size == 0) {
-        yield(emptyList())
-        return@sequence
-    }
-    suspend fun SequenceScope<List<T>>.visit(start: Int, remaining: Int, prefix: MutableList<T>) {
-        if (remaining == 0) {
-            yield(prefix.toList())
-            return
-        }
-        for (index in start..values.size - remaining) {
-            prefix += values[index]
-            visit(index + 1, remaining - 1, prefix)
-            prefix.removeAt(prefix.lastIndex)
-        }
-    }
-    if (size <= values.size) visit(0, size, mutableListOf())
-}
-
-private fun <T> orderedSelections(values: List<T>, size: Int): Sequence<List<T>> = sequence {
-    if (size == 0) {
-        yield(emptyList())
-        return@sequence
-    }
-    suspend fun SequenceScope<List<T>>.visit(prefix: MutableList<T>, remaining: MutableList<T>) {
-        if (prefix.size == size) {
-            yield(prefix.toList())
-            return
-        }
-        for (index in remaining.indices.toList()) {
-            val value = remaining.removeAt(index)
-            prefix += value
-            visit(prefix, remaining)
-            prefix.removeAt(prefix.lastIndex)
-            remaining.add(index, value)
-        }
-    }
-    if (size <= values.size) visit(mutableListOf(), values.toMutableList())
 }
 
 private fun integerVectors(length: Int, total: Int): Sequence<List<Int>> = sequence {

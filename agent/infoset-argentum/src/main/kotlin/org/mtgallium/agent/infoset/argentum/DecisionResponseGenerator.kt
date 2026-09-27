@@ -399,37 +399,13 @@ class DecisionResponseGenerator(
             when {
                 size == 0 -> yield(emptyList())
                 allowRepeats -> yieldAll(products(options, size))
-                ordered -> yieldAll(permutationsOfSize(options, size))
-                else -> yieldAll(combinations(options, size))
+                ordered -> yieldAll(kPermutations(options, size))
+                else -> yieldAll(kSubsets(options, size))
             }
         }
     }
 
-    private fun <T> combinations(values: List<T>, size: Int): Sequence<List<T>> = sequence {
-        suspend fun SequenceScope<List<T>>.walk(start: Int, remaining: Int, prefix: List<T>) {
-            if (remaining == 0) {
-                yield(prefix)
-                return
-            }
-            for (index in start..values.size - remaining) walk(index + 1, remaining - 1, prefix + values[index])
-        }
-        if (size in 0..values.size) walk(0, size, emptyList())
-    }
-
-    private fun <T> permutations(values: List<T>): Sequence<List<T>> = permutationsOfSize(values, values.size)
-
-    private fun <T> permutationsOfSize(values: List<T>, size: Int): Sequence<List<T>> = sequence {
-        suspend fun SequenceScope<List<T>>.walk(remaining: List<T>, needed: Int, prefix: List<T>) {
-            if (needed == 0) {
-                yield(prefix)
-                return
-            }
-            for (index in remaining.indices) {
-                walk(remaining.toMutableList().also { it.removeAt(index) }, needed - 1, prefix + remaining[index])
-            }
-        }
-        if (size in 0..values.size) walk(values, size, emptyList())
-    }
+    private fun <T> permutations(values: List<T>): Sequence<List<T>> = kPermutations(values, values.size)
 
     private fun <T> products(values: List<T>, size: Int): Sequence<List<T>> = sequence {
         suspend fun SequenceScope<List<T>>.walk(remaining: Int, prefix: List<T>) {
@@ -443,18 +419,7 @@ class DecisionResponseGenerator(
     }
 
     private fun <T> subsets(values: List<T>): Sequence<List<T>> = sequence {
-        for (size in boundaryFirst(0..values.size)) yieldAll(combinations(values, size))
-    }
-
-    private fun <T> cartesianProduct(dimensions: List<List<T>>): Sequence<List<T>> = sequence {
-        suspend fun SequenceScope<List<T>>.walk(index: Int, prefix: List<T>) {
-            if (index == dimensions.size) {
-                yield(prefix)
-                return
-            }
-            for (value in dimensions[index]) walk(index + 1, prefix + value)
-        }
-        if (dimensions.none { it.isEmpty() }) walk(0, emptyList())
+        for (size in boundaryFirst(0..values.size)) yieldAll(kSubsets(values, size))
     }
 
     /** Cartesian traversal without materializing any dimension or the resulting product. */

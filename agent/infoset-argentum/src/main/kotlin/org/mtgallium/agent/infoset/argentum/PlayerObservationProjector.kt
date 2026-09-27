@@ -4,7 +4,6 @@ import com.wingedsheep.engine.core.PendingDecision
 import com.wingedsheep.gym.contract.EntityFeatures
 import com.wingedsheep.gym.contract.TrainingObservation
 import com.wingedsheep.sdk.model.EntityId
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -672,7 +671,6 @@ internal class ObservationReferenceMap(
 
     private companion object {
         val EMPTY_CARD_RUNTIME = ArgentumPolicyCardRuntime()
-        val engineJson = Json { encodeDefaults = true; explicitNulls = true; classDiscriminator = "type" }
     }
 }
 
