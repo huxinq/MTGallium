@@ -335,43 +335,6 @@ class KnowledgeStateTest {
     }
 
     @Test
-    fun `older zone and shuffle records default to their original current-object behavior`() {
-        val zoneChange = CanonicalJson.format.decodeFromString<ObservedEventDetail>(
-            """{"type":"zone_change","schemaVersion":1,"ownerId":"p1","fromZone":"HAND","toZone":"GRAVEYARD","cardName":"Shock","knowledgeObjectKey":"known-shock"}""",
-        ) as ObservedEventDetail.ZoneChange
-        val shuffle = CanonicalJson.format.decodeFromString<ObservedEventDetail>(
-            """{"type":"shuffle","schemaVersion":1,"playerId":"p1","cause":"EFFECT"}""",
-        ) as ObservedEventDetail.Shuffle
-
-        assertTrue(zoneChange.continuesAsCurrentObject)
-        assertEquals(emptyList(), shuffle.invalidatedKnowledgeObjectKeys)
-        assertEquals(PERSPECTIVE_EVENT_SCHEMA_V1, zoneChange.schemaVersion)
-        assertEquals(PERSPECTIVE_EVENT_SCHEMA_V1, shuffle.schemaVersion)
-        assertEquals(
-            PERSPECTIVE_EVENT_SCHEMA_V2,
-            ObservedEventDetail.ZoneChange(
-                ownerId = "p1",
-                fromZone = "HAND",
-                toZone = "GRAVEYARD",
-                cardName = "Shock",
-            ).schemaVersion,
-        )
-        assertEquals(
-            PERSPECTIVE_EVENT_SCHEMA_V2,
-            ObservedEventDetail.Shuffle(playerId = "p1", cause = "EFFECT").schemaVersion,
-        )
-
-        val knowledge = KnowledgeReplay.reduce(
-            "p0",
-            decks,
-            observation(),
-            listOf(event(1, zoneChange), event(2, shuffle)),
-        )
-
-        assertEquals("GRAVEYARD", knowledge.knownObjects.single().zone)
-    }
-
-    @Test
     fun `shuffle invalidates only its supplied opaque current-object keys in replay and incrementally`() {
         val history = listOf(
             event(

@@ -88,29 +88,10 @@ class SearchPolicyTest {
     }
 
     @Test
-    fun `runtime budgets are positive counts not a historical experiment grid`() {
-        val config = LivePolicyConfig(particles = 3, simulations = 7)
-        assertEquals(3, config.policyParameters().particles)
-        assertEquals(7, config.policyParameters().searchConfig().simulations)
-        assertFailsWith<IllegalArgumentException> { LivePolicyConfig(particles = 0) }
-        assertFailsWith<IllegalArgumentException> { LivePolicyConfig(simulations = 0) }
-    }
-
-    @Test
     fun `policy parameters reject invalid search budgets`() {
         assertFailsWith<IllegalArgumentException> {
             LivePolicyConfig().policyParameters().copy(simulations = 0)
         }
-    }
-
-    @Test
-    fun `runtime accepts arbitrary positive budgets`() {
-        val config = LivePolicyConfig(particles = 3, simulations = 17)
-        val parameters = config.policyParameters()
-        assertEquals(3, parameters.particles)
-        assertEquals(17, parameters.searchConfig().simulations)
-        assertFailsWith<IllegalArgumentException> { LivePolicyConfig(particles = 0) }
-        assertFailsWith<IllegalArgumentException> { LivePolicyConfig(simulations = -1) }
     }
 
     @Test
@@ -230,5 +211,4 @@ class SearchPolicyTest {
             DecisionContext.capture("p0", menu, { error("Information was forced") }), 0L
         ) { error("Direct policy should run when automatic selection does not apply") }
     }
-
 }

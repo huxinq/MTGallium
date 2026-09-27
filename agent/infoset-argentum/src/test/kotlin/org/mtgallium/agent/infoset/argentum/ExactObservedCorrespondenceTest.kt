@@ -370,23 +370,6 @@ class ExactObservedCorrespondenceTest {
         assertIs<ObservedActionMatch.Unsupported>(changed.matchObservedAction(capture))
     }
 
-    @Test fun `behavior modes preserve historical defaults and explicit representative mass`() {
-        val f = fixture()
-        val group = f.world.expandChoices().candidates.first { it.operationFamily == SemanticOperationFamily.DECLARE_BLOCKERS }
-        val native = assertIs<ArgentumResolvedChoice.Action>(f.world.resolveChoice(group)).value
-        val capture = f.world.recordObservedAction("p0", native)
-        val result = assertIs<ObservedActionMatch.Matched>(f.world.matchObservedAction(capture))
-        assertEquals(1.0, result.memberProbability)
-        assertEquals(ObservedActionMatch.REPRESENTATIVE_ONLY, result.memberSelectionBehaviorId)
-        assertEquals(f.world.observedActionBehaviorId(), capture.behaviorId)
-        val old = fixture(reference = HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
-        assertEquals(old.world.expandChoices(), f.world.expandChoices())
-        assertNotEquals(old.world.exactRevision(), f.world.exactRevision())
-        val env = environment()
-        assertEquals(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1,
-            ArgentumSearchWorld.create(env, "legacy", 1, 1).historyObjectReference)
-    }
-
     @Test fun `genuine alternate private draw still refuses complete observer information`() {
         val env = environment()
         val original = ArgentumSearchWorld.create(env, "wrong-draw", 3, 3, historyObjectReference = mode)

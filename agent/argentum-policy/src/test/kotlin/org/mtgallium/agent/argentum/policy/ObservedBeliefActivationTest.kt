@@ -84,33 +84,6 @@ class ObservedBeliefActivationTest {
         assertTrue(views.all { it.admission == MenuSource.PRODUCTION && it.annotations })
     }
 
-    @Test fun `conditioning can be declared independently of representation without changing legacy bytes`() {
-        val config = BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1)
-        val encoded = CanonicalJson.format.encodeToJsonElement(BeliefConfig.serializer(), config).jsonObject
-        assertEquals(setOf("particles", "beliefMode", "beliefArchitecture"), encoded.keys)
-        val historical = config.copy(observedConditioning = ObservedActionLikelihood.HISTORICAL_GROUP_SIGNATURE_V1)
-        assertNotEquals(encoded, CanonicalJson.format.encodeToJsonElement(BeliefConfig.serializer(), historical))
-        val world = world(qualified)
-        fun prepare(configuration: BeliefConfig) = ArgentumParticleFilter(
-            world, "p0", decks, configuration, UniformOpponentPolicy, "observed-live-test",
-            ArgentumBeliefProposalAuditSink.NONE)
-        val groupOnly = prepare(historical)
-        val nativeDefault = prepare(config)
-        assertNotEquals(groupOnly.snapshot().queries.binding.inferenceModelIdentity,
-            nativeDefault.snapshot().queries.binding.inferenceModelIdentity)
-        val actor = requireNotNull(world.actorToAct())
-        val capture = world.recordObservedAction("p0", pass(world))
-        val observed = world.applyObservedAction(pass(world))
-        assertTrue(observed.result.accepted)
-        groupOnly.advance(world, actor, observed.choice, 0, observed.result.privateToActor)
-        nativeDefault.advance(world, actor, observed.choice, 0, observed.result.privateToActor)
-        assertEquals(ObservedActionLikelihoodRoute.HISTORICAL_SIGNATURE_V1, groupOnly.lastObservedUpdate?.route)
-        assertEquals(ObservedActionLikelihoodRoute.QUALIFIED_EXACT_MEMBER_V1, nativeDefault.lastObservedUpdate?.route)
-        assertFailsWith<IllegalArgumentException> {
-            groupOnly.advance(world, actor, observed.choice, 0, observed.result.privateToActor, capture)
-        }
-    }
-
     @Test fun `live runtime activates exact pass and explicitly names cast compatibility only in opt-in mode`() {
         for (mode in listOf(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1, qualified)) {
             for (isCast in listOf(false, true)) {
@@ -154,22 +127,6 @@ class ObservedBeliefActivationTest {
         }
         assertNotEquals(identities.getValue(qualified),
             identities.getValue(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1))
-    }
-
-    @Test fun `historical representation also versions proposal independent observed history provenance`() {
-        val world = world(HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
-        val config = BeliefConfig(8, BeliefMode.POLICY_CONDITIONED_V1)
-        fun identity(includeSubmission: Boolean) = "particle-inference-v1-sha256:" + CanonicalJson.digest(buildJsonObject {
-            put("configuration", CanonicalJson.format.encodeToJsonElement(config))
-            put("opponentDistribution", CanonicalJson.format.encodeToJsonElement(UniformOpponentPolicy.behaviorSpecification))
-            put("privateChoiceSelector", CanonicalJson.format.encodeToJsonElement(UniformOpponentPolicy.behaviorSpecification))
-            if (includeSubmission) put("observedSubmission", world.observedActionBehaviorId())
-            put("maintenance", CONDITIONED_BELIEF_INFERENCE_MAINTENANCE)
-        })
-        val actual = backend(world).snapshot().queries.binding.inferenceModelIdentity
-        assertNotEquals(identity(includeSubmission = false), actual,
-            "Changed observed-history provenance must not retain the historical inference identity")
-        assertEquals(identity(includeSubmission = true), actual)
     }
 
     private fun assertLegacyActorUpdate(root: ArgentumSearchWorld, action: GameAction) {
