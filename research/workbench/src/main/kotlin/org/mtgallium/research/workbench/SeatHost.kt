@@ -155,7 +155,7 @@ class SeatHost(
             }
             refused++
             if (engineAction == null && seatAction != null) lastRefusal = "not this seat's action or unknown names: $sent"
-            receive(actor, ServerMessage.Error(ErrorCode.INVALID_ACTION, "Action refused"))
+            receive(actor, ServerMessage.Error(ErrorCode.INVALID_ACTION, lastRefusal ?: "Action refused"))
         }
         // Repeatedly refused: pass priority when the seat may, otherwise stop the game.
         fallbacks++
