@@ -1,7 +1,5 @@
 package org.mtgallium.research.workbench
 
-import org.mtgallium.agent.monored.ValueEvaluationStop
-import org.mtgallium.agent.monored.ValueEvaluationException
 
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig

@@ -1,5 +1,7 @@
 # Argentum information-set adapter
 
+Frozen for the `horizon16` anchor and league opponent; no new work uses this view.
+
 The trusted boundary between the Argentum engine and everything policy-facing.
 This module reads full engine state; what it hands onward contains only the
 acting player's information. It depends on `infoset-semantics`,

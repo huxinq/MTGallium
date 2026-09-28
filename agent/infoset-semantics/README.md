@@ -1,5 +1,7 @@
 # Information-set semantic language
 
+Frozen for the `horizon16` anchor and league opponent; no new work uses this view.
+
 This module owns `PlayerObservationSnapshot`,
 `InformationStateRepresentation`, represented knowledge, persistent history,
 semantic choices, admitted decision sites, and the policy, evaluator and

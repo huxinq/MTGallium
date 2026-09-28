@@ -100,12 +100,8 @@ fun playGame(
     record: ((GameDecision) -> Unit)? = null,
     rawTrace: ((ArgentumRawTransition) -> Unit)? = null,
     beforeChoice: ((ArgentumSearchWorld, DecisionContext, Int) -> Unit)? = null,
-    luckCorrection: ChanceControlVariate? = null,
     seats: SeatHost? = null,
 ): GameResult {
-    require(luckCorrection == null || maximumSeconds == null) {
-        "Luck correction does not support maximumSeconds; use a decision limit"
-    }
     require(players.isNotEmpty())
     require(maximumDecisions == null || maximumDecisions >= 0)
     require(maximumSeconds == null || (maximumSeconds.isFinite() && maximumSeconds > 0))
@@ -133,7 +129,6 @@ fun playGame(
         if (player.seat != null) {
             // The seat acts through its host, which has already applied the action for both seats.
             val host = requireNotNull(seats) { "A seat agent needs a seat host" }
-            require(luckCorrection == null) { "Luck correction does not support seat agents" }
             val decisionStarted = System.nanoTime()
             val action = host.act(actor, world.trueState())
             val nanos = System.nanoTime() - decisionStarted
@@ -156,14 +151,12 @@ fun playGame(
             "Policy returned a choice outside its current decision menu: actor=$actor decision=$index " +
                 "view=${player.view} candidates=${context.menu.candidates.size} choice=$choice"
         }
-        val luckBefore = luckCorrection?.before(world)
-        val trace = if (rawTrace != null || luckBefore != null || seats != null) world.stepWithReplayTrace(choice) else null
+        val trace = if (rawTrace != null || seats != null) world.stepWithReplayTrace(choice) else null
         val step = trace?.result ?: world.step(choice)
         trace?.rawTransitions?.forEach { seats?.accept(it); rawTrace?.invoke(it) }
         record?.invoke(GameDecision(index, site.information(),
             context.menu.isExhaustive, context.menu.isProfileExhaustive, selected, step.accepted, nanos))
         check(step.accepted) { "Engine rejected decision $index: ${step.diagnostic}" }
-        if (luckBefore != null) luckCorrection.after(luckBefore, choice, world, requireNotNull(trace))
         players.values.forEach { it.observe(actor, choice, step, index) }
     }
 }

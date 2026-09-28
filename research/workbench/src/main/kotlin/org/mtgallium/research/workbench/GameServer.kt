@@ -10,11 +10,8 @@ import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.infoset.planning.*
-import org.mtgallium.agent.neural.InformationStateByteEncoder
-import org.mtgallium.agent.neural.ByteTokenSchema
 import org.mtgallium.agent.argentum.policy.*
 import org.mtgallium.agent.value.MaterialEvaluator
-import org.mtgallium.agent.value.ValueFeatures
 
 /** Live world and native policy state. */
 class PythonGame internal constructor(
@@ -25,9 +22,6 @@ class PythonGame internal constructor(
     private val policies: NativePolicies = NativePolicies.installed,
     private val registry: CardRegistry? = null,
 ) {
-    private var luckConfig: ChanceControlVariateConfig? = null
-    private var luckOpening: ArgentumSearchWorld? = null
-    private var luckUsed = false
     private val knownDecks = plan.decks.mapIndexed { index, deck -> "p$index" to deck }.toMap()
     private val actors = knownDecks.keys.toList()
     private val policyContext = NativePolicyContext(plan, world, gameId, knownDecks)
@@ -41,18 +35,6 @@ class PythonGame internal constructor(
             actors.associateWith { requireNotNull(world.terminalPayoff(it)) }) else JsonNull)
     }
 
-    fun valueSnapshot(factualSchema: ByteTokenSchema? = null): JsonObject = buildJsonObject {
-        actors.forEach { player ->
-            val information = world.informationState(player)
-            put(player, buildJsonObject {
-                put("features", researchJson.encodeToJsonElement(ValueFeatures.compile(information, player).values))
-                put("v2", MaterialEvaluator().evaluate(information, player))
-                put("turn", information.observation.turnNumber)
-                factualSchema?.let { put("view", researchJson.encodeToJsonElement(InformationStateByteEncoder(it).view(information))) }
-            })
-        }
-    }
-
     private fun context(view: MenuRequest): DecisionContext {
         val context = world.decisionContext(view)
         check(context.site().epistemic.knowledge.isComplete) {
@@ -61,9 +43,7 @@ class PythonGame internal constructor(
         return context
     }
 
-    fun decision(view: MenuRequest, kernel: Boolean = false, factual: Boolean = false,
-        fromEvent: Int = 0, schema: ByteTokenSchema = ByteTokenSchema(),
-        includeEvents: Boolean = true): JsonObject {
+    fun decision(view: MenuRequest, kernel: Boolean = false): JsonObject {
         if (world.terminalPayoff(actors.first()) != null) return status()
         val request = context(view)
         val site = request.site()
@@ -76,18 +56,7 @@ class PythonGame internal constructor(
             put("rulesExhaustive", site.menu.isExhaustive)
             put("profileExhaustive", site.menu.isProfileExhaustive)
             if (kernel) put("features", researchJson.encodeToJsonElement(kernelActionFeatures(site)))
-            if (factual) {
-                val projection = world.policyDecisionProjection(request.view)
-                val encoder = InformationStateByteEncoder(schema)
-                val eventsFrom = if (includeEvents) fromEvent else site.epistemic.history.size
-                put("factual", buildJsonObject {
-                    put("schema", researchJson.encodeToJsonElement(schema))
-                    put("input", researchJson.encodeToJsonElement(encoder.decision(projection.site, projection.semanticReferenceGroups)))
-                    put("events", researchJson.encodeToJsonElement(encoder.events(site.epistemic.history, site.actor, actors, eventsFrom)))
-                    put("eventsFrom", eventsFrom)
-                    put("eventPosition", site.epistemic.history.size)
-                })
-            }
+
         }
     }
 
@@ -175,16 +144,7 @@ class PythonGame internal constructor(
 
     /** Shadow choices consume the candidate's actual history but are never applied. */
     fun compare(candidateSeat: String, incumbent: String, maximumDecisions: Int?, maximumSeconds: Double?,
-        luckCorrection: ChanceControlVariateConfig? = null, choiceSeed: Long? = null): JsonObject {
-        require(luckCorrection == null || maximumSeconds == null) {
-            "Luck correction does not support maximumSeconds; use a decision limit"
-        }
-        require(luckCorrection == luckConfig) { "Supply identical luckCorrection at create and compare" }
-        val luck = luckCorrection?.let { config ->
-            check(!luckUsed && world.acceptedDecisionCount == 0) { "Luck pilot requires one fresh full-game compare" }
-            luckUsed = true
-            ChanceControlVariate(config.copy(seed = ComponentSeeds.derive(plan.seed, "host-luck-pilot", config.seed.toString())), candidateSeat).also { it.opening(requireNotNull(luckOpening)) }
-        }
+        choiceSeed: Long? = null): JsonObject {
         require(candidateSeat in actors)
         val baseline = nativePlayer(incumbent, candidateSeat)
         var decisions = 0
@@ -201,12 +161,11 @@ class PythonGame internal constructor(
         }
         // Direct policy choices can use an independent stream without changing the deal.
         // Search sessions retain their own configured seeds; this is not a search-seed override.
-        val result = playGame(world, compared, choiceSeed ?: plan.seed, maximumDecisions, maximumSeconds, luckCorrection = luck,
+        val result = playGame(world, compared, choiceSeed ?: plan.seed, maximumDecisions, maximumSeconds,
             seats = seatHost(compared))
         return buildJsonObject {
             if (choiceSeed != null) put("choiceSeed", choiceSeed)
             put("result", researchJson.encodeToJsonElement(result))
-            if (luck != null) put("luck", luck.result(result.payoffs))
             put("candidateDecisions", if (candidate.seat == null) JsonPrimitive(decisions) else JsonNull)
             put("changedDecisions", if (candidate.seat == null) JsonPrimitive(changed) else JsonNull)
         }
@@ -219,8 +178,7 @@ class PythonGame internal constructor(
     }
 
     companion object {
-        fun create(plan: ResearchGameConfig, registry: CardRegistry, id: String, luckCorrection: ChanceControlVariateConfig? = null): PythonGame {
-            require(luckCorrection == null || !plan.useHandSmoother) { "Uniform luck pilot does not support hand smoothing" }
+        fun create(plan: ResearchGameConfig, registry: CardRegistry, id: String): PythonGame {
             require(plan.decks.size == 2 && plan.policies.size == 2) { "The convenience setup takes two decks and two policy names" }
             val known = plan.decks.mapIndexed { i, cards -> "p$i" to cards }.toMap()
             val config = GameConfig(players = plan.decks.mapIndexed { i, cards ->
@@ -229,8 +187,6 @@ class PythonGame internal constructor(
                 useHandSmoother = plan.useHandSmoother, startingPlayerIndex = plan.startingPlayerIndex, seed = plan.seed)
             return PythonGame(plan, createWorld(config, known, registry, id, plan.seed, plan.actionProfile), id, registry = registry)
                 .also {
-                    it.luckConfig = luckCorrection
-                    if (luckCorrection != null) it.luckOpening = it.world.fork() as ArgentumSearchWorld
                     it.initializePolicies()
                 }
         }
@@ -275,18 +231,13 @@ class GameServerConnection {
             "create" -> {
                 val plan = decodeGamesPlan(request.getValue("plan").jsonObject)
                 // Search RNG identity must not depend on which worker/session happened to run a setup.
-                remember(PythonGame.create(plan, registry, "python-game-${plan.seed}",
-                    request["luckCorrection"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement<ChanceControlVariateConfig>(it) }))
+                remember(PythonGame.create(plan, registry, "python-game-${plan.seed}"))
             }
             "fork" -> remember(game().fork())
             "close" -> { games.remove(request.getValue("game").jsonPrimitive.int); JsonNull }
             "status" -> game().status()
             "decision" -> game().decision(decodeView(request["view"]?.jsonObject),
-                request["kernel"]?.jsonPrimitive?.booleanOrNull ?: false,
-                request["factual"]?.jsonPrimitive?.booleanOrNull ?: false,
-                request["fromEvent"]?.jsonPrimitive?.intOrNull ?: 0,
-                request["schema"]?.let { researchJson.decodeFromJsonElement<ByteTokenSchema>(it) } ?: ByteTokenSchema(),
-                request["includeEvents"]?.jsonPrimitive?.booleanOrNull ?: true)
+                request["kernel"]?.jsonPrimitive?.booleanOrNull ?: false)
             "select" -> game().select(request.getValue("policy").jsonPrimitive.content, request["seed"]?.jsonPrimitive?.longOrNull)
             "step" -> game().step(request.getValue("index").jsonPrimitive.int,
                 decodeView(request.getValue("view").jsonObject), researchJson.decodeFromJsonElement(request.getValue("choice")),
@@ -303,25 +254,12 @@ class GameServerConnection {
                 request.getValue("incumbent").jsonPrimitive.content,
                 request["maximumDecisions"]?.jsonPrimitive?.intOrNull,
                 request["maximumSeconds"]?.jsonPrimitive?.doubleOrNull,
-                request["luckCorrection"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement<ChanceControlVariateConfig>(it) },
                 request["choiceSeed"]?.jsonPrimitive?.longOrNull)
             "information" -> researchJson.encodeToJsonElement(game().world.informationState(request.getValue("player").jsonPrimitive.content))
-            "value-features" -> {
-                val world = game().world
-                val player = request["player"]?.jsonPrimitive?.content ?: requireNotNull(world.actorToAct())
-                researchJson.encodeToJsonElement(ValueFeatures.compile(world.informationState(player), player).values)
-            }
-            "value-snapshot" -> game().valueSnapshot(request["factualSchema"]?.let {
-                researchJson.decodeFromJsonElement<ByteTokenSchema>(it)
-            })
             "state" -> researchJson.encodeToJsonElement(game().world.trueState())
             "replay-views" -> replayViews(game().world.trueState(), registry)
             "render-replay-state" -> replayViews(
                 researchJson.decodeFromJsonElement(request.getValue("state")), registry)
-            "fit" -> researchJson.encodeToJsonElement(fitKernelRidge(
-                researchJson.decodeFromJsonElement(request.getValue("roots")),
-                request["ridge"]?.jsonPrimitive?.double ?: 0.001,
-                request["weights"]?.takeUnless { it is JsonNull }?.let { researchJson.decodeFromJsonElement(it) }))
             "predict" -> {
                 val model = researchJson.decodeFromJsonElement<KernelRidgeActionModel>(request.getValue("model"))
                 val menus = researchJson.decodeFromJsonElement<List<List<KernelActionFeatures>>>(request.getValue("menus"))

@@ -11,16 +11,6 @@ from research_workspace.ladder import evaluate
 
 
 class ComparisonTest(unittest.TestCase):
-    def test_luck_time_limits_fail_before_setup_or_model_loading(self):
-        with patch('research_workspace.ladder.Session') as session, \
-                patch('research_workspace.ladder.source_provenance') as provenance:
-            for key in ('maximum_seconds', 'maximumSeconds'):
-                with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'time limits'):
-                    evaluate('random', opponents={'random': 'random'}, incumbent='random',
-                             decks=[{'Mountain': 7}] * 2, config={key: 1.0},
-                             luck_correction={'models': [{'model': '/missing-model.json'}]})
-            session.assert_not_called()
-            provenance.assert_not_called()
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

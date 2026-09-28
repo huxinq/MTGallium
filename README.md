@@ -7,6 +7,11 @@ player could legitimately know. It searches over the possible hidden states
 [Argentum](https://github.com/wingedsheep/argentum-engine) engine. Current
 experiments use a narrow Mono-Red scope.
 
+Seat agents are the development line. The old information view, casting kernel,
+belief samplers and IS-MCTS remain frozen for the `horizon16` anchor and league
+opponent. Retired students, learned values and training tools are preserved at
+`archive/old-view-20260928`. Engine-pin changes require new evaluation rows.
+
 ## Try it
 
 Install Git, JDK 21, Python 3 and `just`, then:

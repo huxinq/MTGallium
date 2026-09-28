@@ -146,30 +146,7 @@ configure their policies separately.
 
 A continuation from a captured actual game position. Its return is conditional
 on that hidden world and the continuation policies. Forking copies game and
-native search state; copy Python policy state separately. "Factual" here means
-the actual game; the [factual policy tensors](#factual-policy-tensors) use the
-word differently.
-
-### Features, model, fit, and checkpoint
-
-Features are a model's numerical inputs. A fit produces parameters; a checkpoint
-stores parameters and any state needed to resume training. `LinearWeights`
-contains a bias and sparse coefficients; `ValueFeatures` defines the inputs used
-by the [linear and residual evaluators](value-models.md).
-
-### Learned policy memory
-
-Numeric model state computed from the events delivered to a player so far.
-Each game, player, and branch owns separate memory. Observation updates advance
-its history cursor; repeated scoring does not. See [neural policies](neural-policy.md).
-
-<a id="factual-policy-tensors"></a>
-
-### Byte-token policy tensors
-
-Numeric inputs encoding player information, delivered events, and candidate
-actions as normalized UTF-8 bytes. The schema fixes bounds, padding, and masks.
-See [the tensor contract](neural-policy.md).
+native search state; copy Python policy state separately. "Factual" here means the actual game.
 
 ### Metamorphic test
 

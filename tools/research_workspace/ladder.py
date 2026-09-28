@@ -94,13 +94,6 @@ def _game(session: Session, candidate: Policy, incumbent: Policy, opponent: Poli
     policies[candidate_seat] = candidate
     initial = tuple(policy if isinstance(policy, str) else 'random' for policy in policies)
     game_settings = copy.deepcopy(settings)
-    delivery = game_settings.pop('_factual_delivery', {})
-    luck_config = game_settings.pop('_ladder_luck_correction', None)
-    if luck_config is not None:
-        if not all(isinstance(policy, str) for policy in (candidate, incumbent, opponent)):
-            raise ValueError('Host luck correction requires native policies')
-        game_settings['luck_correction'] = luck_config
-    luck = None
     if isinstance(incumbent, str):
         shadows = list(game_settings.get('shadow_policies', ()))
         if incumbent not in shadows:
@@ -114,10 +107,8 @@ def _game(session: Session, candidate: Policy, incumbent: Policy, opponent: Poli
         if all(isinstance(policy, str) for policy in (candidate, incumbent, opponent)):
             comparison = game._call('compare', candidateSeat=f'p{candidate_seat}',
                                     incumbent=incumbent, maximumDecisions=limit,
-                                    maximumSeconds=settings.get('maximum_seconds', settings.get('maximumSeconds')),
-                                    **({} if luck_config is None else {'luckCorrection': luck_config}))
+                                    maximumSeconds=settings.get('maximum_seconds', settings.get('maximumSeconds')))
             result = comparison['result']
-            luck = comparison.get('luck')
             counts = {'candidate': comparison['candidateDecisions'],
                       'changed': comparison['changedDecisions']}
         else:
@@ -131,12 +122,11 @@ def _game(session: Session, candidate: Policy, incumbent: Policy, opponent: Poli
             played: list[Policy] = [opponent, opponent]
             played[candidate_seat] = compared
             result = game.play(played, decision_limit=limit,
-                               seconds=settings.get('maximum_seconds', settings.get('maximumSeconds')),
-                               **delivery)
+                               seconds=settings.get('maximum_seconds', settings.get('maximumSeconds')))
     payoff = None if result['payoffs'] is None else (result['payoffs'][f'p{candidate_seat}'] + 1) / 2
     return {'seed': seed, 'candidate_seat': f'p{candidate_seat}', 'status': result['status'],
             'payoff': payoff, 'candidate_decisions': counts['candidate'],
-            'changed_decisions': counts['changed'], **({} if luck is None else {'luck': luck})}
+            'changed_decisions': counts['changed']}
 
 
 def _summarize(name: str, games: list[dict], setup_count: int) -> dict:
@@ -245,16 +235,13 @@ def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[s
              sequential: str | None = None, max_pairs: int | None = None,
              claim: str | None = None, pool_start: int | None = None,
              evidence_root: str | Path | None = None,
-             luck_correction: Mapping[str, Any] | None = None, factual: bool = False,
-             schema: Mapping | None = None, include_events: bool = True,
              checkpoint: str | Path | None = None) -> dict:
     """Evaluate paired seat swaps; checkpoint enables durable native-policy recovery."""
     options = dict(candidate=candidate, name=name, opponents=opponents, incumbent=incumbent,
         incumbent_name=incumbent_name, decks=decks, setups=setups, seeds=seeds, threads=threads,
         config=config, output=output, build=build, java_options=java_options, phase=phase,
         seed_pool=seed_pool, sequential=sequential, max_pairs=max_pairs, claim=claim,
-        pool_start=pool_start, evidence_root=evidence_root, luck_correction=luck_correction,
-        factual=factual, schema=schema, include_events=include_events)
+        pool_start=pool_start, evidence_root=evidence_root)
     if checkpoint is None:
         return _evaluate(**options)
     with Checkpoint(checkpoint) as store:
@@ -271,13 +258,8 @@ def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[
              sequential: str | None = None, max_pairs: int | None = None,
              claim: str | None = None, pool_start: int | None = None,
              evidence_root: str | Path | None = None,
-             luck_correction: Mapping[str, Any] | None = None, factual: bool = False,
-             schema: Mapping | None = None, include_events: bool = True,
              checkpoint: Checkpoint | None = None) -> dict:
     """Evaluate paired seat swaps; checkpoint enables durable native-policy recovery."""
-    if luck_correction is not None and any(
-            (config or {}).get(key) is not None for key in ('maximum_seconds', 'maximumSeconds')):
-        raise ValueError('Luck correction does not support time limits; use maximum_decisions')
     candidate_name = _name(candidate, name, 'candidate')
     incumbent_name = _name(incumbent, incumbent_name, 'incumbent')
     if not isinstance(opponents, Mapping) or not opponents:
@@ -324,30 +306,9 @@ def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[
         _name(opponent, opponent_name, 'opponent')
 
     settings = copy.deepcopy(dict(config or {}))
-    if '_factual_delivery' in settings:
-        raise ValueError('Pass factual delivery options through evaluate, not config')
-    if schema is not None and not factual:
-        raise ValueError('A factual schema requires factual=True')
-    if factual:
-        settings['_factual_delivery'] = dict(factual=True, schema=copy.deepcopy(schema),
-                                             include_events=include_events)
-    if luck_correction is not None:
-        if not all(isinstance(policy, str) for policy in (candidate, incumbent, *opponents.values())):
-            raise ValueError('The luck pilot currently requires native policies')
-        settings['_ladder_luck_correction'] = copy.deepcopy(dict(luck_correction))
     if {'seed', 'policies', 'decks', 'games', 'threads'} & settings.keys():
         raise ValueError('Pass seeds, policies, decks and threads through evaluate, not config')
     model_files = {}
-    if luck_correction is not None:
-        for index, model in enumerate(settings['_ladder_luck_correction'].get('models', [])):
-            if 'model' in model:
-                if 'weights' in model:
-                    raise ValueError('Supply a luck model file or inline weights, not both')
-                path = Path(model.pop('model')).resolve()
-                content = path.read_bytes()
-                model['weights'] = json.loads(content)
-                model_files[f'luck_model_{index}'] = {
-                    'path': str(path), 'sha256': hashlib.sha256(content).hexdigest()}
     for key in sorted(settings):
         # Settings named *_model are model files, except the opponent model's name.
         if key.endswith('_model') and key != 'opponent_model' and settings[key] is not None:
@@ -536,10 +497,6 @@ def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[
             else:
                 from .ladder_statistics import fixed_result
                 summary['test'] = fixed_result(_pair_values(games), expected_pairs=setups)
-    if luck_correction is not None:
-        from .luck_statistics import summarize_luck
-        for summary in row['opponents']:
-            summary['luck_pilot'] = summarize_luck(summary['raw_games'])
     if checkpoint is None:
         _append(Path(output), row)
     else:

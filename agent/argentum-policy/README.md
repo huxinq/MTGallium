@@ -1,5 +1,7 @@
 # Argentum policy host
 
+Frozen for the `horizon16` anchor and league opponent; no new work uses this view.
+
 This module connects engine actions, player information, belief maintenance,
 and policy sessions. `createSearch` supplies defaults to `InformationSetSearch`;
 `SearchPolicySession` composes the configured leaf and value source.

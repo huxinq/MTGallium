@@ -78,7 +78,7 @@ class ObservationGapAuditTest {
             "audit-trigger", DrawCardsEffect(1), Step.END, source, "Public spell", player))))
         val components: List<Component> = listOf(
             PlayerCitysBlessingComponent, PlayerEnduringStoryComponent, TheRingComponent(2),
-            PlayerNoMaximumHandSizeComponent, PlayerMaximumHandSizeReductionComponent(3),
+            PlayerNoMaximumHandSizeComponent(1), PlayerMaximumHandSizeReductionComponent(3),
             SkipNextTurnComponent(1), SkipCombatPhasesComponent, SkipDrawStepComponent,
             AdditionalPhasesComponent(listOf(QueuedPhase(ExtraPhaseKind.COMBAT))),
             AdditionalUpkeepStepsComponent(2), AdditionalEndStepsComponent(2),

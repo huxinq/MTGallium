@@ -8,7 +8,6 @@ plugins {
 
 dependencies {
     implementation(project(":agent:infoset-semantics"))
-    implementation(project(":agent:neural-policy"))
     implementation(project(":agent:infoset-planning"))
     implementation(project(":agent:infoset-argentum"))
     implementation(project(":agent:argentum-policy"))
@@ -21,7 +20,6 @@ dependencies {
     implementation("org.mtgallium.argentum:mtg-sets")
     implementation("org.mtgallium.argentum:rules-engine")
     implementation(libs.kotlinx.serialization.json)
-    implementation("org.apache.commons:commons-math3:3.6.1")
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation("org.mtgallium.argentum:game-server")
     testImplementation(kotlin("test-junit5"))

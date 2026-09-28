@@ -8,8 +8,6 @@ import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.infoset.planning.*
 import org.mtgallium.agent.argentum.policy.*
-import org.mtgallium.agent.value.LinearValueEvaluator
-import org.mtgallium.agent.value.InverseLink
 import org.mtgallium.agent.value.MaterialEvaluator
 
 /**
@@ -85,8 +83,7 @@ internal object BuiltinNativePolicies : JvmPolicyProvider {
             rolloutPolicy = PolicyDefaults.rootRolloutPolicy(),
             rolloutOpponentPolicy = PolicyDefaults.opponentRolloutPolicy(),
             valueSource = LeafValueSource.Information(
-                plan.valueWeights?.let { LinearValueEvaluator(it, plan.valueLink ?: InverseLink.CLIP) }
-                    ?: MaterialEvaluator()))
+                MaterialEvaluator()))
     }
 }
 

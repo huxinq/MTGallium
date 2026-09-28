@@ -186,86 +186,12 @@ even after a failed run. Fix the claim, policies, models and sample size before
 running. Confirmation has no sequential stopping and supplies the unbiased raw
 estimate and ordinary fixed-sample interval.
 
-Additional host value models can implement `NativeValueProvider` and register
-through Java ServiceLoader. A luck model may select `provider` and its JSON
-`settings` instead of linear weights. The returned evaluator receives each
-player's own represented information, and its stable `id` must cover its model
-artifacts and interpretation. The result records a hash of that identity.
-Absent a provider, existing V2 and linear behavior and metadata are unchanged.
-
-`luck_correction` enables an **experimental secondary statistic**. It is off by
-default and never feeds a stopping decision. The host JVM combines evaluators on
-each player's own information into a candidate win probability; library order
-is excluded. The pilot compares the public V2 evaluator and optional supplied
-linear weights, retaining model hashes. For eligible pure single-card draws it
-replays each distinct remaining name, weighted by copies. Opening hands and
-mulligan redraws use independent uniform re-permutations. Other randomness and
-failed counterfactuals are skipped and counted. Event sampling is chosen before
-the outcome. Rows report payoff minus summed luck (beta=1), a beta fitted on the
-opposite setup fold, paired variance ratios with bootstrap intervals, event
-counts and timing. Corrected values are not clipped. Adoption as the headline
-score requires an explicit research decision after the pilot.
-
-For example, `luck_correction={"rate": 0.01, "samples": 8, "models":
-[{"name": "v2"}, {"name": "linear", "model": "model.json", "link": "tanh"}]}`
-samples steps and openings independently at 1% before observing outcomes.
-Retained terms are unweighted: skipped events contribute zero. The default
-enabled rate is 1; measure overhead before choosing a rate for compute runs.
-The pilot V uses current own-perspective snapshots without history features,
-and maps values as `0.5 + (candidate_value - opponent_value) / 4`. Known library
-order and transitions that also mill, shuffle, search or reorder a library are
-skipped. The pure-draw guard applies to the actual step and every counterfactual.
-Hand smoothing is rejected because its opening
-distribution is not uniform. A deterministic mirror may have zero raw pair
-variance; its paired ratio is then undefined, and the additional game-level
-ratio uses setup-pair cluster resampling.
-Wall-clock game limits are rejected with correction enabled, so instrumentation
-cannot turn an otherwise completed game into a timeout loss; use decision limits.
-
-Measure variance reduction at `rate=1, samples=8` before choosing a cheaper
-sampling rate. Sparse event sampling measures only the benefit of that sparse
-correction; a ratio near one at 1% does not establish the full correction's value.
-Compare both game and setup-pair variance. The existing `cross_fitted` statistic
-fits beta on pair means; `cross_fitted_game` fits on games, keeping both seats of
-each setup in the same fold. Its game and pair ratios have setup-cluster bootstrap
-intervals that refit beta in every replicate. Event summaries include individual
-luck variance and the variance of summed terms per game and pair. These are
-exploratory estimates, not sequential-test inputs.
-Seat swapping can already cancel shared opening and redraw luck. A reduction
-in single-game variance therefore need not improve the paired ladder estimate;
-use the pair-level result to decide whether further ladder cost/model work is
-justified.
-
-Per-game `luck.nanosByCategory` partitions host-hook time into counterfactual
-steps, materialization/forks, information-state/menu construction, evaluator
-calls, and other work. Categories are exclusive at their call sites: projections
-inside an engine step belong to the step category. Failed work is included;
-hook construction, result serialization, and factual-step tracing are outside
-the partition. Measure total overhead separately with warmed, alternating
-same-seed runs with correction off and on, checking identical primary outcomes.
-
-V2 uses life totals, hand **counts**, and battlefield characteristics, not hand
-card names. Pure draws and opening/redraw alternatives preserve those counts
-and public quantities, so V2's terms are zero apart from floating-point error.
-A useful control variate requires a value model sensitive to the corrected
-chance event, not merely a strong policy or a board-value heuristic.
-
-A null comparison must have nonzero sampling variance. Identical deterministic
-mirrors on identical seeds cancel by construction and cannot validate centering.
-For direct stochastic policies the native `compare` bridge accepts an optional
-`choiceSeed`, recorded in its response, independent of the setup seed. Supply
-independent choice and correction-sampling seeds for each game of a randomized
-mirror. This overrides the stream delivered to direct choices, not internal
-search-session seeds. Omitting it preserves existing play exactly. Check raw
-and corrected centering, event-type means, and adequate mulligan counts.
-
 Rows retain seeds, config, source provenance, model hashes, individual outcomes,
 and changed-decision counts. At every candidate decision the incumbent chooses
 on the same history without playing it (a *shadow* choice); native comparisons
 run inside the JVM. Legacy complete-pair and conservative missing-outcome fields
 remain unchanged. New loss-scored and test fields are additive. Callable
-policies remain supported for ordinary comparisons; the correction pilot uses
-native policies. Give callbacks explicit `name` and `incumbent_name`. Callable
+policies remain supported for ordinary comparisons. Give callbacks explicit `name` and `incumbent_name`. Callable
 objects are copied per game, so closures must not share mutable policy state.
 
 ## Cost measurement
@@ -367,7 +293,9 @@ server envelope. Set `SEAT_STREAM_REQUIRE_PRIVATE=1` to enable the desired
 hidden-library and hidden-draw-ID invariance contracts, and to require that the
 allocation-order recovery witness finds no hidden library card named in the
 envelope. They fail at Argentum `3757f6bd` and upstream `3139bebc`, and pass once
-the library-order fix (Task 20) is in the engine.
+the library-order fix (Task 20) is in the engine, including the current
+`8037aa92` pin. The completeness audit reports 21 of 51 perturbations visible
+in both snapshot and delta; unchanged pairs remain open.
 
 `SeatStreamRecordsTest` is opt-in: pass `SEAT_STREAM_RECORDS` (a directory of
 recorded game JSONL gzip files), `SEAT_STREAM_GAME` (one complete tape) and
