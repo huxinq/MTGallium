@@ -2,7 +2,6 @@ package org.mtgallium.research.workbench
 
 import com.wingedsheep.engine.core.GameAction
 import com.wingedsheep.engine.state.GameState
-import org.mtgallium.agent.infoset.argentum.ArgentumRawTransition
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.KSerializer
@@ -43,7 +42,7 @@ data class ResearchGameConfig(
     val maximumSeconds: Double? = null,
     val recordDecisions: Boolean = false,
     val recordReplay: Boolean = false,
-    /** Host each game as an Argentum browser game and log what each seat is sent and sends; see [SeatRecorder]. */
+    /** Host each game as an Argentum browser game and log what each seat is sent and sends; see [SeatHost]. */
     val recordSeats: Boolean = false,
     /** Settings read by added native policies; see [JvmPolicyProvider.settings]. */
     val extensions: Map<String, JsonElement> = emptyMap(),
@@ -92,17 +91,22 @@ fun runGames(plan: ResearchGameConfig, output: Path): List<PlayedGame> {
                     val seatLogs = if (plan.recordSeats) players.keys.associateWith { openJsonLines(destination.resolve("seat-$it.jsonl.gz")) } else emptyMap()
                     val truthLog = if (plan.recordSeats) openJsonLines(destination.resolve("truth.jsonl.gz")) else null
                     try {
-                        val seats = truthLog?.let { SeatRecorder(registry, world.trueState(), seatLogs, it, verify = index == 0) }
+                        val agents = players.filterValues { it.seat != null }.mapValues { requireNotNull(it.value.seat) }
+                        val seats = if (plan.recordSeats || agents.isNotEmpty())
+                            SeatHost(registry, world.trueState(), agents, seatLogs, truthLog, verify = index == 0) else null
                         var frame = 0
                         replayLog?.writeRecord(ReplayFrame(frame, world.trueState()))
-                        val traces = listOfNotNull<(ArgentumRawTransition) -> Unit>(
-                            replayLog?.let { writer -> { step -> writer.writeRecord(ReplayFrame(++frame, step.afterState, step.action, step.accepted)) } },
-                            seats?.let { it::accept })
                         playGame(world, players, seed, plan.maximumDecisions, plan.maximumSeconds,
                             record = decisionLog?.let { writer -> { decision -> writer.writeRecord(decision) } },
-                            rawTrace = if (traces.isEmpty()) null else { step -> traces.forEach { it(step) } },
-                            beforeChoice = seats?.let { recorder -> { _, context, decision ->
-                                recorder.beforeDecision(decision, context.actor, context.menu.candidates.size) } })
+                            rawTrace = replayLog?.let { writer -> { step -> writer.writeRecord(ReplayFrame(++frame, step.afterState, step.action, step.accepted)) } },
+                            seats = seats,
+                        ).also { seats?.let { host ->
+                            writeJson(destination.resolve("seat-stats.json"), buildJsonObject {
+                                put("refused", host.refused)
+                                put("fallbacks", host.fallbacks)
+                                put("agents", researchJson.encodeToJsonElement(host.agentStats()))
+                            })
+                        } }
                     } finally {
                         (seatLogs.values + listOfNotNull(truthLog)).forEach { it.close() }
                     }

@@ -34,6 +34,9 @@ sealed interface JvmPolicy {
 
     /** One session per actor, created once; the game observes accepted moves, forks it and reports its search. */
     class SearchSession(val session: SearchPolicySession) : JvmPolicy
+
+    /** A player at an Argentum seat; the game hosts it as a browser seat (see [SeatHost]). */
+    class Seat(val agent: SeatAgent) : JvmPolicy
 }
 
 /** The game a native policy is constructed for. */

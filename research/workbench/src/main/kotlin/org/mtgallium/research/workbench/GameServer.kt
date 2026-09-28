@@ -23,6 +23,7 @@ class PythonGame internal constructor(
     private val gameId: String,
     private val sessions: MutableMap<Pair<String, String>, SearchPolicySession> = linkedMapOf(),
     private val policies: NativePolicies = NativePolicies.installed,
+    private val registry: CardRegistry? = null,
 ) {
     private var luckConfig: ChanceControlVariateConfig? = null
     private var luckOpening: ArgentumSearchWorld? = null
@@ -100,6 +101,7 @@ class PythonGame internal constructor(
     private fun nativePlayer(policy: JvmPolicy): GameAgent = when (policy) {
         is JvmPolicy.Memoryless -> policy.player
         is JvmPolicy.SearchSession -> searchPlayer(world, policy.session)
+        is JvmPolicy.Seat -> seatPlayer(policy.agent)
     }
 
     private fun nativePlayer(name: String, actor: String): GameAgent = nativePlayer(nativePolicy(name, actor))
@@ -122,7 +124,7 @@ class PythonGame internal constructor(
             sessions.filterKeys { it.first == actor }.values.forEach {
                 it.observeAccepted(world, acting, choice, index, step.privateToActor)
             }
-        }, choose = player.choose)
+        }, seat = player.seat, choose = player.choose)
 
     fun select(name: String, seed: Long?): JsonObject {
         val actor = requireNotNull(world.actorToAct()) { "A terminal game has no decision" }
@@ -160,7 +162,15 @@ class PythonGame internal constructor(
     fun play(names: List<String>, maximumDecisions: Int?, maximumSeconds: Double?): GameResult {
         require(names.size == actors.size)
         val players = actors.mapIndexed { i, actor -> actor to observedPlayer(actor, nativePlayer(names[i], actor)) }.toMap()
-        return playGame(world, players, plan.seed, maximumDecisions, maximumSeconds)
+        return playGame(world, players, plan.seed, maximumDecisions, maximumSeconds, seats = seatHost(players))
+    }
+
+    /** Seat agents play through a browser-seat host that follows this game from its start. */
+    private fun seatHost(players: Map<String, GameAgent>): SeatHost? {
+        val agents = players.filterValues { it.seat != null }.mapValues { requireNotNull(it.value.seat) }
+        if (agents.isEmpty()) return null
+        check(world.acceptedDecisionCount == 0) { "Seat agents play whole games from the start" }
+        return SeatHost(requireNotNull(registry) { "Seat agents need the game's card registry" }, world.trueState(), agents)
     }
 
     /** Shadow choices consume the candidate's actual history but are never applied. */
@@ -181,7 +191,8 @@ class PythonGame internal constructor(
         var changed = 0
         val compared = players.toMutableMap()
         val candidate = compared.getValue(candidateSeat)
-        compared[candidateSeat] = GameAgent(candidate.view, candidate.observe) { request, seed ->
+        // A seat agent acts through its seat, so no shadow choice is compared with it.
+        if (candidate.seat == null) compared[candidateSeat] = GameAgent(candidate.view, candidate.observe) { request, seed ->
             val expected = baseline.choose(context(baseline.view), seed)
             val selected = candidate.choose(request, seed)
             decisions++
@@ -190,20 +201,21 @@ class PythonGame internal constructor(
         }
         // Direct policy choices can use an independent stream without changing the deal.
         // Search sessions retain their own configured seeds; this is not a search-seed override.
-        val result = playGame(world, compared, choiceSeed ?: plan.seed, maximumDecisions, maximumSeconds, luckCorrection = luck)
+        val result = playGame(world, compared, choiceSeed ?: plan.seed, maximumDecisions, maximumSeconds, luckCorrection = luck,
+            seats = seatHost(compared))
         return buildJsonObject {
             if (choiceSeed != null) put("choiceSeed", choiceSeed)
             put("result", researchJson.encodeToJsonElement(result))
             if (luck != null) put("luck", luck.result(result.payoffs))
-            put("candidateDecisions", decisions)
-            put("changedDecisions", changed)
+            put("candidateDecisions", if (candidate.seat == null) JsonPrimitive(decisions) else JsonNull)
+            put("changedDecisions", if (candidate.seat == null) JsonPrimitive(changed) else JsonNull)
         }
     }
 
     fun fork(): PythonGame {
         val child = world.fork() as ArgentumSearchWorld
         return PythonGame(plan, child, gameId,
-            sessions.mapValues { (_, session) -> session.forkForFactualContinuation(child) }.toMutableMap(), policies)
+            sessions.mapValues { (_, session) -> session.forkForFactualContinuation(child) }.toMutableMap(), policies, registry)
     }
 
     companion object {
@@ -215,7 +227,7 @@ class PythonGame internal constructor(
                 PlayerConfig("Player $i", Deck.of(*cards.map { it.key to it.value }.toTypedArray()), plan.startingLife)
             }, startingHandSize = plan.startingHandSize, skipMulligans = plan.skipMulligans,
                 useHandSmoother = plan.useHandSmoother, startingPlayerIndex = plan.startingPlayerIndex, seed = plan.seed)
-            return PythonGame(plan, createWorld(config, known, registry, id, plan.seed, plan.actionProfile), id)
+            return PythonGame(plan, createWorld(config, known, registry, id, plan.seed, plan.actionProfile), id, registry = registry)
                 .also {
                     it.luckConfig = luckCorrection
                     if (luckCorrection != null) it.luckOpening = it.world.fork() as ArgentumSearchWorld
