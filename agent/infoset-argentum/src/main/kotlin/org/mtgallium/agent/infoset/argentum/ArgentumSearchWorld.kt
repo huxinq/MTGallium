@@ -221,7 +221,8 @@ class ArgentumSearchWorld private constructor(
         val remembered = rememberedKnowledgeObjectIds(viewer, expected)
         val state = environment.state
         val assignments = linkedMapOf<EntityId, com.wingedsheep.sdk.model.CardDefinition>()
-        val visibility = com.wingedsheep.engine.view.Visibility(cardRegistry())
+        val visibility = com.wingedsheep.engine.view.Visibility(
+            cardRegistry(), conditionEvaluator = com.wingedsheep.engine.handlers.PredicateEvaluator(cardRegistry()).conditions)
         val random = kotlin.random.Random(seed)
         var changed = state
         var changedObjects = 0
@@ -329,7 +330,10 @@ class ArgentumSearchWorld private constructor(
      * used by arena games. Decision ids are rebound to this shadow world's current pending decision
      * because those ids are intentionally not deterministic across reconstructions.
      */
-    fun applyObservedAction(action: GameAction): ArgentumObservedStep {
+    fun applyObservedAction(
+        action: GameAction,
+        rawTraceSink: MutableList<ArgentumRawTransition>? = null,
+    ): ArgentumObservedStep {
         val actor = requireNotNull(policyActor(environment)) { "No actor in non-terminal world" }
         require(action.playerId == actor) { "Observed action belongs to a different actor" }
         val rebound = if (action is SubmitDecision) {
@@ -343,7 +347,7 @@ class ArgentumSearchWorld private constructor(
         val semantic = exactObservedActionExpander.encodePreparedChoice(native, prepared)
         return ArgentumObservedStep(
             semantic,
-            submitNativeChoice(semantic, native),
+            submitNativeChoice(semantic, native, rawTraceSink = rawTraceSink),
         )
     }
 

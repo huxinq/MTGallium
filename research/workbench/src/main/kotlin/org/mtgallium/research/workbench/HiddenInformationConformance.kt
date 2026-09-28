@@ -166,6 +166,8 @@ fun checkHiddenInformation(
                             result?.diagnostics?.simulations, ConformanceBudget(specification.search.simulations,
                                 specification.particles, specification.search.maxPolicyDecisions))
                     }
+                    // A seat agent reads Argentum's seat stream, not the engine view this check permutes.
+                    is JvmPolicy.Seat -> error("The hidden-information check covers engine-view policies, not seat agents")
                 }
             }
             val original = try { select(position.world) } catch (failure: Exception) {

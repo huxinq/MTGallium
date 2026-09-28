@@ -364,8 +364,10 @@ delta sensitivity to rule-state perturbations. An unchanged snapshot does not
 prove that prior events omit the fact. `SeatStreamPropertiesTest` checks private
 choices, face-down identities, draw names and resolution context through the
 server envelope. Set `SEAT_STREAM_REQUIRE_PRIVATE=1` to enable the desired
-hidden-library and hidden-draw-ID invariance contracts; these expose failures at
-the current Argentum pin.
+hidden-library and hidden-draw-ID invariance contracts, and to require that the
+allocation-order recovery witness finds no hidden library card named in the
+envelope. They fail at Argentum `3757f6bd` and upstream `3139bebc`, and pass once
+the library-order fix (Task 20) is in the engine.
 
 `SeatStreamRecordsTest` is opt-in: pass `SEAT_STREAM_RECORDS` (a directory of
 recorded game JSONL gzip files), `SEAT_STREAM_GAME` (one complete tape) and
@@ -374,7 +376,8 @@ It measures server updates without serialization, then JSON and independent
 gzip message sizes. The snapshot pass supplies no events; the transition pass
 reapplies accepted choices from each recorded pre-state and includes the emitted
 events. This is distinct from seed-and-action replay verification. Hidden swaps
-rebuild printed components and report unsupported materializations separately.
+rebuild printed components and report unsupported materializations separately;
+the first changed identity swap is written to `identity-swap-counterexample.json`.
 Keep these private corpus runs separate from `just check`.
 
 `hidden-information` compares fresh native policies on factual positions and

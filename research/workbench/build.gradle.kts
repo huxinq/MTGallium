@@ -15,6 +15,8 @@ dependencies {
     implementation(project(":agent:value-models"))
     implementation("org.mtgallium.argentum:ai")
     implementation("org.mtgallium.argentum:gym")
+    implementation(platform(libs.spring.boot.dependencies))
+    implementation("org.mtgallium.argentum:game-server")
     implementation("org.mtgallium.argentum:mtg-sdk")
     implementation("org.mtgallium.argentum:mtg-sets")
     implementation("org.mtgallium.argentum:rules-engine")

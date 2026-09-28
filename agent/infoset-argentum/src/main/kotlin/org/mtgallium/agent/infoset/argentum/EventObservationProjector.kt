@@ -381,7 +381,7 @@ internal object EventObservationProjector {
                 detail = ObservedEventDetail.CounterChange(
                     objectRef = ref(event.entityId),
                     objectName = event.entityName,
-                    counterType = event.counterType,
+                    counterType = event.counterType.printed,
                     delta = event.amount,
                 )
                 kind = ObservedEventKind.COUNTER_CHANGE
@@ -391,7 +391,7 @@ internal object EventObservationProjector {
                 detail = ObservedEventDetail.CounterChange(
                     objectRef = ref(event.entityId),
                     objectName = event.entityName,
-                    counterType = event.counterType,
+                    counterType = event.counterType.printed,
                     delta = -event.amount,
                 )
                 kind = ObservedEventKind.COUNTER_CHANGE
