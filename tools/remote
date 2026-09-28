@@ -31,8 +31,9 @@ main=$(cd "$(git rev-parse --git-common-dir)/.." && pwd)
 src_engine=$main/third_party/argentum-engine
 [[ -f $src_engine/settings.gradle.kts && $(git -C "$src_engine" rev-parse HEAD) == "$pin" ]] || {
   echo "engine at $src_engine is missing or not at pin $pin" >&2; exit 1; }
-rsync -a --delete --exclude build --exclude .gradle --exclude node_modules \
+rsync -a --delete --exclude build --exclude .gradle --exclude node_modules --exclude .mtgallium-pin \
   "$src_engine/" "$host:$engine/"
+ssh "$host" "echo $pin > $engine/.mtgallium-pin"   # lets the private build reuse this copy
 rsync -a --exclude .git --exclude node_modules --exclude build --exclude .gradle --exclude __pycache__ \
   --exclude /third_party/argentum-engine ./ "$host:$dir/src/"
 ssh "$host" "ln -sfn ~/$engine $dir/src/third_party/argentum-engine"
