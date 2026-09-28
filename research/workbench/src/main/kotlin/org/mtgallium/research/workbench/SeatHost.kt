@@ -163,7 +163,7 @@ class SeatHost(
             com.wingedsheep.engine.core.PassPriority(actor).takeIf { current.pendingDecision == null && current.priorityPlayerId == actor }
         } ?: error("Seat agent $alias sent no acceptable action at decision $decision: $lastRefusal")
         sent(actor, pass)
-        sendAll(execute(actor, pass) ?: error("Host refused a fallback pass"))
+        sendAll(execute(actor, pass) ?: error("Host refused a fallback pass at decision $decision after: $lastRefusal"))
         hosted = session.getStateForTesting()
         return pass
     }
