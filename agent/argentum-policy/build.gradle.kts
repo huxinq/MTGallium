@@ -11,7 +11,6 @@ dependencies {
     implementation("org.mtgallium.argentum:rules-engine")
     implementation(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test-junit5"))
-    testImplementation(testFixtures(project(":agent:value-models")))
     testImplementation("org.mtgallium.argentum:gym")
     testImplementation("org.mtgallium.argentum:mtg-sdk")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

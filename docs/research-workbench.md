@@ -46,21 +46,8 @@ and belong only in private evidence.
 
 ## Runnable public examples
 
-The checked-in examples are small technical fixtures:
-
-```bash
-work=$(mktemp -d)
-python3 tools/mtgallium-research fit examples/research-kernel-rows.json "$work/model.json" 0.001
-python3 tools/mtgallium-research predict "$work/model.json" examples/research-kernel-rows.json "$work/scores.json"
-python3 tools/mtgallium-research games examples/research-games.json "$work/game"
-python3 tools/mtgallium-research show "$work/game/results.json"
-```
-
-The fit uses artificial targets; the game uses an intentionally tiny deck.
-
-[`examples/python-value-search.py`](../examples/python-value-search.py) compares
-hand-written value weights at search horizons of 2 and 8 decisions through the
-live interface.
+`examples/research-games.json` is a tiny game fixture. Run it with
+`python3 tools/mtgallium-research games examples/research-games.json /absolute/output`.
 
 ## Live games from Python
 
@@ -128,33 +115,10 @@ initializes its belief from the current world.
 
 `fork()` copies game and native search state; copy Python policy state yourself.
 
-`value_features(player=None)` returns the sparse value-feature map for the named
-player, or for the acting player when omitted. See [value models](value-models.md).
+### Frozen kernel inputs
 
-### Learning inputs
-
-`decision(kernel=True)` adds sparse kernel features. `decision(factual=True)` adds
-the byte tensors used by [neural policies](neural-policy.md): the current view
-and actions, the acting player's encoded event history so far, its
-`eventPosition`, and the encoding schema. Pass `from_event` to receive only later
-events; keep the earlier ones yourself. The optional `schema` takes
-`ByteTokenSchema` fields. `play(..., kernel=True, factual=True,
-record=callback)` collects the same encodings before each accepted action.
-`research.fit(roots, ridge=...)` and `research.predict(model, menus)` run the
-[kernel routines](research-cli.md#fit-score-encode-and-read) in the same JVM on
-Python dictionaries and lists.
-
-A complete Python example collects decisions, branches a game, trains a model
-and plays with it:
-
-```bash
-python3 examples/python-game-learning.py /absolute/private/new-collection
-# With PyTorch in the chosen Python environment:
-python examples/python-game-learning.py /absolute/private/new-learning --train --epochs 2
-```
-
-It records the heuristic's choices on short-deck fixtures as imitation targets,
-fits the PyTorch model, and uses its scores to choose live actions.
+`decision(kernel=True)` adds the historical casting-kernel features retained for
+`horizon16`. No new models are trained on this view.
 
 ### Connection and limits
 
@@ -195,7 +159,7 @@ python3 tools/mtgallium-research jvm org.mtgallium.research.workbench.MyExperime
 ```
 
 Call `createWorld`, `playGame`, `GameAgent`, `selectorPlayer`, `searchPlayer`,
-`kernelActionFeatures`, or `fitKernelRidge` directly. `playGame` accepts
+or the frozen `kernelActionFeatures` directly. `playGame` accepts
 caller-owned policy callbacks, decision recording, and a privileged research hook
 that runs before selection. A `world.fork()` of the actual game is independent
 of its parent and keeps the world's accepted-decision numbering. A native search
@@ -207,6 +171,5 @@ the policy's belief.
 `just check` runs the public tests. Native tests use public fixtures for real
 transitions, branches, recording and numerical checks. Python tests cover
 builds, arbitrary JVM entry points, file reading, and live games through one JVM,
-including Python policies, native search-policy forks, menu binding, factual
-encodings, limits and transport cleanup. Neural training, ONNX export and CUDA
-checks have [separate commands](neural-policy.md#verification).
+including Python policies, native search-policy forks, menu binding, limits
+and transport cleanup.

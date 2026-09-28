@@ -10,8 +10,6 @@ import kotlinx.serialization.json.*
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.infoset.planning.*
 import org.mtgallium.agent.argentum.policy.*
-import org.mtgallium.agent.value.InverseLink
-import org.mtgallium.agent.value.LinearWeights
 
 /** Game setup and native search settings shared by the CLI and Python session. */
 @Serializable @kotlinx.serialization.SerialName("org.mtgallium.research.workbench.GamesPlan")
@@ -32,8 +30,6 @@ data class ResearchGameConfig(
     val searchDepth: Int = 32,
     val explorationConstant: Double = 1.4,
     val leaf: LeafEvaluationConfig = LeafEvaluationConfig(LeafEvaluationMethod.BOUNDED_ROLLOUT),
-    val valueWeights: LinearWeights? = null,
-    val valueLink: InverseLink? = null,
     val rolloutTurnHorizon: RolloutTurnHorizon? = null,
     val opponentModel: String = "mixture",
     /** Initialize shadow search memory before the first move, then observe actual accepted moves. */
@@ -42,6 +38,8 @@ data class ResearchGameConfig(
     val maximumSeconds: Double? = null,
     val recordDecisions: Boolean = false,
     val recordReplay: Boolean = false,
+    /** Host each game as an Argentum browser game and log what each seat is sent and sends; see [SeatHost]. */
+    val recordSeats: Boolean = false,
     /** Settings read by added native policies; see [JvmPolicyProvider.settings]. */
     val extensions: Map<String, JsonElement> = emptyMap(),
 )
@@ -86,13 +84,28 @@ fun runGames(plan: ResearchGameConfig, output: Path): List<PlayedGame> {
             val decisions = if (plan.recordDecisions) openJsonLines(destination.resolve("decisions.jsonl.gz")) else null
             val result = decisions.use { decisionLog ->
                 (if (plan.recordReplay) openJsonLines(destination.resolve("replay.jsonl.gz")) else null).use { replayLog ->
-                    var frame = 0
-                    replayLog?.writeRecord(ReplayFrame(frame, world.trueState()))
-                    playGame(world, players, seed, plan.maximumDecisions, plan.maximumSeconds,
-                        record = decisionLog?.let { writer -> { decision -> writer.writeRecord(decision) } },
-                        rawTrace = replayLog?.let { writer -> { step ->
-                            writer.writeRecord(ReplayFrame(++frame, step.afterState, step.action, step.accepted))
-                        } })
+                    val seatLogs = if (plan.recordSeats) players.keys.associateWith { openJsonLines(destination.resolve("seat-$it.jsonl.gz")) } else emptyMap()
+                    val truthLog = if (plan.recordSeats) openJsonLines(destination.resolve("truth.jsonl.gz")) else null
+                    try {
+                        val agents = players.filterValues { it.seat != null }.mapValues { requireNotNull(it.value.seat) }
+                        val seats = if (plan.recordSeats || agents.isNotEmpty())
+                            SeatHost(registry, world.trueState(), agents, seatLogs, truthLog, verify = index == 0) else null
+                        var frame = 0
+                        replayLog?.writeRecord(ReplayFrame(frame, world.trueState()))
+                        playGame(world, players, seed, plan.maximumDecisions, plan.maximumSeconds,
+                            record = decisionLog?.let { writer -> { decision -> writer.writeRecord(decision) } },
+                            rawTrace = replayLog?.let { writer -> { step -> writer.writeRecord(ReplayFrame(++frame, step.afterState, step.action, step.accepted)) } },
+                            seats = seats,
+                        ).also { seats?.let { host ->
+                            writeJson(destination.resolve("seat-stats.json"), buildJsonObject {
+                                put("refused", host.refused)
+                                put("fallbacks", host.fallbacks)
+                                put("agents", researchJson.encodeToJsonElement(host.agentStats()))
+                            })
+                        } }
+                    } finally {
+                        (seatLogs.values + listOfNotNull(truthLog)).forEach { it.close() }
+                    }
                 }
             }
             PlayedGame(index, seed, result).also { writeJson(destination.resolve("result.json"), it) }
@@ -115,7 +128,6 @@ fun main(args: Array<String>) {
         null, "help", "--help", "-h" -> println("""
             hidden-information PLAN.json OUTPUT_DIRECTORY
             games PLAN.json OUTPUT_DIRECTORY
-            fit ROOTS.json MODEL.json [RIDGE]
             predict MODEL.json MENUS.json OUTPUT.json
             encode DECISIONS.jsonl[.gz] FEATURES.json
             replay-state REPLAY.jsonl[.gz] FRAME_INDEX STATE.json
@@ -131,13 +143,6 @@ fun main(args: Array<String>) {
         "games" -> {
             arity(3, "games PLAN.json OUTPUT_DIRECTORY")
             println(researchJson.encodeToString(runGames(decodeGamesPlan(readJson(path(1))), path(2))))
-        }
-        "fit" -> {
-            require(args.size in 3..4) { "fit ROOTS.json MODEL.json [RIDGE]" }
-            val roots = readJson<List<KernelTrainingRoot>>(path(1))
-            val model = fitKernelRidge(roots, args.getOrNull(3)?.toDouble() ?: 0.001)
-            writeJson(path(2), model)
-            println("Fitted ${roots.size} roots; wrote ${path(2)}")
         }
         "predict" -> {
             arity(4, "predict MODEL.json MENUS.json OUTPUT.json")

@@ -102,8 +102,9 @@ class SeatStreamRecordsTest {
         val output = Path.of(requireNotNull(System.getenv("SEAT_STREAM_OUTPUT")))
         Files.createDirectories(output)
         val registry = buildRegistry()
-        val transformer = ClientStateTransformer(registry)
-        val visibility = Visibility(registry)
+        val predicates = com.wingedsheep.engine.handlers.PredicateEvaluator(registry)
+        val transformer = ClientStateTransformer(registry, predicateEvaluator = predicates)
+        val visibility = Visibility(registry, conditionEvaluator = predicates.conditions)
         val materializer = HiddenWorldMaterializer(registry)
         fun payload(state: GameState, player: EntityId): ServerMessage.StateUpdate {
             val session = GameSession(cardRegistry = registry)
@@ -166,7 +167,17 @@ class SeatStreamRecordsTest {
                                 order = if (beforePayload == payload(reordered, player)) "SAME" else "CHANGED"
                                 identity = when (val replacement = materializer.materialize(state, HiddenWorldMaterializationRequest(assignments, state.rng))) {
                                     is HiddenWorldMaterializationResult.Unsupported -> "UNSUPPORTED_${replacement.reason.kind}"
-                                    is HiddenWorldMaterializationResult.Materialized -> if (beforePayload == payload(replacement.state, player)) "SAME" else "CHANGED"
+                                    is HiddenWorldMaterializationResult.Materialized -> {
+                                        val afterPayload = payload(replacement.state, player)
+                                        if (beforePayload != afterPayload && !Files.exists(output.resolve("identity-swap-counterexample.json"))) {
+                                            writeJson(output.resolve("identity-swap-counterexample.json"), buildJsonObject {
+                                                put("source", path.fileName.toString()); put("decision", row["decisionIndex"] ?: JsonNull)
+                                                put("seat", seat); put("before", researchJson.encodeToJsonElement<ServerMessage>(beforePayload))
+                                                put("after", researchJson.encodeToJsonElement<ServerMessage>(afterPayload))
+                                            })
+                                        }
+                                        if (beforePayload == afterPayload) "SAME" else "CHANGED"
+                                    }
                                 }
                                 if (order == "CHANGED" && !Files.exists(output.resolve("library-order-counterexample.json"))) {
                                     writeJson(output.resolve("library-order-counterexample.json"), buildJsonObject {

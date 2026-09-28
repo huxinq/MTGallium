@@ -32,7 +32,7 @@ The `games` command reads `ResearchGameConfig` JSON:
 The plan runs two players; game `i` uses seed `seed + i` with the configured seat
 assignments. `threads` defaults to CPU count minus two; set fewer when sharing
 the machine. `Session.game` takes the same plan: Python converts top-level
-snake_case keywords such as `value_weights` to these camelCase names, while
+snake_case keywords such as `starting_life` to these camelCase names, while
 nested `leaf` keys keep their JSON spelling.
 
 Search settings:
@@ -44,9 +44,6 @@ Search settings:
   `rolloutTurnHorizon` optionally stops rollouts after a number of turns. The
   default leaf is a bounded rollout that evaluates at its cutoff. See
   [search use](value-models.md#search-use) for all options.
-- `valueWeights` is a `LinearWeights` JSON object for the leaf value; omit it to
-  use the Mono-Red heuristic. `valueLink` is `clip` (default) or `tanh`, for
-  coefficients fitted with a logistic link.
 - `opponentModel` is the opponent policy assumed inside search: `mixture`
   (default), `heuristic` or `random`.
 
@@ -73,6 +70,12 @@ A provider returns `JvmPolicy.Memoryless` for a player without memory, or
 session once per player, feeds it accepted moves, forks it with the game and
 reports its search as it does for `search`.
 
+For seat agents, return `JvmPolicy.Seat` with a `SeatAgent`. `SeatHost` delivers
+Argentum browser messages through `receive` and requests browser actions through
+`act`, including refusal reasons. Seat agents play whole games from the start.
+`recordSeats` records per-seat messages and actions, plus a separate privileged
+truth log; only the per-seat messages are policy inputs.
+
 Set `MTGALLIUM_RESEARCH_BUILD` to that build's root to use it from Python. Its root
 project provides a `researchClasspath` task that writes
 `build/research/runtime.json` as this module's task does.
@@ -92,24 +95,17 @@ decisions and does not interrupt a slow policy call. A policy exception, rejecte
 transition or recording failure propagates to the caller and leaves completed
 files in place.
 
-## Fit, score, encode, and read
+## Score, encode, and read
 
 ```bash
-python3 tools/mtgallium-research fit roots.json model.json 0.001
 python3 tools/mtgallium-research predict model.json menus.json predictions.json
 python3 tools/mtgallium-research encode decisions.jsonl.gz features.json
 python3 tools/mtgallium-research replay-state replay.jsonl.gz 3 state.json
 python3 tools/mtgallium-research show any-producers-data.jsonl.gz
 ```
 
-`fit` takes an array of `KernelTrainingRoot` values: `rootId`,
-`seedGroupId`, `features`, and `actionMeans`. Each feature has a sparse `state` and
-`centeredCandidate`, each stored as aligned `indices` and `values` arrays.
-The kernel is `(1 + state·state′) (candidate·candidate′)`. Targets are centered
-within each root. By default the loss gives equal mass to each seed group, then
-each root, then each action. `fitKernelRidge` in Kotlin also accepts
-explicit positive `actionWeights` and uses them as supplied. Scores are not
-clipped.
+The casting kernel is frozen for `horizon16`; training lives only at
+`archive/old-view-20260928`.
 
 `predict` takes rows containing `features` and adds `scores` and `predictedIndex`,
 keeping other fields such as `selectedIndex`. `encode` normalizes state and

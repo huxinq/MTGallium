@@ -1,7 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 gradle := "bash tools/mtgallium-gradle"
-policy_modules := ":agent:infoset-semantics:test :agent:infoset-planning:test :agent:infoset-argentum:test :agent:neural-policy:test :agent:value-models:test :agent:argentum-policy:test"
+policy_modules := ":agent:infoset-semantics:test :agent:infoset-planning:test :agent:infoset-argentum:test :agent:value-models:test :agent:argentum-policy:test"
 policy_integration := ":integration:argentum-policy:test"
 
 default:

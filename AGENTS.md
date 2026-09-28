@@ -18,7 +18,6 @@ Before reading a large Kotlin, Python or JavaScript file, run `tools/outline FIL
 | Play live games, run examples or Kotlin experiments | [Research quick start](docs/research-workbench.md) |
 | Configure games or native policies; fit, encode or read files | [Games and CLI reference](docs/research-cli.md) |
 | Ladder evaluation, cost measurement, game corpora, remote runs | [Batch research runs](docs/research-runs.md) |
-| Train or export neural policies | [Neural policy training](docs/neural-policy.md) |
 
 Results live in run folders and [ladder rows](docs/research-runs.md#policy-ladder).
 What they establish lives in `FINDINGS.md` at the private evidence root, which

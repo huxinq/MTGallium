@@ -8,8 +8,6 @@ import org.mtgallium.agent.infoset.argentum.ArgentumSearchWorld
 import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.infoset.planning.*
 import org.mtgallium.agent.argentum.policy.*
-import org.mtgallium.agent.value.LinearValueEvaluator
-import org.mtgallium.agent.value.InverseLink
 import org.mtgallium.agent.value.MaterialEvaluator
 
 /**
@@ -34,6 +32,9 @@ sealed interface JvmPolicy {
 
     /** One session per actor, created once; the game observes accepted moves, forks it and reports its search. */
     class SearchSession(val session: SearchPolicySession) : JvmPolicy
+
+    /** A player at an Argentum seat; the game hosts it as a browser seat (see [SeatHost]). */
+    class Seat(val agent: SeatAgent) : JvmPolicy
 }
 
 /** The game a native policy is constructed for. */
@@ -82,8 +83,7 @@ internal object BuiltinNativePolicies : JvmPolicyProvider {
             rolloutPolicy = PolicyDefaults.rootRolloutPolicy(),
             rolloutOpponentPolicy = PolicyDefaults.opponentRolloutPolicy(),
             valueSource = LeafValueSource.Information(
-                plan.valueWeights?.let { LinearValueEvaluator(it, plan.valueLink ?: InverseLink.CLIP) }
-                    ?: MaterialEvaluator()))
+                MaterialEvaluator()))
     }
 }
 

@@ -4,6 +4,9 @@ MTGallium gives each policy only the information its player could legitimately
 know, plans over the possible hidden states (information-set search) on a pinned
 Argentum engine, and provides Mono-Red value models and research tools.
 
+The seat agent is the development line. The old view, casting kernel, belief
+samplers and IS-MCTS are frozen for `horizon16`.
+
 ## Primary dataflow
 
 ```text
@@ -15,7 +18,7 @@ Argentum state → trusted adapter → captured player information + admitted me
                                       ↓
                   represented history / belief update → next decision
 
-private runs → decision and replay records → kernel fitting / neural training → study results
+Argentum browser messages → SeatHost → SeatAgent → browser actions
 ```
 
 The adapter projects engine state into player information and captures it with
@@ -33,8 +36,7 @@ The planning module uses `org.mtgallium.agent.infoset.planning`. Semantics uses
 | `agent/infoset-semantics` | Player information, history, semantic actions, and the contracts policies see. |
 | `agent/infoset-planning` | Planning algorithms and root selection. |
 | `agent/infoset-argentum` | Trusted Argentum projections, engine-backed worlds, and transitions. |
-| `agent/value-models` | Mono-Red features and value evaluators. |
-| `agent/neural-policy` | Byte-token tensor encoding. |
+| `agent/value-models` | Frozen V2 material evaluator. |
 | `agent/argentum-policy` | Argentum policy lifecycle, defaults, and search/leaf composition. |
 | `research/workbench` | Direct games, Python bridge, native policies and the provider hook for other builds, feature/kernel routines, and CLI entry points. |
 | `integration/argentum-policy` | Argentum application integration. |
@@ -53,5 +55,3 @@ application layers; agent and integration modules cannot depend on evaluation.
   composition, belief maintenance and snapshots, and continuations.
 - [Value models](value-models.md): value features, linear evaluators and search
   leaves.
-- [Neural policy training](neural-policy.md): tensors, player memory, training
-  and export.

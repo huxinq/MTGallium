@@ -71,11 +71,8 @@ org.mtgallium.agent.infoset.core.PolicyAudienceScope
 org.mtgallium.agent.infoset.core.PolicyExpansionOmissionReason
 org.mtgallium.agent.infoset.core.BoundedPolicyInputConfig
 org.mtgallium.agent.infoset.argentum.UnifiedSemanticExpansionSpecification
-org.mtgallium.agent.neural.FactualTensorSchema
-org.mtgallium.agent.neural.FactualDecisionTensors
 org.mtgallium.research.workbench.RootActionKernelVector
 org.mtgallium.research.workbench.RootActionKernelFeatures
-org.mtgallium.research.workbench.RootActionKernelTrainingRoot
 org.mtgallium.research.workbench.RootActionKernelModel
 org.mtgallium.research.workbench.GamesPlan
 org.mtgallium.agent.infoset.core.PolicyExpansion
@@ -84,11 +81,6 @@ org.mtgallium.agent.infoset.core.BeliefArchitecture
 org.mtgallium.agent.infoset.core.BeliefMode
 org.mtgallium.agent.infoset.argentum.PerspectiveHistoryEventOrder
 org.mtgallium.agent.argentum.policy.ObservedBeliefConditioning
-org.mtgallium.agent.monored.LinearValueLink
-org.mtgallium.research.workbench.LuckCorrectionConfig
-org.mtgallium.research.workbench.LuckEvent
-org.mtgallium.agent.monored.LinearWeights
-org.mtgallium.agent.searchteacher.ValueInputError
 org.mtgallium.agent.searchteacher.MonoRedVisibleEvaluatorConfig
 org.mtgallium.agent.searchteacher.MonoRedVisiblePermanentFeatures
 org.mtgallium.agent.searchteacher.MonoRedVisibleFeatures
@@ -100,12 +92,10 @@ org.mtgallium.agent.infoset.core.SemanticChoice
 "RULES_FORCED_V1","PROFILE_FORCED_WHILE_VOLATILE_V1"
 "LEGACY_ENGINE_ORDER_V1","QUALIFIED_TURN_UNTAP_V2"
 "HISTORICAL_GROUP_SIGNATURE_V1","QUALIFIED_SUPPORTED_FAMILIES_V1"
-"clip","tanh"
 "TERMINAL_PAYOFF","HEURISTIC_SETTLEMENT","LEARNED_OUTCOME_ESTIMATE","NEUTRAL_UNRESOLVED_SETTLEMENT"
 "PUBLIC","ENTITLED_PLAYERS"
 "PROFILE_SUPPRESSED_STANDALONE_MANA","SOURCE_NON_EXHAUSTIVE","RESPONSE_LIMIT","ATTEMPT_LIMIT","GENERATED_SCAN_LIMIT"
 SEMANTIC,PRODUCTION
 LEGACY_SNAPSHOT_V1,QUALIFIED_OBSERVED_OBJECTS_V2
 choice,visits,meanValue,policyProbability
-weightedLuck
 unsettledLeafEvaluations

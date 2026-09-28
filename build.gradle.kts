@@ -13,7 +13,7 @@ tasks.register("checkArchitecture") {
     doLast {
         val semantics = ":agent:infoset-semantics"
         val planning = ":agent:infoset-planning"
-        val models = setOf(":agent:value-models", ":agent:neural-policy")
+        val models = setOf(":agent:value-models")
         val isolated = models + setOf(semantics, planning)
         val violations = mutableSetOf<String>()
         for (owner in subprojects) {

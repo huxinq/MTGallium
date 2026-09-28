@@ -276,9 +276,12 @@ class SimultaneousUntapHistoryTest {
             assertEquals(ordered.size, repaired.size)
             val differing = ordered.indices.filter { ordered[it] != repaired[it] }
             if (differing.isNotEmpty()) {
-                assertEquals(f.range.count(), differing.size)
-                assertTrue(differing.zipWithNext().all { (left, right) -> right == left + 1 })
-                val block = differing.first()..differing.last()
+                // Canonical order may leave some IDs in their original positions.
+                val block = ordered.indices.filter {
+                    (ordered[it].detail as? ObservedEventDetail.ObjectState)?.change == "UNTAPPED"
+                }
+                assertEquals(f.range.count(), block.size)
+                assertTrue(differing.all { it in block })
                 for (index in ordered.indices) if (index !in block) assertEquals(ordered[index], repaired[index])
                 assertEquals(
                     ordered.slice(block).map { it.copy(eventId = 0) }.toSet(),

@@ -1,5 +1,7 @@
 # Information-set planning algorithms
 
+Frozen for the `horizon16` anchor and league opponent; no new work uses this view.
+
 Planning types live in `org.mtgallium.agent.infoset.planning`; the underlying
 information and action contracts stay in `org.mtgallium.agent.infoset.core`.
 Existing serializer names remain pinned to preserve wire compatibility.

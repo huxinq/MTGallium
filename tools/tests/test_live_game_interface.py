@@ -234,47 +234,7 @@ class LiveGameInterfaceTest(unittest.TestCase):
                 game.step(selected)
                 self.assertEqual(game.state(), branch.state())
 
-    def test_hand_authored_value_weights_inside_search_at_two_horizons(self):
-        # Base64 components encode player/life/root. All players stay at 20 life here.
-        root_life = 'player/bGlmZQ/cm9vdA'
-        expected = -.2 + .1 * math.log1p(20)
-        rollout_decisions = []
-        for horizon in (1, 4):
-            with self.subTest(horizon=horizon), self.game(
-                    starting_hand_size=2, policies=('search', 'random'), particles=1,
-                    simulations=2, search_depth=horizon, exploration_constant=.7,
-                    opponent_model='random', value_weights={'bias': -.2, 'weights': {root_life: .1}},
-                    leaf={'stateSource': 'BOUNDED_ROLLOUT', 'cutoff': 'EVALUATE'}) as game:
-                for _ in range(24):
-                    decision = game.decision()
-                    if decision.actor == 'p0' and len(decision.actions) > 1:
-                        break
-                    game.step(next(a for a in decision.actions if a.family == 'PASS_PRIORITY'))
-                else:
-                    self.fail('Fixture did not reach a branching player decision')
-                self.assertAlmostEqual(math.log1p(20), game.value_features()[root_life])
-                before = game.state()
-                action = game.select('search')
-                search = action.search
-                self.assertIsNotNone(search)
-                self.assertAlmostEqual(expected, search['rootValue'], places=12)
-                self.assertEqual(action.choice, search['chosen'])
-                diagnostics = search['diagnostics']
-                self.assertGreater(diagnostics['evaluatorCalls'], 0)
-                self.assertEqual('uniform-v1', diagnostics['opponentModelId'])
-                self.assertEqual(diagnostics['simulations'], sum(
-                    c['learnedOutcomeEstimateBackups'] for c in search['candidateSettlementCounts'].values()))
-                rollout_decisions.append(diagnostics['rootRolloutDecisions'] + diagnostics['opponentRolloutDecisions'])
-                self.assertEqual(before, game.state())
-                game.step(action)
-                self.assertEqual(decision.index + 1, game.status()['index'])
-        self.assertEqual(0, rollout_decisions[0])
-        self.assertGreater(rollout_decisions[1], rollout_decisions[0])
 
-    def test_misspelled_or_missing_model_weights_fail_at_game_creation(self):
-        for model in ({'bias': .3}, {'bias': .3, 'wieghts': {}}):
-            with self.subTest(model=model), self.assertRaises(ResearchError):
-                self.game(policies=('search', 'random'), value_weights=model)
 
     def test_python_policy_memory_is_explicitly_copied_by_the_experiment(self):
         class CountingPolicy:
@@ -292,44 +252,7 @@ class LiveGameInterfaceTest(unittest.TestCase):
             game.play({'p0': policy}, decision_limit=1)
             self.assertEqual(1, policy.calls)
 
-    def test_kernel_and_factual_encodings_keep_menu_order_and_have_no_targets(self):
-        with self.game(starting_hand_size=3) as game:
-            decision = game.decision(kernel=True, factual=True)
-            self.assertEqual(len(decision.actions), len(decision.features))
-            value = decision.factual
-            self.assertEqual(len(decision.actions), len(value['input']['actions']))
-            self.assertEqual(value['eventPosition'], len(value['events']))
-            self.assertTrue(all(1 <= token <= 256 for token in value['input']['view']))
-            self.assertFalse({'target', 'split', 'groupId', 'actionMeans'} & value.keys())
-            self.assertEqual(decision.rules_exhaustive, value['input']['rulesExhaustive'])
-            self.assertEqual(decision.profile_exhaustive, value['input']['profileExhaustive'])
 
-    def test_current_view_callback_omits_history_without_changing_same_seed_play(self):
-        schema = {'version': 'factual-policy-json-bytes-v1', 'maximumViewBytes': 65536,
-                  'maximumActionBytes': 16384, 'maximumEventBytes': 16384,
-                  'maximumCandidates': 256}
-        with self.game(starting_hand_size=3) as game:
-            game.step(0)
-            ordinary = game.decision(factual=True, schema=schema)
-            compact = game.decision(factual=True, schema=schema, include_events=False)
-            self.assertEqual(ordinary.factual['input'], compact.factual['input'])
-            self.assertEqual(ordinary.factual['schema'], compact.factual['schema'])
-            self.assertEqual(ordinary.factual['eventPosition'], compact.factual['eventPosition'])
-            self.assertGreater(compact.factual['eventPosition'], 0)
-            self.assertEqual([], compact.factual['events'])
-            self.assertEqual(compact.factual['eventPosition'], compact.factual['eventsFrom'])
-            with game.fork() as branch:
-                seen = []
-                def choose(decision):
-                    seen.append(decision.factual)
-                    return 0
-                game.play({'p0': choose, 'p1': choose}, decision_limit=3,
-                          factual=True, schema=schema, include_events=False)
-                branch.play({'p0': lambda _: 0, 'p1': lambda _: 0}, decision_limit=3,
-                            factual=True, schema=schema, include_events=True)
-                self.assertTrue(seen)
-                self.assertTrue(all(row['schema'] == schema and row['events'] == [] for row in seen))
-                self.assertEqual(game.state(), branch.state())
 
     def test_callback_choice_uses_the_same_menu_as_its_recorded_encodings(self):
         with self.game() as game:
@@ -344,15 +267,6 @@ class LiveGameInterfaceTest(unittest.TestCase):
             self.assertEqual(offered.information['candidates'], rows[0]['information']['candidates'])
             self.assertEqual(offered.features, rows[0]['features'])
 
-    def test_fitter_and_prediction_use_ordinary_python_numeric_values(self):
-        vector = lambda value: dict(indices=[0], values=[value])
-        menu = [dict(state=vector(1.), centeredCandidate=vector(a)) for a in (-1., 1.)]
-        roots = [dict(rootId='authored', seedGroupId='synthetic', features=menu, actionMeans=[-.4, .4])]
-        model = self.session.fit(roots, ridge=.001)
-        scores = self.session.predict(model, [menu])[0]
-        self.assertGreater(scores[1], scores[0])
-        self.assertAlmostEqual(0., sum(scores), places=12)
-        self.assertNotIn('researchRunIdentity', model)
 
     def test_closing_one_game_does_not_close_siblings(self):
         with self.game() as game:

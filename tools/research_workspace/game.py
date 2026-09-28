@@ -52,7 +52,6 @@ class Decision:
     rules_exhaustive: bool
     profile_exhaustive: bool
     features: list | None = None
-    factual: dict | None = None
 
 
 class Session:
@@ -97,19 +96,14 @@ class Session:
             return response['value']
 
     def game(self, decks: Sequence[Mapping[str, int]], *, seed: int = 1,
-             policies: Sequence[str] = ('random', 'random'), luck_correction: Mapping | None = None,
+             policies: Sequence[str] = ('random', 'random'),
              **settings: Any) -> Game:
         plan = {''.join(word if i == 0 else word[:1].upper() + word[1:]
                         for i, word in enumerate(key.split('_'))): value
                 for key, value in settings.items()}
         plan.update(decks=list(decks), seed=seed, policies=list(policies))
-        arguments = {} if luck_correction is None else {'luckCorrection': dict(luck_correction)}
-        result = self._call('create', plan=plan, **arguments)
+        result = self._call('create', plan=plan)
         return Game._from(self, result['game'], tuple(policies))
-
-    def fit(self, roots: Sequence[Mapping], ridge: float = .001, *, weights: Mapping | None = None) -> dict:
-        """The existing root-centered kernel objective; caller-supplied targets and groups."""
-        return self._call('fit', roots=list(roots), ridge=ridge, weights=weights)
 
     def predict(self, model: Mapping, menus: Sequence[Sequence[Mapping]]) -> list[list[float]]:
         return self._call('predict', model=model, menus=list(menus))
@@ -176,26 +170,12 @@ class Game:
         """Only the named player's represented information, including remembered history."""
         return self._call('information', player=player)
 
-    def value_features(self, player: str | None = None) -> dict[str, float]:
-        """Sparse linear-value features, from the named player's or acting player's view."""
-        return self._call('value-features', **({} if player is None else {'player': player}))
-
-    def value_snapshot(self, *, factual_schema: Mapping | None = None) -> dict[str, dict]:
-        """Value features, V2 and turn for both player perspectives at this position."""
-        return self._call('value-snapshot', **({} if factual_schema is None else {'factualSchema': dict(factual_schema)}))
-
     def state(self) -> dict:
         """Privileged referee snapshot for research inspection, not a policy input."""
         return self._call('state')
 
-    def decision(self, *, kernel: bool = False, factual: bool = False,
-                 from_event: int = 0, schema: Mapping | None = None,
-                 view: Mapping | None = None, include_events: bool = True) -> Decision | None:
-        arguments = dict(kernel=kernel, factual=factual, fromEvent=from_event)
-        if not include_events:
-            arguments['includeEvents'] = False
-        if schema is not None:
-            arguments['schema'] = dict(schema)
+    def decision(self, *, kernel: bool = False, view: Mapping | None = None) -> Decision | None:
+        arguments = dict(kernel=kernel)
         if view is not None:
             arguments['view'] = dict(view)
         value = self._call('decision', **arguments)
@@ -205,7 +185,7 @@ class Game:
                         for choice in value['information']['candidates'])
         return Decision(value['index'], value['actor'], value['information'], actions,
                         value['rulesExhaustive'], value['profileExhaustive'],
-                        value.get('features'), value.get('factual'))
+                        value.get('features'))
 
     def select(self, policy: str = 'heuristic', *, seed: int | None = None) -> Action:
         """Choose without advancing. Action.search contains estimates when search ran."""
@@ -232,9 +212,7 @@ class Game:
 
     def play(self, policies: Sequence[str | Callable[[Decision], Action | int]] | Mapping | None = None,
              *, decision_limit: int | None = 2048, seconds: float | None = None,
-             record: Callable[[dict], None] | None = None, kernel: bool = False,
-             factual: bool = False, schema: Mapping | None = None,
-             include_events: bool = True) -> dict:
+             record: Callable[[dict], None] | None = None, kernel: bool = False) -> dict:
         """Python callbacks receive a decision, never the game or referee state.
 
         Unrecorded native moves stay inside the JVM, including native opponents
@@ -280,11 +258,9 @@ class Game:
                 continue
             if isinstance(policy, str):
                 action = self.select(policy)
-                decision = self.decision(view=action.view, kernel=kernel, factual=factual,
-                                         schema=schema, include_events=include_events)
+                decision = self.decision(view=action.view, kernel=kernel)
             else:
-                decision = self.decision(kernel=kernel, factual=factual,
-                                         schema=schema, include_events=include_events)
+                decision = self.decision(kernel=kernel)
                 selected = policy(decision)
                 if type(selected) is int:
                     if selected < 0 or selected >= len(decision.actions):
@@ -305,8 +281,6 @@ class Game:
                 row = result['decision']
                 if kernel:
                     row['features'] = decision.features
-                if factual:
-                    row['factual'] = decision.factual
                 record(row)
 
     def close(self) -> None:

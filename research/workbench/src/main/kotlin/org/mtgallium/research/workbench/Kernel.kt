@@ -2,13 +2,11 @@ package org.mtgallium.research.workbench
 
 import kotlin.math.sqrt
 import kotlinx.serialization.Serializable
-import org.apache.commons.math3.linear.Array2DRowRealMatrix
-import org.apache.commons.math3.linear.ArrayRealVector
-import org.apache.commons.math3.linear.CholeskyDecomposition
 import org.mtgallium.agent.infoset.core.DecisionPoint
 import org.mtgallium.agent.infoset.core.InformationStateRepresentation
 import org.mtgallium.agent.infoset.core.SemanticChoice
 
+// Frozen casting-kernel features for horizon16; training is archived.
 @Serializable @kotlinx.serialization.SerialName("org.mtgallium.research.workbench.RootActionKernelVector")
 data class KernelFeatureVector(val indices: List<Int>, val values: List<Double>) {
     init {
@@ -30,20 +28,6 @@ data class KernelFeatureVector(val indices: List<Int>, val values: List<Double>)
 
 @Serializable @kotlinx.serialization.SerialName("org.mtgallium.research.workbench.RootActionKernelFeatures")
 data class KernelActionFeatures(val state: KernelFeatureVector, val centeredCandidate: KernelFeatureVector)
-
-/** IDs are joins and weighting groups; neither is a predictive feature. Targets are caller-supplied quantities. */
-@Serializable @kotlinx.serialization.SerialName("org.mtgallium.research.workbench.RootActionKernelTrainingRoot")
-data class KernelTrainingRoot(
-    val rootId: String,
-    val seedGroupId: String,
-    val features: List<KernelActionFeatures>,
-    val actionMeans: List<Double>,
-) {
-    init {
-        require(rootId.isNotBlank() && seedGroupId.isNotBlank())
-        require(features.isNotEmpty() && features.size == actionMeans.size && actionMeans.all(Double::isFinite))
-    }
-}
 
 @Serializable @kotlinx.serialization.SerialName("org.mtgallium.research.workbench.RootActionKernelModel")
 data class KernelRidgeActionModel(
@@ -93,40 +77,4 @@ fun kernelActionFeatures(
         val nonzero = centered.filterValues { it != 0.0 }
         KernelActionFeatures(state, KernelFeatureVector(nonzero.keys.toList(), nonzero.values.toList()))
     }
-}
-
-/**
- * Minimize sum_i w_i (f_i - (y_i - mean_root(y)))² + ridge ||f||²_K.
- * Default mass is equal per group, then root, then action. Explicit positive masses are
- * used as supplied, not silently renormalized. Raw scores are never clipped.
- */
-fun fitKernelRidge(
-    roots: List<KernelTrainingRoot>,
-    ridge: Double = 0.001,
-    actionWeights: Map<String, List<Double>>? = null,
-): KernelRidgeActionModel {
-    require(roots.isNotEmpty() && roots.map { it.rootId }.distinct().size == roots.size)
-    require(ridge.isFinite() && ridge > 0)
-    val groups = roots.groupingBy { it.seedGroupId }.eachCount()
-    val weights = actionWeights ?: roots.associate { root -> root.rootId to List(root.features.size) {
-        1.0 / groups.size / groups.getValue(root.seedGroupId) / root.features.size
-    } }
-    require(weights.keys == roots.map { it.rootId }.toSet()) { "Weights must cover the fitted roots exactly" }
-    roots.forEach { root -> require(weights.getValue(root.rootId).let { values ->
-        values.size == root.features.size && values.all { it.isFinite() && it > 0 }
-    }) }
-    val centers = roots.flatMap { it.features }
-    val scale = roots.flatMap { root -> weights.getValue(root.rootId).map(::sqrt) }
-    val centered = roots.flatMap { root ->
-        val mean = root.actionMeans.average()
-        root.actionMeans.map { it - mean }
-    }
-    val gram = Array(centers.size) { i -> DoubleArray(centers.size) { j ->
-        scale[i] * actionKernel(centers[i], centers[j]) * scale[j] + if (i == j) ridge else 0.0
-    } }
-    require(gram.all { row -> row.all(Double::isFinite) } && centered.all(Double::isFinite))
-    val target = DoubleArray(centers.size) { scale[it] * centered[it] }
-    val solution = CholeskyDecomposition(Array2DRowRealMatrix(gram, false), 1e-12, 0.0).solver
-        .solve(ArrayRealVector(target, false)).toArray()
-    return KernelRidgeActionModel(ridge, centers, solution.indices.map { solution[it] * scale[it] })
 }

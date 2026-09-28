@@ -1,8 +1,6 @@
 package org.mtgallium.agent.infoset.argentum
 
 import com.wingedsheep.engine.core.*
-import com.wingedsheep.engine.handlers.effects.ZoneTransitionService
-import com.wingedsheep.engine.mechanics.stack.StackResolver
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.engine.state.GameState
 import com.wingedsheep.engine.state.ZoneKey
@@ -22,6 +20,7 @@ import kotlin.test.*
 /** Authored component states using native transitions/resolution, not a reachable gameplay proof. */
 class ResolutionSourceReferenceTest {
     private val registry = CardRegistry().apply { register(PortalSet.cards); register(PortalSet.basicLands) }
+    private val services = com.wingedsheep.engine.core.EngineServices(registry)
     private val mode = HistoryObjectReferencing.QUALIFIED_OBSERVED_OBJECTS_V2
     private data class Fixture(val state: GameState, val source: EntityId, val other: EntityId,
         val owner: EntityId, val players: List<EntityId>)
@@ -63,8 +62,8 @@ class ResolutionSourceReferenceTest {
 
     @Test fun `native permanent resolution ignores after snapshot ordinal only in explicit new mode`() {
         val left = fixture(); val right = fixture(reverse = true)
-        val a = StackResolver(registry).resolveTop(left.state)
-        val b = StackResolver(registry).resolveTop(right.state)
+        val a = services.stackResolver.resolveTop(left.state)
+        val b = services.stackResolver.resolveTop(right.state)
         val move = a.events.filterIsInstance<ZoneChangeEvent>().single { it.entityId == left.source }
         assertEquals(left.state.objectRef(left.source), move.oldObject)
         assertEquals(a.state.objectRef(left.source), move.newObject)
@@ -93,7 +92,7 @@ class ResolutionSourceReferenceTest {
         val f = fixture(bothStack = true)
         // Two alternative component transitions from the same stack, not two claims of legal top resolution.
         fun branch(id: EntityId): InformationStateRecorder {
-            val moved = ZoneTransitionService.moveToZone(f.state, id, Zone.BATTLEFIELD)
+            val moved = services.zones.moveToZone(f.state, id, Zone.BATTLEFIELD)
             return record(f, moved.state, moved.events + ResolvedEvent(id, "Raging Goblin"))
         }
         val a = branch(f.source); val b = branch(f.other)
@@ -106,7 +105,7 @@ class ResolutionSourceReferenceTest {
 
     @Test fun `unsupported and ambiguous witnesses retain historical fallback`() {
         val f = fixture()
-        val moved = ZoneTransitionService.moveToZone(f.state, f.source, Zone.BATTLEFIELD)
+        val moved = services.zones.moveToZone(f.state, f.source, Zone.BATTLEFIELD)
         val move = moved.events.filterIsInstance<ZoneChangeEvent>().single()
         val resolved = ResolvedEvent(f.source, "Raging Goblin")
         val variants = listOf(
@@ -128,14 +127,14 @@ class ResolutionSourceReferenceTest {
         val events = moved.events + resolved
         assertTrue(qualifiedResolutionSources(events,
             f.state.updateEntity(f.source) { it.without<SpellOnStackComponent>() }, moved.state, refs, 0).isEmpty())
-        val returned = ZoneTransitionService.moveToZone(moved.state, f.source, Zone.EXILE)
+        val returned = services.zones.moveToZone(moved.state, f.source, Zone.EXILE)
         assertTrue(qualifiedResolutionSources(events + returned.events, f.state, returned.state, refs, 0).isEmpty())
         val missingIdentity = moved.state.copy(objectIdentities = moved.state.objectIdentities - f.source)
         assertTrue(qualifiedResolutionSources(events, f.state, missingIdentity, refs, 0).isEmpty())
     }
 
     @Test fun `source admission is viewer local and requires a pre stack locator`() {
-        val f = fixture(); val moved = ZoneTransitionService.moveToZone(f.state, f.source, Zone.BATTLEFIELD)
+        val f = fixture(); val moved = services.zones.moveToZone(f.state, f.source, Zone.BATTLEFIELD)
         val events = moved.events + ResolvedEvent(f.source, "Raging Goblin")
         val viewer = f.players[0]
         val raw = ObservationBuilder(registry).build(f.state, viewer, emptyList()).observation as TrainingObservation
@@ -151,14 +150,14 @@ class ResolutionSourceReferenceTest {
 
     @Test fun `fork preserves mode and resolution does not rebind a prior battlefield handle`() {
         val f = fixture()
-        val oldVisit = ZoneTransitionService.moveToZone(f.state, f.source, Zone.BATTLEFIELD)
+        val oldVisit = services.zones.moveToZone(f.state, f.source, Zone.BATTLEFIELD)
         val history = record(f, oldVisit.state, oldVisit.events)
         val back = oldVisit.state.removeFromZone(ZoneKey(f.owner, Zone.BATTLEFIELD), f.source)
             .pushToStack(f.source).updateEntity(f.source) { it.with(SpellOnStackComponent(f.owner)) }
         record(f, back, listOf(ZoneChangeEvent(f.source, "Raging Goblin", Zone.BATTLEFIELD, Zone.STACK, f.owner)),
             history, oldVisit.state)
         val fork = history.fork()
-        val result = StackResolver(registry).resolveTop(back)
+        val result = services.stackResolver.resolveTop(back)
         record(f, result.state, result.events, history, back)
         assertNotEquals(history.forViewer(f.owner), fork.forViewer(f.owner))
         record(f, result.state, result.events, fork, back)

@@ -5,8 +5,6 @@ import org.mtgallium.agent.infoset.planning.*
 import org.mtgallium.agent.infoset.argentum.ActionGenerationSpecification
 import org.mtgallium.agent.argentum.policy.ObservedActionLikelihood
 import org.mtgallium.agent.value.*
-import org.mtgallium.agent.neural.ByteTokenSchema
-import org.mtgallium.agent.neural.DecisionByteTokens
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.core.PlayerConfig
 import com.wingedsheep.gym.GameEnvironment
@@ -31,8 +29,6 @@ import org.mtgallium.agent.infoset.core.BeliefMode
 import org.mtgallium.agent.infoset.core.CanonicalJson
 import org.mtgallium.agent.infoset.core.SemanticOperationFamily
 import org.mtgallium.agent.infoset.core.UniformOpponentPolicy
-import org.mtgallium.agent.value.ValueFeatures
-import org.mtgallium.agent.neural.InformationStateByteEncoder
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -116,11 +112,8 @@ class FrozenPublicByteGoldensTest {
             ActionOmissionReason.serializer().descriptor,
             PolicyInputLimits.serializer().descriptor,
             ActionGenerationSpecification.serializer().descriptor,
-            ByteTokenSchema.serializer().descriptor,
-            DecisionByteTokens.serializer().descriptor,
             KernelFeatureVector.serializer().descriptor,
             KernelActionFeatures.serializer().descriptor,
-            KernelTrainingRoot.serializer().descriptor,
             KernelRidgeActionModel.serializer().descriptor,
             ResearchGameConfig.serializer().descriptor,
             ActionMenu.serializer().descriptor,
@@ -129,11 +122,6 @@ class FrozenPublicByteGoldensTest {
             BeliefMode.serializer().descriptor,
             HistoryEventOrdering.serializer().descriptor,
             ObservedActionLikelihood.serializer().descriptor,
-            InverseLink.serializer().descriptor,
-            ChanceControlVariateConfig.serializer().descriptor,
-            LuckEvent.serializer().descriptor,
-            LinearWeights.serializer().descriptor,
-            ValueInputError.serializer().descriptor,
             MaterialWeights.serializer().descriptor,
             MaterialPermanentFeatures.serializer().descriptor,
             MaterialFeatures.serializer().descriptor,
@@ -147,7 +135,6 @@ class FrozenPublicByteGoldensTest {
             wireTokens(QuiescencePassRule.serializer(), QuiescencePassRule.entries),
             wireTokens(HistoryEventOrdering.serializer(), HistoryEventOrdering.entries),
             wireTokens(ObservedActionLikelihood.serializer(), ObservedActionLikelihood.entries),
-            wireTokens(InverseLink.serializer(), InverseLink.entries),
             wireTokens(ReturnSource.serializer(), ReturnSource.entries),
             wireTokens(EventAudienceScope.serializer(), EventAudienceScope.entries),
             wireTokens(ActionOmissionReason.serializer(), ActionOmissionReason.entries),
@@ -156,7 +143,6 @@ class FrozenPublicByteGoldensTest {
             RootActionStatistics.serializer().descriptor.let { d ->
                 (0 until d.elementsCount).joinToString(",", transform = d::getElementName)
             },
-            LuckEvent.serializer().descriptor.getElementName(6),
             InformationSetSearchDiagnostics.serializer().descriptor.let { d ->
                 d.getElementName(d.getElementIndex("unsettledLeafEvaluations"))
             },
@@ -195,19 +181,10 @@ class FrozenPublicByteGoldensTest {
             HistoryObjectReferencing.LEGACY_SNAPSHOT_V1)
         val site = world.decisionContext().site()
         val information = site.information()
-        val tensors = InformationStateByteEncoder().decision(site)
-        val keys = ValueFeatures.compile(information, "p0").values.keys.sorted()
-        assertTrue(keys.isNotEmpty())
         val outputs = sortedMapOf<String, ByteArray>(
-            "value/public-fixture-keys" to keys.joinToString("\n", postfix = "\n").toByteArray(UTF_8),
-            "tensor/view-text" to untoken(tensors.view),
-            "tensor/flags" to "${tensors.rulesExhaustive},${tensors.profileExhaustive}\n".toByteArray(UTF_8),
             // The public API returns hashed vectors; it does not expose pre-hash feature names.
             "kernel/public-fixture-vectors" to researchJson.encodeToString(kernelActionFeatures(site)).toByteArray(UTF_8),
         )
-        tensors.actions.forEachIndexed { index, action ->
-            outputs["tensor/action-text-%03d".format(index)] = untoken(action)
-        }
         // A visible land move makes this an ordinary history corpus; it is not a qualified
         // simultaneous-untap witness. That mechanism retains its focused regression tests.
         for (order in listOf(HistoryEventOrdering.LEGACY_ENGINE_ORDER_V1,
@@ -251,11 +228,6 @@ class FrozenPublicByteGoldensTest {
         ))
         return ArgentumSearchWorld.create(environment, "frozen-public-61", 61L, 61L,
             knownDecks = decks, historyEventOrder = order, historyObjectReference = references)
-    }
-
-    private fun untoken(tokens: List<Int>): ByteArray {
-        require(tokens.all { it in 1..256 })
-        return tokens.map { (it - 1).toByte() }.toByteArray()
     }
 
     /** Compares each entry with the committed golden; MTG_CAPTURE_GOLDENS=1 writes a candidate instead. */

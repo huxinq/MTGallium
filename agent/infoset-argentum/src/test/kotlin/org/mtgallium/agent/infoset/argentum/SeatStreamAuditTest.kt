@@ -40,7 +40,7 @@ class SeatStreamAuditTest {
         val player = env.playerIds[0]
         val source = env.state.getHand(player).first { env.state.getEntity(it)!!.get<CardComponent>()!!.name == "Raging Goblin" }
         val state = env.state.moveToZone(source, ZoneKey(player, Zone.HAND), ZoneKey(player, Zone.BATTLEFIELD))
-        val transformer = ClientStateTransformer(registry)
+        val transformer = ClientStateTransformer(registry, predicateEvaluator = com.wingedsheep.engine.handlers.PredicateEvaluator(registry))
         fun view(s: GameState) = transformer.transform(s, player)
         val pairs = mutableListOf<Triple<String, GameState, GameState>>()
         fun gap(name: String, changed: GameState) { pairs += Triple(name, state, changed) }
@@ -72,7 +72,7 @@ class SeatStreamAuditTest {
             "audit-trigger", DrawCardsEffect(1), Step.END, source, "Public spell", player))))
         val components: List<Component> = listOf(
             PlayerCitysBlessingComponent, PlayerEnduringStoryComponent, TheRingComponent(2),
-            PlayerNoMaximumHandSizeComponent, PlayerMaximumHandSizeReductionComponent(3),
+            PlayerNoMaximumHandSizeComponent(1L), PlayerMaximumHandSizeReductionComponent(3),
             SkipNextTurnComponent(1), SkipCombatPhasesComponent, SkipDrawStepComponent,
             AdditionalPhasesComponent(listOf(QueuedPhase(ExtraPhaseKind.COMBAT))),
             AdditionalUpkeepStepsComponent(2), AdditionalEndStepsComponent(2),
@@ -103,7 +103,7 @@ class SeatStreamAuditTest {
             it.with(NotedCreatureTypesComponent(setOf("Elf"))) })
         val delayed = DelayedTriggeredAbility("audit-event", DrawCardsEffect(1),
             sourceId = source, sourceName = "Public trigger", controllerId = player,
-            trigger = com.wingedsheep.sdk.dsl.Triggers.Attacks,
+            trigger = com.wingedsheep.sdk.dsl.Triggers.self.attacks(),
             expiry = com.wingedsheep.sdk.scripting.effects.DelayedTriggerExpiry.EndOfTurn)
         pairs += Triple("event trigger badge expiry", state.copy(delayedTriggers = listOf(delayed)),
             state.copy(delayedTriggers = listOf(delayed.copy(expiry = com.wingedsheep.sdk.scripting.effects.DelayedTriggerExpiry.Never))))
@@ -114,7 +114,7 @@ class SeatStreamAuditTest {
             it.with(com.wingedsheep.engine.state.components.identity.RevealedToComponent.to(env.playerIds[1])) })
         val granted = com.wingedsheep.engine.event.GlobalGrantedTriggeredAbility(
             com.wingedsheep.sdk.scripting.TriggeredAbility(com.wingedsheep.sdk.scripting.AbilityId("audit"),
-                com.wingedsheep.sdk.dsl.Triggers.Attacks.event, effect = DrawCardsEffect(1)),
+                com.wingedsheep.sdk.dsl.Triggers.self.attacks().event, effect = DrawCardsEffect(1)),
             player, source, "Public trigger", Duration.EndOfTurn)
         pairs += Triple("global trigger badge duration", state.copy(globalGrantedTriggeredAbilities = listOf(granted)),
             state.copy(globalGrantedTriggeredAbilities = listOf(granted.copy(duration = Duration.Permanent))))

@@ -36,7 +36,6 @@ class FrozenRuntimeFqcnTest {
             "com.wingedsheep.engine.state.GameState",
             "org.mtgallium.agent.value.MaterialEvaluator",
             "org.mtgallium.agent.argentum.policy.LivePolicySession",
-            "org.mtgallium.research.workbench.JvmValueModelProvider",
         )) {
             // Loading without initialization checks the JVM name without constructing an engine or policy.
             assertEquals(name, Class.forName(name, false, loader).name)

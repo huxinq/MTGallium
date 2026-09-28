@@ -78,7 +78,7 @@ internal object ArgentumPolicyRuntimeProjector {
         cardRegistry: CardRegistry,
         observation: TrainingObservation,
     ): ArgentumPolicyRuntimeProjection {
-        val conditionEvaluator = ConditionEvaluator()
+        val conditionEvaluator = com.wingedsheep.engine.handlers.PredicateEvaluator(cardRegistry).conditions
         val visibleCards = observation.zones.asSequence()
             .flatMap { it.cards.asSequence() }
             .associate { card ->

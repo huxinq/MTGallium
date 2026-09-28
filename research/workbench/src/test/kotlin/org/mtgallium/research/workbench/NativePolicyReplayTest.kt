@@ -34,27 +34,15 @@ class NativePolicyReplayTest {
         return "$choice [$candidates]"
     }
 
-    /** Recorded from the Python protocol before the built-in policies moved behind [JvmPolicyProvider]. */
+    /** Retained built-ins on Argentum 8037aa92; the learned-value scenario is archived. */
     @Test fun `built-in policies replay their recorded same-seed games`() {
         val deck = deck()
         val connection = GameServerConnection()
         fun call(command: String, body: JsonObjectBuilder.() -> Unit = {}) =
             connection.request(buildJsonObject { put("command", command); body() })
-        val probe = call("create") { putJsonObject("plan") {
-            put("decks", JsonArray(listOf(deck, deck)))
-            put("policies", JsonArray(listOf(JsonPrimitive("random"), JsonPrimitive("random"))))
-        } }.jsonObject.getValue("game")
-        val random = Random(11)
-        val names = call("value-features") { put("game", probe); put("player", "p0") }.jsonObject.keys.sorted()
-        val weights = buildJsonObject {
-            put("bias", 0.05)
-            putJsonObject("weights") { names.forEach { put(it, random.nextGaussian() * 0.05) } }
-        }
         val small = mapOf("particles" to JsonPrimitive(2), "simulations" to JsonPrimitive(8))
         val games = listOf(
             listOf("search", "heuristic") to 105L to small + ("searchDepth" to JsonPrimitive(8)),
-            listOf("random", "search") to 106L to small + mapOf("searchDepth" to JsonPrimitive(4),
-                "valueWeights" to weights, "valueLink" to JsonPrimitive("tanh"), "opponentModel" to JsonPrimitive("heuristic")),
             listOf("production", "heuristic") to 104L to emptyMap<String, JsonElement>(),
             listOf("random", "production") to 107L to emptyMap<String, JsonElement>(),
         )
@@ -82,7 +70,7 @@ class NativePolicyReplayTest {
             lines += "$seed status ${call("status") { put("game", game) }}"
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(lines.joinToString("\n", postfix = "\n").toByteArray())
-        assertEquals("7f9ca7e2b5f0c25c8e380b88b8c7669732a6beb62ded4106c87293b2f921053f",
+        assertEquals("ec855cda3a2af67a3cb95e93e8fd72f22786d868369805b57a7fda8f38dea844",
             digest.joinToString("") { "%02x".format(it) })
     }
 }

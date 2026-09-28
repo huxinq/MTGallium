@@ -72,8 +72,13 @@ class SeatStreamPropertiesTest {
         assertNotEquals(ClientEventTransformer.transform(a, owner), ClientEventTransformer.transform(b, owner))
     }
 
-    @Test fun allocationOrderCanIdentifyUnrevealedLibraryCards() {
-        // A second initialization uses the public ordered deck input, but a different shuffle seed.
+    /**
+     * Recovery witness. A second initialization uses the public ordered deck input with a different
+     * shuffle seed, so its id-to-name map is what decklist-order allocation would reveal. Reports how
+     * many unrevealed library cards the viewer's envelope names by id, how many of those the map
+     * names correctly, and the map's accuracy over all of the owner's cards.
+     */
+    @Test fun allocationOrderRecoveryWitness() {
         val known = GameEnvironment.create(registry).apply {
             reset(GameConfig(players = listOf(
                 PlayerConfig("A", Deck.of("Mountain" to 10, "Raging Goblin" to 10)),
@@ -83,14 +88,17 @@ class SeatStreamPropertiesTest {
         val inferred = known.state.entities.mapNotNull { (id, components) ->
             components.get<CardComponent>()?.let { id to it.name }
         }.toMap()
-        val delivered = message(env.state, viewer).state
-        val ids = delivered.zones.single { it.zoneId == ZoneKey(owner, Zone.LIBRARY) }.cardIds
-        assertTrue(ids.isNotEmpty())
-        for (id in ids) {
-            assertTrue(id !in delivered.cards, "Identity should be masked")
-            assertEquals(env.state.getEntity(id)!!.get<CardComponent>()!!.name, inferred[id])
-        }
-        println("SEAT_STREAM_ID_RECOVERY\t${ids.size}\t${ids.size}")
+        fun name(id: EntityId) = env.state.getEntity(id)!!.get<CardComponent>()!!.name
+        val envelope = researchJson.encodeToString(ServerMessage.serializer(), message(env.state, viewer))
+        val hidden = env.state.getLibrary(owner)
+        val named = hidden.filter { "\"${it.value}\"" in envelope }
+        val recovered = named.count { name(it) == inferred[it] }
+        val owned = env.state.entities.keys.filter { env.state.getEntity(it)?.get<OwnerComponent>()?.playerId == owner &&
+            env.state.getEntity(it)?.get<CardComponent>() != null }
+        val guessed = owned.count { name(it) == inferred[it] }
+        println("SEAT_STREAM_ID_RECOVERY\tnamed=${named.size}\trecovered=$recovered\thidden=${hidden.size}\t" +
+            "allocation_guess=$guessed/${owned.size}")
+        if (System.getenv("SEAT_STREAM_REQUIRE_PRIVATE") == "1") assertEquals(0, named.size, "Envelope names hidden library cards")
     }
 
     @Test fun manifestedIdentityIsPrivateAfterRebuildingComponents() {

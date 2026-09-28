@@ -3,8 +3,6 @@ package org.mtgallium.agent.argentum.policy
 import org.mtgallium.agent.infoset.planning.BeliefSnapshot
 import org.mtgallium.agent.infoset.core.BeliefQueryView
 
-import org.mtgallium.agent.monored.ValueEvaluationStop
-import org.mtgallium.agent.monored.ValueEvaluationException
 import org.mtgallium.agent.infoset.core.DecisionPolicy
 import org.mtgallium.agent.infoset.core.ActionSelector
 import org.mtgallium.agent.infoset.planning.RootActionSelection
@@ -239,15 +237,11 @@ class SearchPolicySession private constructor(
             // Sequential particles are still advanced after every accepted action, but the expensive
             // all-particle digest audit is needed only when its result can affect an actual search.
             belief.synchronize(world, acceptedDecisionCount)
-            val result = try {
-                search.search(
-                    rootPlayer = actor,
-                    belief = profiledBeliefBatch(),
-                    searchSeed = searchSeed,
-                )
-            } catch (failure: ValueEvaluationException) {
-                throw ValueEvaluationStop(failure)
-            }
+            val result = search.search(
+                rootPlayer = actor,
+                belief = profiledBeliefBatch(),
+                searchSeed = searchSeed,
+            )
             RootActionSelection.Searched(result)
         }
     }

@@ -8,8 +8,6 @@
   policies, output files and numerical commands.
 - [Batch research runs](research-runs.md): ladder evaluation, cost measurement,
   resumable game corpora, remote runs and source context.
-- [Neural policy training](neural-policy.md): PyTorch training, checkpoints and
-  ONNX export.
 - [Durable runner](workbench/durable-runs.md): keep a long command and its logs
   running across sessions.
 
@@ -26,4 +24,4 @@
 ## Change the code
 
 Follow [CONTRIBUTING](../CONTRIBUTING.md). Run focused tests while developing,
-then `just check`; neural checks have [separate commands](neural-policy.md#verification).
+then `just check`.
