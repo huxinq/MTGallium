@@ -2,8 +2,9 @@
 import os
 from pathlib import Path
 
-JAVA_OPTIONS = ('-Xms64m', '-Xmx768m', '-XX:+UseParallelGC', '-XX:ActiveProcessorCount=2')
-WORKER_BYTES = 1536 * 1024**2
+JAVA_OPTIONS = ('-Xms64m', '-Xmx384m', '-XX:+UseSerialGC', '-XX:+ExitOnOutOfMemoryError',
+                '-XX:ActiveProcessorCount=2')
+WORKER_BYTES = 1024**3
 
 
 def available_memory() -> int:
@@ -34,5 +35,5 @@ def available_memory() -> int:
 def default_workers() -> int:
     memory_workers = available_memory() // WORKER_BYTES
     if memory_workers < 1:
-        raise RuntimeError('Less than 1.5 GiB available for a research JVM; wait or explicitly set threads')
+        raise RuntimeError('Less than 1 GiB available for a research JVM; wait or explicitly set threads')
     return min(12, max(1, (os.cpu_count() or 1) - 2), memory_workers)

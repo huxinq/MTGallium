@@ -14,13 +14,24 @@ Read historical records with their [producing source](history.md).
 ## Workers and memory
 
 `evaluate()`, `measure()` and `run_games()` start one JVM per worker with the
-shared `JAVA_OPTIONS`: `-Xms64m -Xmx768m -XX:+UseParallelGC
--XX:ActiveProcessorCount=2`. The default worker count is the smallest of 12,
-CPU count minus two (at least one), and available RAM at 1.5 GiB per worker,
+shared `JAVA_OPTIONS`: `-Xms64m -Xmx384m -XX:+UseSerialGC
+-XX:+ExitOnOutOfMemoryError -XX:ActiveProcessorCount=2`. The default worker count is the smallest of 12,
+CPU count minus two (at least one), and available RAM at 1 GiB per worker,
 including Linux cgroup v2 memory limits. If not even one worker fits, the call
 fails before starting JVMs; unknown platforms use one worker. Explicit `threads`
 and `java_options` override these defaults; lower them when other jobs share the
 machine. `Session()` and the CLI keep their own defaults.
+
+The worker allowance covers the heap, class metadata, compiled code and native
+policies. The heap cap also leaves room for transient search allocations;
+post-collection heap samples alone can miss these peaks. A worker that still runs
+out of heap exits at once instead of stalling in collection.
+
+Game registries load the decklists' cards, basic lands and tokens from card data
+generated during the build. The generator preserves Argentum's catalog order
+and checks serialization against each original definition. Game JVMs do not
+initialize the full catalog of card-definition classes. Missing deck cards fail
+with their names; there is no full-catalog fallback.
 
 Builds happen once before workers start. `build=False` reuses compiled classes,
 so close sessions before rebuilding. On Linux with `flock`,

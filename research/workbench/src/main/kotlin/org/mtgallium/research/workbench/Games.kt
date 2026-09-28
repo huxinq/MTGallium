@@ -3,8 +3,6 @@ package org.mtgallium.research.workbench
 import com.wingedsheep.engine.core.GameConfig
 import com.wingedsheep.engine.registry.CardRegistry
 import com.wingedsheep.gym.GameEnvironment
-import com.wingedsheep.mtg.sets.MtgSetCatalog
-import com.wingedsheep.mtg.sets.tokens.PredefinedTokens
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import kotlinx.serialization.Serializable
@@ -15,15 +13,6 @@ import org.mtgallium.agent.infoset.core.*
 import org.mtgallium.agent.infoset.planning.*
 import org.mtgallium.agent.argentum.policy.SearchPolicySession
 
-fun buildRegistry(): CardRegistry = CardRegistry().apply {
-    register(PredefinedTokens.allTokens)
-    MtgSetCatalog.all.forEach { set ->
-        register(set.cards)
-        register(set.basicLands)
-        set.basicLandsFallback?.let { register(it.basicLands) }
-    }
-}
-
 /** Create a game with explicit known decks for player information and belief sampling. */
 fun createWorld(
     config: GameConfig,
@@ -33,6 +22,7 @@ fun createWorld(
     policySeed: Long = requireNotNull(config.seed) { "Supply a setup seed" },
     actionProfile: ActionSpaceProfile = ActionSpaceProfile.MONO_RED_FAST_MANA_PRUNED_V1,
 ): ArgentumSearchWorld {
+    registry.loadCards(config.players.flatMap { it.deck.cards + listOfNotNull(it.deck.commander) })
     val environment = GameEnvironment.create(registry)
     environment.reset(config)
     return ArgentumSearchWorld.create(environment, gameId, policySeed,

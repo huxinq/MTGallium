@@ -62,7 +62,7 @@ class RefactorSearchCpuProbeTest {
             ?: error("Process CPU time is unavailable on this JVM")
         check(cpu.processCpuTime >= 0) { "Process CPU time is unsupported" }
         val cards = publicDeck()
-        val registry = buildRegistry()
+        val registry = buildRegistry(cards.keys)
         val deck = Deck.of(*cards.entries.map { it.key to it.value }.toTypedArray())
         val known = mapOf("p0" to cards, "p1" to cards)
         val lines = mutableListOf<String>()

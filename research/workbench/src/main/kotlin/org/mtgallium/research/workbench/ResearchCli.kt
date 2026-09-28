@@ -68,7 +68,7 @@ data class PlayedGame(val index: Int, val seed: Long, val result: GameResult)
 fun runGames(plan: ResearchGameConfig, output: Path): List<PlayedGame> {
     require(plan.decks.size == 2 && plan.policies.size == 2) { "This CLI convenience runs two-player games" }
     require(plan.games > 0 && plan.threads > 0)
-    val registry = buildRegistry()
+    val registry = buildRegistry(plan.decks.flatMap { it.keys })
     Files.createDirectories(output.toAbsolutePath().parent)
     Files.createDirectory(output)
     writeJson(output.resolve("plan.json"), plan)

@@ -1,8 +1,5 @@
 package org.mtgallium.evaluation.argentum
 
-import com.wingedsheep.engine.registry.CardRegistry
-import com.wingedsheep.mtg.sets.MtgSetCatalog
-import com.wingedsheep.mtg.sets.tokens.PredefinedTokens
 import com.wingedsheep.sdk.model.Deck
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
@@ -20,15 +17,6 @@ internal fun loadDeckManifest(): DeckManifest {
         DeckManifest::class.java.getResourceAsStream("/decks/mono-red-standard-2026-07-30.json")
     ) { "Deck manifest resource is missing" }
     return stream.bufferedReader().use { reportJson.decodeFromString<DeckManifest>(it.readText()) }
-}
-
-internal fun buildRegistry(): CardRegistry = CardRegistry().apply {
-    register(PredefinedTokens.allTokens)
-    for (set in MtgSetCatalog.all) {
-        register(set.cards)
-        register(set.basicLands)
-        set.basicLandsFallback?.let { register(it.basicLands) }
-    }
 }
 
 internal fun DeckManifest.mainDeck(): Deck = Deck.of(
