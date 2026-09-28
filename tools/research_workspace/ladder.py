@@ -225,6 +225,51 @@ def _append(path: Path, row: dict) -> None:
         fcntl.flock(stream, fcntl.LOCK_UN)
 
 
+def _model_digest(path: Path) -> dict:
+    """A file hashes directly; a model directory hashes its sorted files by relative path and content."""
+    def digest(file: Path) -> str:
+        with file.open('rb') as stream:
+            return hashlib.file_digest(stream, 'sha256').hexdigest()
+    if not path.is_dir():
+        return {'path': str(path), 'sha256': digest(path)}
+    files = {str(f.relative_to(path)): digest(f) for f in sorted(path.rglob('*')) if f.is_file()}
+    if not files:
+        raise ValueError(f'Model directory {path} contains no files')
+    tree = hashlib.sha256(json.dumps(files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return {'path': str(path), 'sha256': tree, 'files': files}
+
+
+def _publish_run_row(root: Path, output: Path, row: dict) -> None:
+    """A row file kept in a run folder is also published to the evidence root's ladder."""
+    if output.resolve().is_relative_to((root / 'runs').resolve()):
+        publish_row(row, root / 'ladder/ladder.jsonl')
+
+
+def publish_row(row: dict, ladder: Path) -> bool:
+    """Append a finished row to the ladder unless it is already there; True when appended."""
+    if row.get('state') not in ('completed', 'failed') or 'source' not in row:
+        raise ValueError('Only finished rows with provenance can be published')
+    ladder.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(row, allow_nan=False, separators=(',', ':'))
+    with ladder.open('a+', encoding='utf-8') as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        stream.seek(0)
+        for line in stream:
+            if not line.endswith('\n'):
+                raise ValueError('incomplete ladder row; refusing to append')
+            prior = json.loads(line)
+            same = (prior.get('checkpoint_id') == row['checkpoint_id'] if row.get('checkpoint_id')
+                    else prior == row)
+            if same:
+                if prior != row:
+                    raise ValueError('published checkpoint result mismatch')
+                return False
+        stream.write(encoded + '\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+    return True
+
+
 def evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[str, Policy],
              incumbent: Policy, incumbent_name: str | None = None,
              decks: Sequence[Mapping[str, int]], setups: int | None = None,
@@ -314,8 +359,7 @@ def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[
         if key.endswith('_model') and key != 'opponent_model' and settings[key] is not None:
             path = Path(settings[key]).resolve()
             settings[key] = str(path)
-            with path.open('rb') as stream:
-                model_files[key] = {'path': str(path), 'sha256': hashlib.file_digest(stream, 'sha256').hexdigest()}
+            model_files[key] = _model_digest(path)
     deck_snapshot = tuple(copy.deepcopy(dict(deck)) for deck in decks)
     total_started = time.monotonic()
     started_at = datetime.now(timezone.utc).isoformat()
@@ -343,6 +387,7 @@ def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[
         retained = checkpoint.read('result.json')
         if retained is not None:
             retained = checkpoint.publish(output, retained)
+            _publish_run_row(root, Path(output), retained)
             if retained['state'] == 'failed':
                 raise ResearchError('Checkpoint retains a failed comparison; refusing to replay outcomes')
             return retained
@@ -502,6 +547,7 @@ def _evaluate(candidate: Policy, *, name: str | None = None, opponents: Mapping[
     else:
         row['timings']['scope'] = 'current invocation only; outcomes include checkpoint recovery'
         row = checkpoint.publish(output, row)
+    _publish_run_row(root, Path(output), row)
     if failed:
         raise ResearchError(f'Ladder evaluation failed; reproducible failure row retained at {output}')
     return row

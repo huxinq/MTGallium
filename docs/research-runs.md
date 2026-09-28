@@ -58,6 +58,11 @@ row = evaluate("heuristic", opponents={"random": "random"}, incumbent="random",
                decks=[deck, deck], setups=100)
 ```
 
+An `output` row file inside the evidence root's `runs/` is published to the ladder
+too, once per row. `tools/mtgallium-research publish <row.json>...` publishes rows
+written elsewhere, and skips rows already there. Settings named `*_model` may name
+a file or a model directory; a directory is recorded by the hashes of its files.
+
 A setup is two games with the same seed and swapped policy/deck seats. Existing
 calls retain their legacy fixed-size behavior and OS-generated seeds. Old rows
 are never rewritten. Opt into shared deals with `seed_pool="development"`;

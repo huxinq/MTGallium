@@ -240,3 +240,47 @@ class SourceProvenanceTest(unittest.TestCase):
         self.assertEqual('rev-parse@public', provenance['commit'])
         self.assertEqual({'path': str(build.resolve()), 'commit': 'rev-parse@added',
                           'diff': 'diff@added', 'status': 'status@added'}, provenance['research_build'])
+
+
+class LadderPublicationTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_a_model_directory_hashes_every_file(self):
+        model = self.root / 'model'
+        (model / 'nested').mkdir(parents=True)
+        (model / 'manifest.json').write_text('{}')
+        (model / 'nested/weights.bin').write_bytes(b'\x00\x01')
+        first = ladder._model_digest(model)
+        self.assertEqual({'manifest.json', 'nested/weights.bin'}, set(first['files']))
+        (model / 'nested/weights.bin').write_bytes(b'\x00\x02')
+        self.assertNotEqual(first['sha256'], ladder._model_digest(model)['sha256'])
+        self.assertNotIn('files', ladder._model_digest(model / 'manifest.json'))
+        with self.assertRaises(ValueError):
+            (self.root / 'empty').mkdir()
+            ladder._model_digest(self.root / 'empty')
+
+    def test_rows_publish_once_and_only_when_finished(self):
+        path = self.root / 'ladder/ladder.jsonl'
+        row = {'state': 'completed', 'source': {}, 'checkpoint_id': 'a', 'score': 1}
+        self.assertTrue(ladder.publish_row(row, path))
+        self.assertFalse(ladder.publish_row(row, path))
+        with self.assertRaises(ValueError):
+            ladder.publish_row(dict(row, score=0), path)
+        plain = {'state': 'failed', 'source': {}}
+        self.assertTrue(ladder.publish_row(plain, path))
+        self.assertFalse(ladder.publish_row(plain, path))
+        self.assertEqual(2, len(path.read_text().splitlines()))
+        with self.assertRaises(ValueError):
+            ladder.publish_row({'state': 'running', 'source': {}}, path)
+
+    def test_only_run_folder_outputs_reach_the_ladder(self):
+        row = {'state': 'completed', 'source': {}, 'checkpoint_id': 'b'}
+        ladder._publish_run_row(self.root, self.root / 'elsewhere/row.json', row)
+        self.assertFalse((self.root / 'ladder/ladder.jsonl').exists())
+        ladder._publish_run_row(self.root, self.root / 'runs/task/eval/row.json', row)
+        self.assertEqual(1, len((self.root / 'ladder/ladder.jsonl').read_text().splitlines()))

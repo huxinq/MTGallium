@@ -12,7 +12,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-build', action='store_true',
                         help='Use the last compiled runtime without checking for source changes')
-    parser.add_argument('command', help='build, show, durable, jvm, or a native command; use help for native commands')
+    parser.add_argument('command', help='build, show, publish, durable, jvm, or a native command; use help for native commands')
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     try:
@@ -35,6 +35,19 @@ def main(argv=None):
                 print('\n'.join(str(item) for item in sorted(path.iterdir())))
             else:
                 print(json.dumps(read_data(path), indent=2, ensure_ascii=False, allow_nan=False))
+            return 0
+        if args.command == 'publish':
+            if not args.arguments:
+                parser.error('publish requires one or more row files from ladder evaluations')
+            from .ladder import publish_row
+            import os
+            root = Path(os.environ.get('MTGALLIUM_PRIVATE_EVIDENCE_ROOT',
+                                       str(Path.home() / 'Documents/MTGallium-private-evidence')))
+            for item in args.arguments:
+                for line in Path(item).read_text().splitlines():
+                    if line.strip():
+                        appended = publish_row(json.loads(line), root / 'ladder/ladder.jsonl')
+                        print(('published ' if appended else 'already published ') + item)
             return 0
         if args.command == 'jvm':
             if not args.arguments:
