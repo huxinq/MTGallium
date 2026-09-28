@@ -5,6 +5,7 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":research:workbench"))
     implementation("org.mtgallium.argentum:ai")
     implementation("org.mtgallium.argentum:gym")
     implementation("org.mtgallium.argentum:gym-trainer")

@@ -244,7 +244,7 @@ class SearchCharacterizationMatrixTest {
 
     private fun world(scenario: Scenario, deck: Map<String, Int>,
         knownDecks: Map<String, Map<String, Int>>): ArgentumSearchWorld {
-        val registry = buildRegistry()
+        val registry = buildRegistry(deck.keys)
         val environment = GameEnvironment.create(registry)
         val cards = Deck.of(*deck.map { it.key to it.value }.toTypedArray())
         environment.reset(GameConfig(players = listOf(PlayerConfig("A", cards), PlayerConfig("B", cards)),

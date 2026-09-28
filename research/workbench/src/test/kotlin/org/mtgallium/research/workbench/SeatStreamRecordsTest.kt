@@ -47,6 +47,7 @@ class SeatStreamRecordsTest {
                     }
                     val encoded = row["privilegedPreState"] ?: continue
                     val state = researchJson.decodeFromJsonElement<GameState>(encoded)
+                    registry.loadCards(state)
                     val env = GameEnvironment.create(registry).also { it.restore(state, state.turnOrder) }
                     val world = ArgentumSearchWorld.create(env, "stream-replay", 0L, 0L)
                     val choice = researchJson.decodeFromJsonElement<SemanticChoice>(row.getValue("chosenChoice"))
@@ -128,6 +129,7 @@ class SeatStreamRecordsTest {
                         val row = element.jsonObject
                         val encoded = row["privilegedPreState"] ?: row["privilegedFinalState"] ?: continue
                         val state = researchJson.decodeFromJsonElement<GameState>(encoded)
+                        registry.loadCards(state)
                         for ((seat, player) in state.turnOrder.withIndex()) {
                             val session = sessions.getOrPut(player) { GameSession(cardRegistry = registry) }
                             session.injectStateForTesting(state, emptyMap())

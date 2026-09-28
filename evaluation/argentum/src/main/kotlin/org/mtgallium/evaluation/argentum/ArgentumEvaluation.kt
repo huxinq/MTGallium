@@ -1,6 +1,7 @@
 package org.mtgallium.evaluation.argentum
 
 import com.wingedsheep.gym.contract.SchemaHash
+import org.mtgallium.research.workbench.buildRegistry
 import java.nio.file.Path
 import java.time.Instant
 
@@ -8,7 +9,7 @@ fun main(args: Array<String>) {
     val options = CliOptions.parse(args)
     val root = Path.of("").toAbsolutePath().normalize()
     val manifest = loadDeckManifest()
-    val registry = buildRegistry()
+    val registry = buildRegistry(manifest.mainDeck.keys + manifest.sideboard.keys + diagnosticDeck().cards)
     val context = EvaluationContext(root, registry, manifest, options.seed)
 
     println("Argentum evaluation: loading ${registry.size} registered cards")

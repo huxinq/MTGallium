@@ -28,6 +28,20 @@ dependencies {
 
 application { mainClass = "org.mtgallium.research.workbench.ResearchCliKt" }
 
+val gameCards = tasks.register<JavaExec>("gameCards") {
+    dependsOn(tasks.named("compileKotlin"))
+    classpath = files(tasks.named("compileKotlin")) + configurations.runtimeClasspath.get()
+    mainClass = "org.mtgallium.research.workbench.GenerateGameCards"
+    maxHeapSize = "1g"
+    jvmArgs("-XX:ActiveProcessorCount=2")
+    val destination = layout.buildDirectory.dir("generated/game-cards")
+    inputs.files(classpath)
+    outputs.dir(destination)
+    args(destination.get().asFile.absolutePath)
+    doFirst { delete(destination) }
+}
+sourceSets.main { resources.srcDir(gameCards) }
+
 tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir
     standardInput = System.`in`

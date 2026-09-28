@@ -22,6 +22,12 @@ fails before starting JVMs; unknown platforms use one worker. Explicit `threads`
 and `java_options` override these defaults; lower them when other jobs share the
 machine. `Session()` and the CLI keep their own defaults.
 
+Game registries load the decklists' cards, basic lands and tokens from card data
+generated during the build. The generator preserves Argentum's catalog order
+and checks serialization against each original definition. Game JVMs do not
+initialize the full catalog of card-definition classes. Missing deck cards fail
+with their names; there is no full-catalog fallback.
+
 Builds happen once before workers start. `build=False` reuses compiled classes,
 so close sessions before rebuilding. On Linux with `flock`,
 `tools/mtgallium-gradle` holds `/tmp/mtgallium-science-gradle.lock` during every
