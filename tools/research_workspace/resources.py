@@ -2,7 +2,8 @@
 import os
 from pathlib import Path
 
-JAVA_OPTIONS = ('-Xms64m', '-Xmx384m', '-XX:+UseSerialGC', '-XX:ActiveProcessorCount=2')
+JAVA_OPTIONS = ('-Xms64m', '-Xmx384m', '-XX:+UseSerialGC', '-XX:+ExitOnOutOfMemoryError',
+                '-XX:ActiveProcessorCount=2')
 WORKER_BYTES = 1024**3
 
 
